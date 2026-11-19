@@ -130,7 +130,7 @@ Claude session ── luke-voice mod ── events, long-poll ──┤
 claude --plugin-dir .                 # load this clone, hot-reloads
 claude plugin validate .
 claude plugin test .
-node --test hub/server.test.mjs hub/launch.test.mjs hub/agent.test.mjs window/guard.test.mjs
+node --test hub/server.test.mjs hub/launch.test.mjs hub/agent.test.mjs hub/paths.test.mjs window/guard.test.mjs
 ```
 
 ## License

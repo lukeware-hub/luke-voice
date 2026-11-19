@@ -392,6 +392,14 @@ export function createHub({ serviceToken, windowKey, apiKey = '', root = ROOT, o
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const { serviceToken, windowKey } = loadSecrets()
   const hub = createHub({ serviceToken, windowKey, apiKey: process.env.ELEVENLABS_API_KEY ?? '', log: line => console.log(line) })
+  // Two launchers can race to start a hub; the one that finds the port taken leaves quietly.
+  hub.on('error', error => {
+    if (error.code === 'EADDRINUSE') {
+      console.log(`luke-voice hub: 127.0.0.1:${PORT} is already served, exiting`)
+      process.exit(0)
+    }
+    throw error
+  })
   hub.listen(PORT, '127.0.0.1', () => console.log(`luke-voice hub on 127.0.0.1:${PORT}`))
   setInterval(() => {
     if (hub.idleFor() > 10 * 60_000) process.exit(0)
