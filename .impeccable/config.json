@@ -1,0 +1,14 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "side-tab",
+        "value": "border-left: 3px solid var(--violet)",
+        "createdAt": "2026-11-19T16:40:04.849Z",
+        "reason": "user's reference image (Image #12) pins a violet bar before the 'Sessões Recentes' heading; it marks a heading, not a card"
+      }
+    ]
+  }
+}
