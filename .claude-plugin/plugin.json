@@ -1,0 +1,17 @@
+{
+  "name": "luke-voice",
+  "version": "0.1.0",
+  "description": "A voice coworker beside your Claude Code session: talk it through, and it sends the prompt to Claude. On/off button above the prompt.",
+  "author": { "name": "lukeware-hub" },
+  "license": "MIT",
+  "icon": "./assets/icon.png",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "api_key": {
+      "type": "string",
+      "title": "ElevenLabs API key",
+      "description": "The local hub creates your voice agent and starts calls with it. Falls back to the ELEVENLABS_API_KEY environment variable. It never leaves the hub process.",
+      "sensitive": true
+    }
+  }
+}

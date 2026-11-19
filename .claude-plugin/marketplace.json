@@ -1,0 +1,6 @@
+{
+  "name": "luke-voice",
+  "owner": { "name": "lukeware-hub" },
+  "metadata": { "description": "luke-voice: a voice coworker for Claude Code that sends the prompts you agree on." },
+  "plugins": [{ "name": "luke-voice", "source": "./" }]
+}
