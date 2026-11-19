@@ -222,6 +222,11 @@ export function createHub({ serviceToken, windowKey, apiKey = '', root = ROOT, o
         const when = body.when === 'after_current' ? 'after_current' : 'now'
         return [200, await enqueue(session, { type: 'send', prompt: prompt.slice(0, 8000), when })]
       }
+      if (body.type === 'task') {
+        const task = String(body.task ?? '').trim()
+        if (!task) return [400, { ok: false, message: 'The task is empty.' }]
+        return [200, await enqueue(session, { type: 'task', task: task.slice(0, 8000) })]
+      }
       if (body.type === 'stop') return [200, await enqueue(session, { type: 'stop' })]
       return [400, { ok: false, message: 'Unknown command.' }]
     },

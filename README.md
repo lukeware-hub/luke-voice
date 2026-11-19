@@ -8,6 +8,10 @@ An on/off button sits above the prompt (`✦ luke-voice: on` / `✦ luke-voice: 
 
 ## What it does
 
+luke-voice speaks **Brazilian Portuguese** with a Brazilian female voice (ElevenLabs "Roberta"). Whatever you ask out loud runs on your machine in a **Claude Code subagent**: the agent repeats the task, waits for your "sim", starts the subagent in the background, and tells you the result when it finishes. The main chat stays free.
+
+**Example:** say *"Verifica no repositório luke-voice onde o botão de ligar é desenhado."* The agent answers *"Vou procurar no repositório luke-voice onde o botão de ligar é desenhado. Posso?"*. Say *"sim"*. The window log shows "▶" with the task, and a little later the agent says where it is (`hooks/register.tsx`, in the footer render).
+
 - **Watches the session** while it is on: your prompts, Claude's tool calls and failures, final answers and permission waits reach the voice agent as context.
 - **Talks with you** in a small call window: an orb that follows the agent's voice, the list of connected sessions, and every prompt it sent.
 - **Sends prompts to Claude** with the `luke_send_to_claude` tool:

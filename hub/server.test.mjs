@@ -124,3 +124,14 @@ test('the Chrome window allows the mic and sound without a prompt, in its own pr
   assert.ok(args.includes('--user-data-dir=/home/u/.luke-voice/chrome'))
   assert.ok(args.includes('--app=http://127.0.0.1:4848/?k=x'))
 })
+
+test('a voice task reaches the named session, and an empty task is refused', async () => {
+  const s1 = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/tasks' } })).body
+  assert.equal((await call('POST', '/command', { key: WINDOW, body: { type: 'task', session: s1.name, task: '  ' } })).status, 400)
+  const started = call('POST', '/command', { key: WINDOW, body: { type: 'task', session: s1.name, task: 'verifica o login' } })
+  const inbox = await call('GET', '/inbox?wait=2000', { auth: s1.token })
+  assert.deepEqual({ type: inbox.body.commands[0].type, task: inbox.body.commands[0].task }, { type: 'task', task: 'verifica o login' })
+  await call('POST', '/ack', { auth: s1.token, body: { id: inbox.body.commands[0].id, ok: true, message: 'Started.' } })
+  assert.deepEqual((await started).body, { ok: true, message: 'Started.' })
+  await call('POST', '/unsubscribe', { auth: s1.token })
+})

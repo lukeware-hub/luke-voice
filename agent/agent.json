@@ -3,8 +3,31 @@
   "tools": [
     {
       "type": "client",
+      "name": "luke_run_task",
+      "description": "Runs a task on the user's computer in a Claude Code subagent (read code, search a repository, run a command, change files). Call it only after you said the task back in one sentence and the user clearly said yes. Returns at once; the result arrives later as a [task done] message.",
+      "expects_response": true,
+      "response_timeout_secs": 20,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "task"
+        ],
+        "properties": {
+          "task": {
+            "type": "string",
+            "description": "The full task for the subagent, clear and complete, in Portuguese: what to do, where (repository, folder or file) and what to report back."
+          },
+          "session": {
+            "type": "string",
+            "description": "The short name of the Claude session to run it in. Leave empty for the focused one."
+          }
+        }
+      }
+    },
+    {
+      "type": "client",
       "name": "luke_send_to_claude",
-      "description": "Send a prompt to Claude Code. Use it only after the user agreed on what to ask. Write the prompt as a clear, complete instruction for Claude.",
+      "description": "Sends a prompt to the main Claude Code chat instead of a subagent. Use it only when the user explicitly asks to send something to Claude's chat.",
       "expects_response": true,
       "response_timeout_secs": 20,
       "parameters": {
@@ -70,14 +93,15 @@
   ],
   "conversation_config": {
     "agent": {
-      "first_message": "Hey, I'm here. What are we working on?",
-      "language": "en",
+      "first_message": "Oi! Estou aqui. O que vamos fazer?",
+      "language": "pt",
       "prompt": {
         "llm": "gemini-2.5-flash"
       }
     },
     "tts": {
-      "voice_id": "21m00Tcm4TlvDq8ikWAM"
+      "voice_id": "RGymW84CSmfVugnA5tvA",
+      "model_id": "eleven_flash_v2_5"
     }
   },
   "platform_settings": {

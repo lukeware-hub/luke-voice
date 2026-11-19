@@ -147,3 +147,51 @@ test('a poll answered 409 (a reload took over) ends the loop without subscribing
   expect(calls.filter(c => c.path === '/subscribe').length).toBe(1)
   expect(calls.filter(c => c.path === '/inbox').length).toBe(1)
 })
+
+test('a voice task runs in a Claude Code subagent, and its answer is reported as task_done', async ($, on) => {
+  const spawned: string[] = []
+  on('agent.spawn', (_, e) => (spawned.push(e.prompt), { model: 'test', agentId: 'agent-7' }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => (release = resolve))
+  const { calls } = engine(on, [
+    async () => ({ status: 200, body: { commands: [{ id: 't1', type: 'task', task: 'verifica o login no repo xpto' }] } }),
+    async () => (await held, { status: 410, body: {} }),
+  ])
+
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/ack'))
+  // The engine names the subagent when its loop starts.
+  await $.turn.start({ text: spawned[0] ?? '', turnId: 'x', agentId: 'agent-7' })
+  await $.turn.complete({ answer: 'Achei o login em auth.ts.', durationMs: 1, isAborted: false, turnId: 'x', agentId: 'agent-7', reason: 'answer' })
+  await until(() => calls.some(c => c.path === '/events' && JSON.stringify(c.body).includes('task_done')))
+  await $.turn.complete({ answer: 'other', durationMs: 1, isAborted: false, turnId: 'y', agentId: 'agent-unknown', reason: 'answer' })
+  await $.command.run(run('off'))
+  release()
+
+  expect(spawned[0]).toContain('verifica o login no repo xpto')
+  expect(calls.find(c => c.path === '/ack')?.body).toEqual({ id: 't1', ok: true, message: 'Started. A Claude Code subagent is working on it; the result comes as [task done].' })
+  const events = calls.filter(c => c.path === '/events').map(c => JSON.stringify(c.body))
+  expect(events.filter(e => e.includes('task_done')).length).toBe(1)
+  expect(events.find(e => e.includes('task_done'))).toContain('Achei o login em auth.ts.')
+})
+
+test('a refused subagent spawn acks the task as failed', async ($, on) => {
+  on('agent.spawn', () => ({ deny: 'agent limit' }))
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => (release = resolve))
+  const { calls } = engine(on, [
+    async () => ({ status: 200, body: { commands: [{ id: 't2', type: 'task', task: 'roda os testes' }] } }),
+    async () => (await held, { status: 410, body: {} }),
+  ])
+
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/ack'))
+  await $.command.run(run('off'))
+  release()
+
+  const ack = calls.find(c => c.path === '/ack')?.body
+  expect(ack?.ok).toBe(false)
+  expect(String(ack?.message)).toContain('agent limit')
+})

@@ -6,7 +6,7 @@ export type Link = {
   reason: string | null
 }
 
-export type Line = { kind: 'sent' | 'queued' | 'note' | 'stop' | 'info'; text: string }
+export type Line = { kind: 'sent' | 'queued' | 'note' | 'stop' | 'info' | 'task' | 'result'; text: string }
 
 declare module 'claude-code' {
   interface PluginState {
