@@ -85,6 +85,21 @@ test('show opens the window once with the window key, and the page needs that ke
   await call('POST', '/unsubscribe', { auth: s.token })
 })
 
+test('every external script on the page carries an integrity hash, and the page scripts import nothing remote', async () => {
+  const page = (await call('GET', `/?k=${WINDOW}`)).body
+  const external = [...page.matchAll(/<script\b[^>]*\bsrc="https?:\/\/[^"]*"[^>]*>/g)].map(m => m[0])
+  assert.ok(external.length > 0)
+  for (const tag of external) {
+    assert.match(tag, /\bintegrity="sha(256|384|512)-[A-Za-z0-9+/=]+"/)
+    assert.match(tag, /\bcrossorigin="anonymous"/)
+  }
+  for (const path of ['/app.js', '/guard.js']) {
+    const res = await call('GET', path)
+    assert.equal(res.status, 200)
+    assert.doesNotMatch(res.body, /\bfrom\s*['"]https?:|import\s*\(\s*['"]https?:/)
+  }
+})
+
 test('events are kept as activity the agent can read', async () => {
   const s = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/api' } })).body
   await call('POST', '/events', { auth: s.token, body: { events: [{ kind: 'tool', text: 'Bash npm test' }], isBusy: true } })

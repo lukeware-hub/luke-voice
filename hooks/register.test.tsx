@@ -172,7 +172,7 @@ test('a voice task runs in a Claude Code subagent, and its answer is reported as
   release()
 
   expect(spawned[0]).toContain('verifica o login no repo xpto')
-  expect(calls.find(c => c.path === '/ack')?.body).toEqual({ id: 't1', ok: true, message: 'Started. A Claude Code subagent is working on it; the result comes as [task done].' })
+  expect(calls.find(c => c.path === '/ack')?.body).toEqual({ id: 't1', ok: true, message: 'Started. A Claude Code subagent is working on it; the result comes in a [news] update.' })
   const events = calls.filter(c => c.path === '/events').map(c => JSON.stringify(c.body))
   expect(events.filter(e => e.includes('task_done')).length).toBe(1)
   expect(events.find(e => e.includes('task_done'))).toContain('Achei o login em auth.ts.')

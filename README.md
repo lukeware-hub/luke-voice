@@ -89,6 +89,8 @@ Claude session ── luke-voice mod ── events, long-poll ──┤
 - Three secrets: the service token in `~/.luke-voice/hub.json` (mode 600) lets a mod subscribe; each subscription gets its own session token for its inbox; the window key (in the window URL) can send commands but cannot read an inbox.
 - The agent requires signed tokens, so its id alone cannot start a call.
 - Prompts reach Claude framed as relayed by luke-voice, and the pane lists each one.
+- The call window loads the ElevenLabs client from a pinned CDN file checked with Subresource Integrity.
+- Session activity and task results reach the voice agent only as marked untrusted context, never as the user's words, and the tools that act on the computer are refused until the user speaks after an automatic update.
 
 ## Development
 
@@ -96,7 +98,7 @@ Claude session ── luke-voice mod ── events, long-poll ──┤
 claude --plugin-dir .                 # load this clone, hot-reloads
 claude plugin validate .
 claude plugin test .
-node --test hub/server.test.mjs hub/launch.test.mjs hub/agent.test.mjs
+node --test hub/server.test.mjs hub/launch.test.mjs hub/agent.test.mjs window/guard.test.mjs
 ```
 
 ## License

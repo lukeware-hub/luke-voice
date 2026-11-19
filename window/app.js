@@ -1,6 +1,9 @@
 // The call window: one voice call for every subscribed Claude session.
 // The ElevenLabs key never reaches this page; the hub hands it a per-call token.
-import { Conversation } from 'https://cdn.jsdelivr.net/npm/@elevenlabs/client@1.26.0/+esm'
+// The ElevenLabs client comes from a pinned CDN file that index.html loads with an integrity hash.
+import { NOTICE, REFUSED, createVoiceGate, quoteUntrusted, safeKind } from '/guard.js'
+
+const { Conversation } = window.ElevenLabsClient
 
 const params = new URLSearchParams(location.search)
 const KEY = params.get('k') ?? ''
@@ -28,6 +31,7 @@ let focused = null
 let pendingActivity = []
 let pendingSpeech = []
 let silentSince = Date.now()
+const gate = createVoiceGate()
 
 async function hub(method, path, body) {
   const res = await fetch(path, {
@@ -93,7 +97,7 @@ const sessionsLine = () =>
 function flushActivity() {
   if (!conversation || pendingActivity.length === 0) return
   const text = pendingActivity.splice(0).join('\n')
-  conversation.sendContextualUpdate(`[activity]\n${text}`)
+  conversation.sendContextualUpdate(`[activity]\n${quoteUntrusted(text)}`)
 }
 
 // A finished turn or a permission wait is worth saying out loud, once the user is quiet.
@@ -102,16 +106,21 @@ function speakWhenQuiet() {
   if (mode === 'speaking' || Date.now() - silentSince < SPEAK_AFTER_SILENCE_MS) return
   flushActivity()
   const text = pendingSpeech.splice(0).join('\n')
-  conversation.sendUserMessage(`${text}\nConte isso em poucas palavras, em português.`)
+  // The news goes in as context, never as the user's words; the user message is fixed text.
+  conversation.sendContextualUpdate(`[news]\n${quoteUntrusted(text)}`)
+  gate.noticeSent()
+  conversation.sendUserMessage(NOTICE)
 }
 
 function onActivity(session, events) {
   for (const event of events) {
-    const line = `[activity] session ${session}: ${event.kind}: ${event.text}`
-    if (event.kind === 'task_done') {
-      pendingSpeech.push(`[task done] ${event.text}`)
-      addLog(`✓ ${event.text.slice(0, 200)}`)
-    } else if (event.kind === 'done' || event.kind === 'attention') {
+    const kind = safeKind(event.kind)
+    const text = String(event.text ?? '')
+    const line = `session ${session}: ${kind}: ${text}`
+    if (kind === 'task_done') {
+      pendingSpeech.push(`task done: ${text}`)
+      addLog(`✓ ${text.slice(0, 200)}`)
+    } else if (kind === 'done' || kind === 'attention') {
       pendingSpeech.push(line)
     } else {
       pendingActivity.push(line)
@@ -119,25 +128,29 @@ function onActivity(session, events) {
   }
 }
 
+// The tools that act on the computer need the user's own voice since the last automatic notice.
 const clientTools = {
   luke_run_task: async ({ task, session }) => {
+    if (!gate.allows()) return REFUSED
     const out = await hub('POST', '/command', { type: 'task', task, session: session || undefined }).catch(error => ({ ok: false, message: error.message }))
     addLog(`▶ ${task}`, !out.ok)
     return out.message || (out.ok ? 'Started.' : 'It did not start.')
   },
   luke_send_to_claude: async ({ prompt, when, session }) => {
+    if (!gate.allows()) return REFUSED
     const out = await hub('POST', '/command', { type: 'send', prompt, when, session: session || undefined }).catch(error => ({ ok: false, message: error.message }))
     addLog(`${session || focused}: ${prompt}`, !out.ok)
     return out.message || (out.ok ? 'Sent.' : 'It did not go through.')
   },
   luke_stop_claude: async ({ session }) => {
+    if (!gate.allows()) return REFUSED
     const out = await hub('POST', '/command', { type: 'stop', session: session || undefined }).catch(error => ({ ok: false, message: error.message }))
     addLog(`${session || focused}: stop`, !out.ok)
     return out.message || (out.ok ? 'Stopped.' : 'It did not stop.')
   },
   luke_session_activity: async ({ session }) => {
     const out = await hub('GET', `/activity?session=${encodeURIComponent(session || '')}`).catch(error => ({ text: error.message }))
-    return out.text
+    return quoteUntrusted(out.text)
   },
 }
 
@@ -165,7 +178,7 @@ async function startCall() {
         window.focus()
         setCall('live', 'Listening. Talk it through.')
         const snapshot = await hub('GET', '/activity').catch(() => ({ text: '' }))
-        conversation?.sendContextualUpdate(`${sessionsLine()}\n${snapshot.text}`)
+        conversation?.sendContextualUpdate(`${sessionsLine()}\n[activity]\n${quoteUntrusted(snapshot.text)}`)
       },
       onDisconnect: () => {
         conversation = null
@@ -178,6 +191,7 @@ async function startCall() {
         if (next !== 'speaking') silentSince = Date.now()
       },
       onMessage: ({ source, message }) => {
+        if (source === 'user') gate.userSpoke(message)
         if (source === 'ai') ui.caption.textContent = message.replace(/\[[a-z ]+\]\s*/gi, '')
       },
     })
