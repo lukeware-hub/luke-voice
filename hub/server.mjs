@@ -60,7 +60,7 @@ export function chromeArgs(url, profile) {
   return [
     `--app=${url}`,
     `--user-data-dir=${profile}`,
-    '--window-size=420,660',
+    '--window-size=760,900',
     '--no-first-run',
     '--use-fake-ui-for-media-stream',
     '--autoplay-policy=no-user-gesture-required',

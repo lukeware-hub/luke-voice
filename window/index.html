@@ -3,66 +3,172 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="color-scheme" content="dark light" />
-    <title>luke-voice</title>
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0c0b16" />
+    <title>Luke-Voice</title>
     <link rel="preload" href="/fonts/schibsted-grotesk-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="/style.css" />
   </head>
-  <body>
+  <body data-view="home" data-compact="false">
+    <!-- Icons: Phosphor Icons (MIT), regular and fill weights. -->
     <svg width="0" height="0" class="sprite" aria-hidden="true">
-      <symbol id="i-phone" viewBox="0 0 24 24"><path d="M6.6 3.5h2.3l1.4 4.1-2 1.4a12 12 0 0 0 6.7 6.7l1.4-2 4.1 1.4v2.3a2 2 0 0 1-2.1 2A16.5 16.5 0 0 1 4.6 5.6a2 2 0 0 1 2-2.1Z" /></symbol>
-      <symbol id="i-hangup" viewBox="0 0 24 24"><path d="M3.3 13.9 2.6 12a2 2 0 0 1 .8-2.4 15.8 15.8 0 0 1 17.2 0 2 2 0 0 1 .8 2.4l-.7 1.9-4.2-.7-.5-2.4a10.6 10.6 0 0 0-8 0l-.5 2.4Z" /></symbol>
-      <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" /></symbol>
-      <symbol id="i-mic-off" viewBox="0 0 24 24"><path d="M15 9.4V6a3 3 0 0 0-5.7-1.3M9 9v2a3 3 0 0 0 4.6 2.5M5.5 11a6.5 6.5 0 0 0 10.4 5.2M18.5 11a6.4 6.4 0 0 1-.4 2.2M12 17.5V21M3.5 3.5l17 17" /></symbol>
-      <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10-6.5Z" /></symbol>
-      <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.2 4.2L19 7" /></symbol>
-      <symbol id="i-send" viewBox="0 0 24 24"><path d="M4 12h14M13 6l6 6-6 6" /></symbol>
-      <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="2" /></symbol>
-      <symbol id="i-x" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" /></symbol>
+      <symbol id="i-house" viewBox="0 0 256 256"><path d="M219.31,108.68l-80-80a16,16,0,0,0-22.62,0l-80,80A15.87,15.87,0,0,0,32,120v96a8,8,0,0,0,8,8h64a8,8,0,0,0,8-8V160h32v56a8,8,0,0,0,8,8h64a8,8,0,0,0,8-8V120A15.87,15.87,0,0,0,219.31,108.68ZM208,208H160V152a8,8,0,0,0-8-8H104a8,8,0,0,0-8,8v56H48V120l80-80,80,80Z"/></symbol>
+      <symbol id="i-chat-circle-dots" viewBox="0 0 256 256"><path d="M140,128a12,12,0,1,1-12-12A12,12,0,0,1,140,128ZM84,116a12,12,0,1,0,12,12A12,12,0,0,0,84,116Zm88,0a12,12,0,1,0,12,12A12,12,0,0,0,172,116Zm60,12A104,104,0,0,1,79.12,219.82L45.07,231.17a16,16,0,0,1-20.24-20.24l11.35-34.05A104,104,0,1,1,232,128Zm-16,0A88,88,0,1,0,51.81,172.06a8,8,0,0,1,.66,6.54L40,216,77.4,203.53a7.85,7.85,0,0,1,2.53-.42,8,8,0,0,1,4,1.08A88,88,0,0,0,216,128Z"/></symbol>
+      <symbol id="i-chart-bar" viewBox="0 0 256 256"><path d="M224,200h-8V40a8,8,0,0,0-8-8H152a8,8,0,0,0-8,8V80H96a8,8,0,0,0-8,8v40H48a8,8,0,0,0-8,8v64H32a8,8,0,0,0,0,16H224a8,8,0,0,0,0-16ZM160,48h40V200H160ZM104,96h40V200H104ZM56,144H88v56H56Z"/></symbol>
+      <symbol id="i-gear-six" viewBox="0 0 256 256"><path d="M128,80a48,48,0,1,0,48,48A48.05,48.05,0,0,0,128,80Zm0,80a32,32,0,1,1,32-32A32,32,0,0,1,128,160Zm109.94-52.79a8,8,0,0,0-3.89-5.4l-29.83-17-.12-33.62a8,8,0,0,0-2.83-6.08,111.91,111.91,0,0,0-36.72-20.67,8,8,0,0,0-6.46.59L128,41.85,97.88,25a8,8,0,0,0-6.47-.6A112.1,112.1,0,0,0,54.73,45.15a8,8,0,0,0-2.83,6.07l-.15,33.65-29.83,17a8,8,0,0,0-3.89,5.4,106.47,106.47,0,0,0,0,41.56,8,8,0,0,0,3.89,5.4l29.83,17,.12,33.62a8,8,0,0,0,2.83,6.08,111.91,111.91,0,0,0,36.72,20.67,8,8,0,0,0,6.46-.59L128,214.15,158.12,231a7.91,7.91,0,0,0,3.9,1,8.09,8.09,0,0,0,2.57-.42,112.1,112.1,0,0,0,36.68-20.73,8,8,0,0,0,2.83-6.07l.15-33.65,29.83-17a8,8,0,0,0,3.89-5.4A106.47,106.47,0,0,0,237.94,107.21Zm-15,34.91-28.57,16.25a8,8,0,0,0-3,3c-.58,1-1.19,2.06-1.81,3.06a7.94,7.94,0,0,0-1.22,4.21l-.15,32.25a95.89,95.89,0,0,1-25.37,14.3L134,199.13a8,8,0,0,0-3.91-1h-.19c-1.21,0-2.43,0-3.64,0a8.08,8.08,0,0,0-4.1,1l-28.84,16.1A96,96,0,0,1,67.88,201l-.11-32.2a8,8,0,0,0-1.22-4.22c-.62-1-1.23-2-1.8-3.06a8.09,8.09,0,0,0-3-3.06l-28.6-16.29a90.49,90.49,0,0,1,0-28.26L61.67,97.63a8,8,0,0,0,3-3c.58-1,1.19-2.06,1.81-3.06a7.94,7.94,0,0,0,1.22-4.21l.15-32.25a95.89,95.89,0,0,1,25.37-14.3L122,56.87a8,8,0,0,0,4.1,1c1.21,0,2.43,0,3.64,0a8.08,8.08,0,0,0,4.1-1l28.84-16.1A96,96,0,0,1,188.12,55l.11,32.2a8,8,0,0,0,1.22,4.22c.62,1,1.23,2,1.8,3.06a8.09,8.09,0,0,0,3,3.06l28.6,16.29A90.49,90.49,0,0,1,222.9,142.12Z"/></symbol>
+      <symbol id="i-question" viewBox="0 0 256 256"><path d="M140,180a12,12,0,1,1-12-12A12,12,0,0,1,140,180ZM128,72c-22.06,0-40,16.15-40,36v4a8,8,0,0,0,16,0v-4c0-11,10.77-20,24-20s24,9,24,20-10.77,20-24,20a8,8,0,0,0-8,8v8a8,8,0,0,0,16,0v-.72c18.24-3.35,32-17.9,32-35.28C168,88.15,150.06,72,128,72Zm104,56A104,104,0,1,1,128,24,104.11,104.11,0,0,1,232,128Zm-16,0a88,88,0,1,0-88,88A88.1,88.1,0,0,0,216,128Z"/></symbol>
+      <symbol id="i-microphone-slash" viewBox="0 0 256 256"><path d="M213.92,218.62l-160-176A8,8,0,0,0,42.08,53.38L80,95.09V128a48,48,0,0,0,69.11,43.12l11.1,12.2A63.41,63.41,0,0,1,128,192a64.07,64.07,0,0,1-64-64,8,8,0,0,0-16,0,80.11,80.11,0,0,0,72,79.6V240a8,8,0,0,0,16,0V207.59a78.83,78.83,0,0,0,35.16-12.22l30.92,34a8,8,0,1,0,11.84-10.76ZM128,160a32,32,0,0,1-32-32V112.69l41.66,45.82A32,32,0,0,1,128,160Zm57.52-3.91A63.32,63.32,0,0,0,192,128a8,8,0,0,1,16,0,79.16,79.16,0,0,1-8.11,35.12,8,8,0,0,1-7.19,4.49,7.88,7.88,0,0,1-3.51-.82A8,8,0,0,1,185.52,156.09ZM84,44.87A48,48,0,0,1,176,64v64a49.19,49.19,0,0,1-.26,5,8,8,0,0,1-8,7.17,8.13,8.13,0,0,1-.84,0,8,8,0,0,1-7.12-8.79c.11-1.1.17-2.24.17-3.36V64A32,32,0,0,0,98.64,51.25,8,8,0,1,1,84,44.87Z"/></symbol>
+      <symbol id="i-phone" viewBox="0 0 256 256"><path d="M222.37,158.46l-47.11-21.11-.13-.06a16,16,0,0,0-15.17,1.4,8.12,8.12,0,0,0-.75.56L134.87,160c-15.42-7.49-31.34-23.29-38.83-38.51l20.78-24.71c.2-.25.39-.5.57-.77a16,16,0,0,0,1.32-15.06l0-.12L97.54,33.64a16,16,0,0,0-16.62-9.52A56.26,56.26,0,0,0,32,80c0,79.4,64.6,144,144,144a56.26,56.26,0,0,0,55.88-48.92A16,16,0,0,0,222.37,158.46ZM176,208A128.14,128.14,0,0,1,48,80,40.2,40.2,0,0,1,82.87,40a.61.61,0,0,0,0,.12l21,47L83.2,111.86a6.13,6.13,0,0,0-.57.77,16,16,0,0,0-1,15.7c9.06,18.53,27.73,37.06,46.46,46.11a16,16,0,0,0,15.75-1.14,8.44,8.44,0,0,0,.74-.56L168.89,152l47,21.05h0s.08,0,.11,0A40.21,40.21,0,0,1,176,208Z"/></symbol>
+      <symbol id="i-phone-x" viewBox="0 0 256 256"><path d="M146.34,98.34,164.69,80,146.34,61.66a8,8,0,0,1,11.32-11.32L176,68.69l18.34-18.35a8,8,0,0,1,11.32,11.32L187.32,80l18.34,18.34a8,8,0,0,1-11.32,11.32L176,91.31l-18.34,18.35a8,8,0,0,1-11.32-11.32Zm77.54,84.74A56.26,56.26,0,0,1,168,232C88.6,232,24,167.4,24,88A56.26,56.26,0,0,1,72.92,32.12a16,16,0,0,1,16.62,9.52l21.12,47.15,0,.12A16,16,0,0,1,109.39,104c-.18.27-.37.52-.57.77L88,129.45c7.49,15.22,23.41,31,38.83,38.51l24.34-20.71a8.12,8.12,0,0,1,.75-.56,16,16,0,0,1,15.17-1.4l.13.06,47.11,21.11A16,16,0,0,1,223.88,183.08Zm-15.88-2s-.07,0-.11,0h0l-47-21.05-24.35,20.71a8.44,8.44,0,0,1-.74.56,16,16,0,0,1-15.75,1.14c-18.73-9.05-37.4-27.58-46.46-46.11a16,16,0,0,1,1-15.7,6.13,6.13,0,0,1,.57-.77L96,95.15l-21-47a.61.61,0,0,1,0-.12A40.2,40.2,0,0,0,40,88,128.14,128.14,0,0,0,168,216,40.21,40.21,0,0,0,208,181.07Z"/></symbol>
+      <symbol id="i-waveform" viewBox="0 0 256 256"><path d="M56,96v64a8,8,0,0,1-16,0V96a8,8,0,0,1,16,0ZM88,24a8,8,0,0,0-8,8V224a8,8,0,0,0,16,0V32A8,8,0,0,0,88,24Zm40,32a8,8,0,0,0-8,8V192a8,8,0,0,0,16,0V64A8,8,0,0,0,128,56Zm40,32a8,8,0,0,0-8,8v64a8,8,0,0,0,16,0V96A8,8,0,0,0,168,88Zm40-16a8,8,0,0,0-8,8v96a8,8,0,0,0,16,0V80A8,8,0,0,0,208,72Z"/></symbol>
+      <symbol id="i-check-circle" viewBox="0 0 256 256"><path d="M173.66,98.34a8,8,0,0,1,0,11.32l-56,56a8,8,0,0,1-11.32,0l-24-24a8,8,0,0,1,11.32-11.32L112,148.69l50.34-50.35A8,8,0,0,1,173.66,98.34ZM232,128A104,104,0,1,1,128,24,104.11,104.11,0,0,1,232,128Zm-16,0a88,88,0,1,0-88,88A88.1,88.1,0,0,0,216,128Z"/></symbol>
+      <symbol id="i-arrow-right" viewBox="0 0 256 256"><path d="M221.66,133.66l-72,72a8,8,0,0,1-11.32-11.32L196.69,136H40a8,8,0,0,1,0-16H196.69L138.34,61.66a8,8,0,0,1,11.32-11.32l72,72A8,8,0,0,1,221.66,133.66Z"/></symbol>
+      <symbol id="i-minus" viewBox="0 0 256 256"><path d="M224,128a8,8,0,0,1-8,8H40a8,8,0,0,1,0-16H216A8,8,0,0,1,224,128Z"/></symbol>
+      <symbol id="i-corners-out" viewBox="0 0 256 256"><path d="M216,48V88a8,8,0,0,1-16,0V56H168a8,8,0,0,1,0-16h40A8,8,0,0,1,216,48ZM88,200H56V168a8,8,0,0,0-16,0v40a8,8,0,0,0,8,8H88a8,8,0,0,0,0-16Zm120-40a8,8,0,0,0-8,8v32H168a8,8,0,0,0,0,16h40a8,8,0,0,0,8-8V168A8,8,0,0,0,208,160ZM88,40H48a8,8,0,0,0-8,8V88a8,8,0,0,0,16,0V56H88a8,8,0,0,0,0-16Z"/></symbol>
+      <symbol id="i-corners-in" viewBox="0 0 256 256"><path d="M152,96V48a8,8,0,0,1,16,0V88h40a8,8,0,0,1,0,16H160A8,8,0,0,1,152,96ZM96,152H48a8,8,0,0,0,0,16H88v40a8,8,0,0,0,16,0V160A8,8,0,0,0,96,152Zm112,0H160a8,8,0,0,0-8,8v48a8,8,0,0,0,16,0V168h40a8,8,0,0,0,0-16ZM96,40a8,8,0,0,0-8,8V88H48a8,8,0,0,0,0,16H96a8,8,0,0,0,8-8V48A8,8,0,0,0,96,40Z"/></symbol>
+      <symbol id="i-x" viewBox="0 0 256 256"><path d="M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z"/></symbol>
+      <symbol id="i-stop" viewBox="0 0 256 256"><path d="M200,40H56A16,16,0,0,0,40,56V200a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V56A16,16,0,0,0,200,40Zm0,160H56V56H200V200Z"/></symbol>
+      <symbol id="i-check" viewBox="0 0 256 256"><path d="M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z"/></symbol>
+      <symbol id="i-x-circle" viewBox="0 0 256 256"><path d="M165.66,101.66,139.31,128l26.35,26.34a8,8,0,0,1-11.32,11.32L128,139.31l-26.34,26.35a8,8,0,0,1-11.32-11.32L116.69,128,90.34,101.66a8,8,0,0,1,11.32-11.32L128,116.69l26.34-26.35a8,8,0,0,1,11.32,11.32ZM232,128A104,104,0,1,1,128,24,104.11,104.11,0,0,1,232,128Zm-16,0a88,88,0,1,0-88,88A88.1,88.1,0,0,0,216,128Z"/></symbol>
+      <symbol id="i-paper-plane-right" viewBox="0 0 256 256"><path d="M231.87,114l-168-95.89A16,16,0,0,0,40.92,37.34L71.55,128,40.92,218.67A16,16,0,0,0,56,240a16.15,16.15,0,0,0,7.93-2.1l167.92-96.05a16,16,0,0,0,.05-27.89ZM56,224a.56.56,0,0,0,0-.12L85.74,136H144a8,8,0,0,0,0-16H85.74L56.06,32.16A.46.46,0,0,0,56,32l168,95.83Z"/></symbol>
+      <symbol id="i-terminal-window" viewBox="0 0 256 256"><path d="M128,128a8,8,0,0,1-3,6.25l-40,32a8,8,0,1,1-10-12.5L107.19,128,75,102.25a8,8,0,1,1,10-12.5l40,32A8,8,0,0,1,128,128Zm48,24H136a8,8,0,0,0,0,16h40a8,8,0,0,0,0-16Zm56-96V200a16,16,0,0,1-16,16H40a16,16,0,0,1-16-16V56A16,16,0,0,1,40,40H216A16,16,0,0,1,232,56ZM216,200V56H40V200H216Z"/></symbol>
+      <symbol id="i-microphone-fill" viewBox="0 0 256 256"><path d="M80,128V64a48,48,0,0,1,96,0v64a48,48,0,0,1-96,0Zm128,0a8,8,0,0,0-16,0,64,64,0,0,1-128,0,8,8,0,0,0-16,0,80.11,80.11,0,0,0,72,79.6V240a8,8,0,0,0,16,0V207.6A80.11,80.11,0,0,0,208,128Z"/></symbol>
+      <symbol id="i-users-three-fill" viewBox="0 0 256 256"><path d="M64.12,147.8a4,4,0,0,1-4,4.2H16a8,8,0,0,1-7.8-6.17,8.35,8.35,0,0,1,1.62-6.93A67.79,67.79,0,0,1,37,117.51a40,40,0,1,1,66.46-35.8,3.94,3.94,0,0,1-2.27,4.18A64.08,64.08,0,0,0,64,144C64,145.28,64,146.54,64.12,147.8Zm182-8.91A67.76,67.76,0,0,0,219,117.51a40,40,0,1,0-66.46-35.8,3.94,3.94,0,0,0,2.27,4.18A64.08,64.08,0,0,1,192,144c0,1.28,0,2.54-.12,3.8a4,4,0,0,0,4,4.2H240a8,8,0,0,0,7.8-6.17A8.33,8.33,0,0,0,246.17,138.89Zm-89,43.18a48,48,0,1,0-58.37,0A72.13,72.13,0,0,0,65.07,212,8,8,0,0,0,72,224H184a8,8,0,0,0,6.93-12A72.15,72.15,0,0,0,157.19,182.07Z"/></symbol>
+      <symbol id="i-play-fill" viewBox="0 0 256 256"><path d="M240,128a15.74,15.74,0,0,1-7.6,13.51L88.32,229.65a16,16,0,0,1-16.2.3A15.86,15.86,0,0,1,64,216.13V39.87a15.86,15.86,0,0,1,8.12-13.82,16,16,0,0,1,16.2.3L232.4,114.49A15.74,15.74,0,0,1,240,128Z"/></symbol>
+      <symbol id="i-waveform-fill" viewBox="0 0 256 256"><path d="M216,40H40A16,16,0,0,0,24,56V200a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V56A16,16,0,0,0,216,40ZM72,152a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm32,32a8,8,0,0,1-16,0V72a8,8,0,0,1,16,0Zm32-16a8,8,0,0,1-16,0V88a8,8,0,0,1,16,0Zm32-16a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm32,8a8,8,0,0,1-16,0V96a8,8,0,0,1,16,0Z"/></symbol>
+      <symbol id="i-phone-fill" viewBox="0 0 256 256"><path d="M231.88,175.08A56.26,56.26,0,0,1,176,224C96.6,224,32,159.4,32,80A56.26,56.26,0,0,1,80.92,24.12a16,16,0,0,1,16.62,9.52l21.12,47.15,0,.12A16,16,0,0,1,117.39,96c-.18.27-.37.52-.57.77L96,121.45c7.49,15.22,23.41,31,38.83,38.51l24.34-20.71a8.12,8.12,0,0,1,.75-.56,16,16,0,0,1,15.17-1.4l.13.06,47.11,21.11A16,16,0,0,1,231.88,175.08Z"/></symbol>
     </svg>
 
-    <div class="app">
-      <header class="bar">
-        <div class="brand">
-          <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
-            <circle cx="16" cy="16" r="14" />
-            <circle cx="16" cy="16" r="9.5" />
-            <circle cx="16" cy="16" r="5" />
-          </svg>
-          <span class="wordmark">luke-voice</span>
-        </div>
-        <p id="status" class="pill" data-state="idle" role="status"><span class="dot"></span><span id="statusText">pronto</span></p>
-      </header>
+    <div class="shell">
+      <nav class="rail" aria-label="Navegação">
+        <div class="logo" aria-hidden="true"><svg class="icon"><use href="#i-waveform-fill" /></svg></div>
+        <button class="nav-item" type="button" data-target="home" aria-current="page">
+          <svg class="icon" aria-hidden="true"><use href="#i-house" /></svg><span>Início</span>
+        </button>
+        <button class="nav-item" type="button" data-target="sessions">
+          <svg class="icon" aria-hidden="true"><use href="#i-chat-circle-dots" /></svg><span>Sessões</span>
+        </button>
+        <button class="nav-item" type="button" data-target="history">
+          <svg class="icon" aria-hidden="true"><use href="#i-chart-bar" /></svg><span>Histórico</span>
+          <span id="historyCount" class="count" hidden></span>
+        </button>
+        <button class="nav-item" type="button" data-target="settings">
+          <svg class="icon" aria-hidden="true"><use href="#i-gear-six" /></svg><span>Configurações</span>
+        </button>
+        <button class="nav-item" type="button" data-target="help">
+          <svg class="icon" aria-hidden="true"><use href="#i-question" /></svg><span>Ajuda</span>
+        </button>
+      </nav>
 
-      <section class="stage" aria-label="Chamada">
-        <div id="orb" class="orb" data-mode="idle" aria-hidden="true">
-          <span class="ring r1"></span>
-          <span class="ring r2"></span>
-          <span class="ring r3"></span>
-        </div>
-        <p id="caption" class="caption" aria-live="polite">Toque em Ligar e fale. Quando vocês combinarem algo, eu peço ao Claude.</p>
-        <div class="controls">
-          <button id="callButton" class="call" type="button" data-live="false">
-            <svg class="icon" aria-hidden="true"><use id="callIcon" href="#i-phone" /></svg>
-            <span id="callLabel">Ligar</span>
-          </button>
-          <button id="muteButton" class="mute" type="button" disabled aria-pressed="false">
-            <svg class="icon" aria-hidden="true"><use id="muteIcon" href="#i-mic" /></svg>
-            <span id="muteLabel">Silenciar</span>
-          </button>
-        </div>
-      </section>
+      <div class="main">
+        <header class="top">
+          <h1 class="title">Luke<span>-Voice</span></h1>
+          <div class="top-actions">
+            <p id="status" class="pill" data-state="idle" role="status"><span class="dot"></span><span id="statusText">Pronto</span></p>
+            <button class="icon-btn hide-compact" type="button" data-target="settings" aria-label="Configurações">
+              <svg class="icon" aria-hidden="true"><use href="#i-gear-six" /></svg>
+            </button>
+            <div class="win" role="group" aria-label="Janela">
+              <button id="winCompact" class="win-btn" type="button" aria-label="Modo compacto" aria-pressed="false">
+                <svg class="icon" aria-hidden="true"><use href="#i-minus" /></svg>
+              </button>
+              <button id="winMax" class="win-btn" type="button" aria-label="Maximizar">
+                <svg class="icon" aria-hidden="true"><use id="winMaxIcon" href="#i-corners-out" /></svg>
+              </button>
+              <button id="winClose" class="win-btn close" type="button" aria-label="Encerrar e fechar">
+                <svg class="icon" aria-hidden="true"><use href="#i-x" /></svg>
+              </button>
+            </div>
+          </div>
+        </header>
 
-      <div class="side">
-        <section class="panel" aria-labelledby="sessionsTitle">
-          <h2 id="sessionsTitle">Sessões</h2>
-          <div id="sessions" class="sessions"></div>
-        </section>
+        <main class="views">
+          <section class="view" id="view-home" data-name="home" aria-label="Início">
+            <div class="stage">
+              <div id="orb" class="orb" data-mode="idle" aria-hidden="true">
+                <span class="halo"></span>
+                <span class="ripple"></span>
+                <span class="ripple"></span>
+                <span class="ripple"></span>
+                <span class="ring"></span>
+                <span class="core"><svg class="mic"><use id="orbIcon" href="#i-microphone-fill" /></svg></span>
+              </div>
+              <h2 id="headline" class="headline">Pronto para conversar</h2>
+              <p id="caption" class="caption" aria-live="polite">Toque em Chamar e fale naturalmente.</p>
+              <div class="controls">
+                <button id="callButton" class="call" type="button" data-live="false">
+                  <svg class="icon" aria-hidden="true"><use id="callIcon" href="#i-phone-fill" /></svg>
+                  <span id="callLabel">Chamar</span>
+                </button>
+                <button id="muteButton" class="ghost" type="button" disabled aria-pressed="false">
+                  <svg class="icon" aria-hidden="true"><use id="muteIcon" href="#i-microphone-slash" /></svg>
+                  <span id="muteLabel">Silenciar</span>
+                </button>
+              </div>
+            </div>
 
-        <section class="panel grow" aria-labelledby="logTitle">
-          <h2 id="logTitle">Atividade</h2>
-          <ol id="log" class="log"></ol>
-        </section>
+            <section class="recent hide-compact" aria-labelledby="recentTitle">
+              <div class="section-head">
+                <h2 id="recentTitle">Sessões recentes</h2>
+                <button class="link" type="button" data-target="sessions">
+                  Ver todas <svg class="icon" aria-hidden="true"><use href="#i-arrow-right" /></svg>
+                </button>
+              </div>
+              <div id="recentSessions" class="session-list"></div>
+            </section>
+
+            <aside id="banner" class="banner hide-compact" data-state="idle" aria-live="polite">
+              <span class="banner-icon"><svg class="icon" aria-hidden="true"><use id="bannerIcon" href="#i-check-circle" /></svg></span>
+              <div class="banner-copy">
+                <p id="bannerTitle" class="banner-title">Pronto para conversar!</p>
+                <p id="bannerText" class="banner-text">Use o microfone para falar com o Claude.</p>
+              </div>
+              <svg class="wave" viewBox="0 0 800 120" preserveAspectRatio="none" aria-hidden="true">
+                <path class="w1" d="M0 84 C 100 40, 200 40, 300 72 S 500 120, 600 64 S 750 20, 800 52 L 800 120 L 0 120 Z" />
+                <path class="w2" d="M0 96 C 120 70, 220 64, 330 88 S 520 118, 640 84 S 760 60, 800 76 L 800 120 L 0 120 Z" />
+              </svg>
+            </aside>
+          </section>
+
+          <section class="view" id="view-sessions" data-name="sessions" aria-label="Sessões" hidden>
+            <h2 class="view-title">Sessões</h2>
+            <p class="view-sub">As sessões do Claude Code ligadas ao luke-voice. Toque em uma para que a voz fale com ela.</p>
+            <div id="allSessions" class="session-list"></div>
+          </section>
+
+          <section class="view" id="view-history" data-name="history" aria-label="Histórico" hidden>
+            <h2 class="view-title">Histórico</h2>
+            <p class="view-sub">Tudo que você pediu nesta janela, do mais novo para o mais antigo.</p>
+            <ol id="log" class="log"></ol>
+          </section>
+
+          <section class="view" id="view-settings" data-name="settings" aria-label="Configurações" hidden>
+            <h2 class="view-title">Configurações</h2>
+            <p class="view-sub">Como o luke-voice está funcionando agora.</p>
+            <dl id="facts" class="facts"></dl>
+            <p class="note">A chave da ElevenLabs é configurada no Claude Code, com <code>/plugin configure luke-voice@luke-voice</code>. Ela nunca chega a esta janela.</p>
+          </section>
+
+          <section class="view" id="view-help" data-name="help" aria-label="Ajuda" hidden>
+            <h2 class="view-title">Ajuda</h2>
+            <p class="view-sub">Fale como falaria com uma pessoa. Antes de mexer no seu computador, ela repete o pedido e espera o seu "sim".</p>
+            <div class="help">
+              <article>
+                <h3>Exemplo de pedido</h3>
+                <p>"Verifica no repositório luke-voice onde o botão de ligar é desenhado."</p>
+              </article>
+              <article>
+                <h3>Comandos no Claude Code</h3>
+                <ul>
+                  <li><code>/luke-voice</code> liga ou desliga e já começa a chamada</li>
+                  <li><code>/luke-voice call</code> abre a janela e liga</li>
+                  <li><code>/luke-voice end</code> encerra a chamada</li>
+                  <li><code>/luke-voice status</code> mostra o que falta</li>
+                </ul>
+              </article>
+            </div>
+          </section>
+        </main>
       </div>
     </div>
 
