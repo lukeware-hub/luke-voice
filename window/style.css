@@ -201,15 +201,16 @@ ol {
 
 .log li {
   padding: 8px 10px;
-  border-left: 2px solid var(--accent);
+  border: 1px solid var(--line);
   background: var(--panel);
-  border-radius: 0 8px 8px 0;
+  border-radius: 8px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
 .log li.failed {
-  border-left-color: var(--error);
+  color: var(--error);
+  border-color: var(--error);
 }
 
 .empty {
