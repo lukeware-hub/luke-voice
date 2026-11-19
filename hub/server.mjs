@@ -7,7 +7,7 @@ import { createServer } from 'node:http'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-import { conversationToken, ensureAgent } from './agent.mjs'
+import { conversationToken, credits, ensureAgent, outOfCreditsMessage } from './agent.mjs'
 import { PORT, stateDir, stateFile } from './paths.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -211,6 +211,9 @@ export function createHub({ serviceToken, windowKey, apiKey = '', root = ROOT, o
       if (!key) return [409, { error: 'No ElevenLabs API key. Set ELEVENLABS_API_KEY or run /plugin configure luke-voice@luke-voice.' }]
       try {
         agentId ??= await ensureAgent(key, root, { log })
+        // With no credits left, ElevenLabs accepts the call and drops it at once: say why instead.
+        const left = await credits(key)
+        if (left && left.limit > 0 && left.used >= left.limit) return [402, { error: outOfCreditsMessage(left) }]
         const token = await conversationToken(key, agentId)
         isKeyRejected = false
         return [200, { token }]
