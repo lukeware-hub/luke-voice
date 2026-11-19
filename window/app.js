@@ -18,6 +18,7 @@ const { Conversation } = window.ElevenLabsClient
 
 const params = new URLSearchParams(location.search)
 const KEY = params.get('k') ?? ''
+const STALE_WINDOW = 'Esta janela ficou desatualizada. Feche-a e digite /luke-voice window no Claude Code.'
 const SPEAK_AFTER_SILENCE_MS = 1500
 const ACTIVITY_FLUSH_MS = 3000
 const MIC_TIMEOUT_MS = 10_000
@@ -122,6 +123,8 @@ async function hub(method, path, body) {
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   const out = await res.json().catch(() => ({}))
+  // A window opened by an older hub holds a key the current hub no longer accepts.
+  if (out.error === 'key') throw new Error(STALE_WINDOW)
   if (!res.ok && out.error) throw new Error(out.error)
   return out
 }

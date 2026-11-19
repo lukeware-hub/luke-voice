@@ -37,7 +37,8 @@ function sameSecret(given, expected) {
 export function loadSecrets() {
   const file = stateFile('hub.json')
   const saved = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {}
-  const secrets = { serviceToken: saved.serviceToken || newSecret(), windowKey: newSecret() }
+  // The window key survives a hub restart: an open window keeps working instead of failing with "key".
+  const secrets = { serviceToken: saved.serviceToken || newSecret(), windowKey: saved.windowKey || newSecret() }
   writeFileSync(file, JSON.stringify(secrets, null, 2), { mode: 0o600 })
   return secrets
 }
