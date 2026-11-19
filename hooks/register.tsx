@@ -83,7 +83,7 @@ async function subscribeOnce($: EngineInterface, options: Record<string, unknown
       await setLink($, { state: 'down', reason: out.error || launched.stderr.trim() || 'the hub did not start' })
       return false
     }
-    const res = await hubFetch($, 'POST', '/subscribe', { cwd: await $.session.cwd(), apiKey: await apiKey($, options) }, out.serviceToken)
+    const res = await hubFetch($, 'POST', '/subscribe', { cwd: await $.session.cwd(), sessionId: await $.session.id(), apiKey: await apiKey($, options) }, out.serviceToken)
     if (!res.ok || typeof res.json.token !== 'string') {
       await setLink($, { state: 'down', reason: `subscribe failed (${res.status})` })
       return false
@@ -115,6 +115,8 @@ async function pollLoop($: EngineInterface, options: Record<string, unknown>, ge
     try {
       const res = await hubFetch($, 'GET', `/inbox?wait=${POLL_WAIT_MS}`)
       if (gen !== generation) return
+      // A reload of this mod subscribed again for the same session: this older loop ends.
+      if (res.status === 409) return
       if (res.status === 401 || res.status === 410) {
         token = null
         await $.clock.sleep(250)
@@ -173,13 +175,15 @@ async function onCommand($: EngineInterface, command: Command) {
 
 function report($: EngineInterface, event: Activity) {
   if (!token) return
-  void read($, isOn).then(on => (on ? hubFetch($, 'POST', '/events', { events: [event], isBusy }).catch(() => undefined) : undefined))
+  void read($, isOn)
+    .then(on => (on ? hubFetch($, 'POST', '/events', { events: [event], isBusy }) : undefined))
+    .catch(() => undefined)
 }
 
 async function turnOn($: EngineInterface, options: Record<string, unknown>) {
   const gen = ++generation
   await setLink($, { state: 'connecting', reason: null })
-  void pollLoop($, options, gen)
+  void pollLoop($, options, gen).catch(() => undefined)
 }
 
 // Off: leave the hub, stop polling, drop the queue and close the pane. The hub ends the call
@@ -194,18 +198,23 @@ async function turnOff($: EngineInterface) {
   await setLink($, { state: 'off', name: null, reason: null })
 }
 
-async function toggle($: EngineInterface, options: Record<string, unknown>, to?: boolean) {
+// Turning it on also opens the window and starts the call, unless the caller does that itself.
+async function toggle($: EngineInterface, options: Record<string, unknown>, to?: boolean, startCall = true) {
   await update($, isOn, v => to ?? !v)
   const active = await read($, isOn)
   await $.store.set('isOn', active)
-  if (active) await turnOn($, options)
-  else await turnOff($)
-  $.ui.toast(`luke-voice: ${active ? 'on' : 'off'}`)
+  if (active) {
+    await turnOn($, options)
+    if (startCall) void show($, options, true).then(text => $.ui.toast(text)).catch(() => undefined)
+  } else {
+    await turnOff($)
+  }
+  $.ui.toast(active ? 'luke-voice: on, starting the call…' : 'luke-voice: off')
   return active
 }
 
 async function show($: EngineInterface, options: Record<string, unknown>, withCall: boolean) {
-  if (!(await read($, isOn))) await toggle($, options, true)
+  if (!(await read($, isOn))) await toggle($, options, true, false)
   if (!(await subscribe($, options))) {
     const l = await read($, link)
     return `luke-voice could not reach its hub: ${l.reason ?? 'unknown reason'}.`
@@ -249,10 +258,10 @@ export const register: Register = (on, options) => {
     const arg = e.args.trim().toLowerCase()
     switch (arg) {
       case '':
-        return { text: `luke-voice: ${(await toggle($, opts)) ? 'on' : 'off'}` }
+        return { text: (await toggle($, opts)) ? 'luke-voice: on. Starting the call.' : 'luke-voice: off' }
       case 'on':
       case 'off':
-        return { text: `luke-voice: ${(await toggle($, opts, arg === 'on')) ? 'on' : 'off'}` }
+        return { text: (await toggle($, opts, arg === 'on')) ? 'luke-voice: on. Starting the call.' : 'luke-voice: off' }
       case 'call':
         return { text: await show($, opts, true) }
       case 'window':

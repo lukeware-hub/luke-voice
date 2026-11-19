@@ -47,15 +47,17 @@ Or export `ELEVENLABS_API_KEY` before you start Claude Code. Then restart Claude
 
 | | |
 | --- | --- |
-| the footer button | turn luke-voice on or off, like `/luke-voice` |
-| `/luke-voice` | turn it on or off |
+| the footer button | turn luke-voice on (opens the window and **starts the call**) or off |
+| `/luke-voice` | the same as the button |
 | `/luke-voice on` / `off` | set it explicitly |
 | `/luke-voice call` | turn it on, open the call window and start the call |
 | `/luke-voice window` | open or raise the call window, focus this session |
 | `/luke-voice end` | hang up |
 | `/luke-voice status` | hub, call, key and queue |
 
-It starts **off** on a fresh install. The choice is remembered across sessions.
+It starts **off** on a fresh install. The choice is remembered across sessions. Turning it on starts the call right away, and the agent greets you. When Claude Code opens with luke-voice already on, it only reconnects: it never starts a call you did not ask for.
+
+The call window is a Chrome window with a profile of its own (`~/.luke-voice/chrome`) that only loads the luke-voice page. It is started with the microphone and sound allowed, so the call needs no extra click. Your own Chrome profile is not changed.
 
 **Off** means: this session leaves the hub, stops sending activity, drops prompts still queued for it, and closes its pane. When no session is left on the hub, the call ends. **On** joins the hub again.
 

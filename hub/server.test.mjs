@@ -6,16 +6,17 @@ import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 
 process.env.LUKE_VOICE_HOME = mkdtempSync(join(tmpdir(), 'luke-voice-test-'))
-const { createHub } = await import('./server.mjs')
+const { chromeArgs, createHub } = await import('./server.mjs')
 
 const SERVICE = 'service-token'
 const WINDOW = 'window-key'
 let hub
 let port
 const opened = []
+let shutdowns = 0
 
 before(async () => {
-  hub = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: url => opened.push(url) })
+  hub = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: url => opened.push(url), onShutdown: () => shutdowns++ })
   await new Promise(resolve => hub.listen(0, '127.0.0.1', resolve))
   port = hub.address().port
 })
@@ -97,4 +98,29 @@ test('a call token without an API key says how to add one', async () => {
   const res = await call('POST', '/token', { key: WINDOW })
   assert.equal(res.status, 409)
   assert.match(res.body.error, /ELEVENLABS_API_KEY/)
+})
+
+test('a reload of the same Claude session takes over its row: same name, old token answered 409', async () => {
+  const first = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/cli', sessionId: 's-1' } })).body
+  const second = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/cli', sessionId: 's-1' } })).body
+  assert.equal(second.name, first.name)
+  assert.equal((await call('GET', '/inbox', { auth: first.token })).status, 409)
+  assert.equal((await call('GET', '/inbox?wait=0', { auth: second.token })).status, 200)
+  assert.equal((await call('GET', '/health')).body.sessions, 1)
+  await call('POST', '/unsubscribe', { auth: second.token })
+})
+
+test('shutdown needs the service token', async () => {
+  assert.equal((await call('POST', '/shutdown', { auth: WINDOW })).status, 401)
+  assert.equal((await call('POST', '/shutdown', { auth: SERVICE })).status, 200)
+  await new Promise(resolve => setTimeout(resolve, 150))
+  assert.equal(shutdowns, 1)
+})
+
+test('the Chrome window allows the mic and sound without a prompt, in its own profile', () => {
+  const args = chromeArgs('http://127.0.0.1:4848/?k=x', '/home/u/.luke-voice/chrome')
+  assert.ok(args.includes('--use-fake-ui-for-media-stream'))
+  assert.ok(args.includes('--autoplay-policy=no-user-gesture-required'))
+  assert.ok(args.includes('--user-data-dir=/home/u/.luke-voice/chrome'))
+  assert.ok(args.includes('--app=http://127.0.0.1:4848/?k=x'))
 })
