@@ -19,20 +19,29 @@ An on/off button sits above the prompt (`✦ luke-voice: on` / `✦ luke-voice: 
 
 ## Install
 
-You need Claude Code with mods (hooks modules), Node 20+, Google Chrome (or any browser with a microphone) and an [ElevenLabs API key](https://elevenlabs.io/app/settings/api-keys).
+**Easiest: use the installer.** It checks what you need, installs the mod, asks for your ElevenLabs key and tells you when it is done. Step-by-step guide: [INSTALL.md](INSTALL.md).
+
+- **Windows:** download [install-luke-voice-windows.cmd](https://github.com/lukeware-hub/luke-voice/releases/latest/download/install-luke-voice-windows.cmd) and double-click it.
+- **macOS / Linux:** paste this in the Terminal:
+
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/install.sh | bash
+  ```
+
+You need Claude Code, Node.js 20+ and an [ElevenLabs API key](https://elevenlabs.io/app/settings/api-keys). The first call creates a voice agent named `luke-voice` in your ElevenLabs account, and calls are billed to that account.
+
+<details>
+<summary>Manual install (for developers)</summary>
 
 ```bash
 claude plugin marketplace add lukeware-hub/luke-voice
 claude plugin install luke-voice@luke-voice
-```
-
-Give it your key, either as `ELEVENLABS_API_KEY` in the environment Claude Code starts in, or in Claude Code's secure storage:
-
-```bash
 printf '{"api_key":"%s"}' "$ELEVENLABS_API_KEY" | claude plugin configure luke-voice@luke-voice --values-stdin
 ```
 
-Restart Claude Code. The first call creates a voice agent named `luke-voice` in your ElevenLabs account; calls are billed to that account.
+Or export `ELEVENLABS_API_KEY` before you start Claude Code. Then restart Claude Code.
+
+</details>
 
 ## Use
 
