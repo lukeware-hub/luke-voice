@@ -339,13 +339,17 @@ async function pluginVersion($: EngineInterface) {
 async function helpText($: EngineInterface) {
   const on = await read($, isOn)
   const health = await hubFetch($, 'GET', '/health', undefined, null).catch(() => null)
-  const h = (health?.ok && health.json.app === 'luke-voice' ? health.json : null) as { version?: string; hasKey?: boolean } | null
+  const h = (health?.ok && health.json.app === 'luke-voice' ? health.json : null) as { version?: string; hasKey?: boolean; keyStatus?: string } | null
   const version = await pluginVersion($)
   const mark = (ok: boolean) => (ok ? '✓' : '✗')
   const checks = [
     `${mark(on)} luke-voice ligado${on ? '' : ': clique no botão "✦ luke-voice: off" acima do prompt, ou digite /luke-voice'}`,
     `${mark(Boolean(h))} Servidor local (hub)${h ? ` rodando, versão ${h.version}` : ': não está rodando. Ele sobe sozinho quando você liga o luke-voice'}`,
-    h ? `${mark(Boolean(h.hasKey))} Chave da ElevenLabs${h.hasKey ? ' configurada' : ': falta. Veja o passo 2 abaixo'}` : null,
+    h
+      ? h.keyStatus === 'rejected'
+        ? '✗ Chave da ElevenLabs: a ElevenLabs recusou a chave salva. Crie uma nova (passo 2 abaixo) e reinicie o Claude Code'
+        : `${mark(Boolean(h.hasKey))} Chave da ElevenLabs${h.hasKey ? ' configurada' : ': falta. Veja o passo 2 abaixo'}`
+      : null,
     h && version && h.version !== version
       ? `✗ O hub é da versão ${h.version}, mas a instalada é ${version}: feche o Claude Code e abra de novo`
       : null,

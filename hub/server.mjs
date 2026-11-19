@@ -87,6 +87,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', root = ROOT, o
   let call = 'idle'
   let key = apiKey
   let agentId = null
+  let isKeyRejected = false // ElevenLabs answered 401 to the current key
   let lastBusy = Date.now()
 
   const byName = name => [...sessions.values()].find(s => s.name === name)
@@ -210,9 +211,15 @@ export function createHub({ serviceToken, windowKey, apiKey = '', root = ROOT, o
       if (!key) return [409, { error: 'No ElevenLabs API key. Set ELEVENLABS_API_KEY or run /plugin configure luke-voice@luke-voice.' }]
       try {
         agentId ??= await ensureAgent(key, root, { log })
-        return [200, { token: await conversationToken(key, agentId) }]
+        const token = await conversationToken(key, agentId)
+        isKeyRejected = false
+        return [200, { token }]
       } catch (error) {
         agentId = null
+        if (error.status === 401) {
+          isKeyRejected = true
+          return [401, { error: 'A ElevenLabs recusou a chave salva. Crie uma chave nova em elevenlabs.io/app/settings/api-keys, salve com /plugin configure luke-voice@luke-voice e reinicie o Claude Code.' }]
+        }
         return [502, { error: String(error.message ?? error) }]
       }
     },
@@ -276,13 +283,19 @@ export function createHub({ serviceToken, windowKey, apiKey = '', root = ROOT, o
       const bearer = (req.headers.authorization ?? '').replace(/^Bearer /, '')
 
       if (route === 'GET /health') {
-        return send(res, 200, { app: 'luke-voice', version: VERSION, sessions: sessions.size, isWindowOpen: streams.size > 0, call, hasKey: Boolean(key) })
+        return send(res, 200, { app: 'luke-voice', version: VERSION, sessions: sessions.size, isWindowOpen: streams.size > 0, call, hasKey: Boolean(key), keyStatus: !key ? 'missing' : isKeyRejected ? 'rejected' : 'set' })
       }
 
       if (route === 'POST /subscribe') {
         if (!sameSecret(bearer, serviceToken)) return send(res, 401, { error: 'token' })
         const body = await readBody(req)
-        if (!key && typeof body.apiKey === 'string' && body.apiKey.trim()) key = body.apiKey.trim()
+        const offered = typeof body.apiKey === 'string' ? body.apiKey.trim() : ''
+        // A new key replaces one ElevenLabs rejected; otherwise the first key stays.
+        if (offered && (!key || (isKeyRejected && offered !== key))) {
+          key = offered
+          isKeyRejected = false
+          agentId = null
+        }
         const token = newSecret()
         const sessionId = typeof body.sessionId === 'string' ? body.sessionId.slice(0, 200) : ''
         // A reloaded mod subscribes again from the same Claude session: it takes over the old row.

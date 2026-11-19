@@ -163,3 +163,10 @@ test('the window font is served locally as font/woff2', async () => {
   assert.equal(res.statusCode, 200)
   assert.equal(res.headers['content-type'], 'font/woff2')
 })
+
+test('health reports a missing key, and a new key offered on subscribe is taken when none is set', async () => {
+  assert.equal((await call('GET', '/health')).body.keyStatus, 'missing')
+  const s = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/keys', apiKey: 'k-1' } })).body
+  assert.equal((await call('GET', '/health')).body.keyStatus, 'set')
+  await call('POST', '/unsubscribe', { auth: s.token })
+})

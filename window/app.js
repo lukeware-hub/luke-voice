@@ -273,7 +273,9 @@ async function renderFacts() {
   const rows = health
     ? [
         ['Versão', health.version, ''],
-        ['Chave da ElevenLabs', health.hasKey ? 'Configurada' : 'Faltando', health.hasKey ? 'ok' : 'bad'],
+        health.keyStatus === 'rejected'
+          ? ['Chave da ElevenLabs', 'Recusada pela ElevenLabs', 'bad']
+          : ['Chave da ElevenLabs', health.hasKey ? 'Configurada' : 'Faltando', health.hasKey ? 'ok' : 'bad'],
         ['Voz', 'Roberta, português do Brasil', ''],
         ['Sessões ligadas', String(health.sessions), ''],
         ['Chamada', STATES[health.call]?.pill ?? health.call, ''],
