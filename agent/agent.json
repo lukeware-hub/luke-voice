@@ -101,12 +101,25 @@
       "first_message": "Oi! Estou aqui. O que vamos fazer?",
       "language": "pt",
       "prompt": {
-        "llm": "gemini-2.5-flash"
+        "llm": "gemini-2.5-flash",
+        "built_in_tools": {
+          "skip_turn": {
+            "type": "system",
+            "name": "skip_turn",
+            "description": "Stay silent until the user speaks again. Use it whenever there is nothing new to say: the user is quiet while a task runs, or only [activity] or [sessions] context arrived.",
+            "params": {
+              "system_tool_type": "skip_turn"
+            }
+          }
+        }
       }
     },
     "tts": {
       "voice_id": "RGymW84CSmfVugnA5tvA",
       "model_id": "eleven_flash_v2_5"
+    },
+    "turn": {
+      "turn_timeout": 30
     }
   },
   "platform_settings": {

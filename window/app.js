@@ -1,7 +1,7 @@
 // The call window: one voice call for every subscribed Claude session.
 // The ElevenLabs key never reaches this page; the hub hands it a per-call token.
 // The ElevenLabs client comes from a pinned CDN file that index.html loads with an integrity hash.
-import { NOTICE, REFUSED, createVoiceGate, quoteUntrusted, safeKind } from '/guard.js'
+import { NOTICE, REFUSED, createSpeechFilter, createVoiceGate, quoteUntrusted, safeKind } from '/guard.js'
 
 const { Conversation } = window.ElevenLabsClient
 
@@ -101,6 +101,7 @@ let entries = 0
 let restoreRect = null
 let compactRect = null
 const gate = createVoiceGate()
+const speech = createSpeechFilter()
 
 async function hub(method, path, body) {
   const res = await fetch(path, {
@@ -302,7 +303,7 @@ function flushActivity() {
   conversation.sendContextualUpdate(`[activity]\n${quoteUntrusted(text)}`)
 }
 
-// A finished turn or a permission wait is worth saying out loud, once the user is quiet.
+// Finished work is said out loud once the user is quiet; nothing else speaks on its own.
 function speakWhenQuiet() {
   if (!conversation || pendingSpeech.length === 0) return
   if (mode === 'speaking' || Date.now() - silentSince < SPEAK_AFTER_SILENCE_MS) return
@@ -319,11 +320,12 @@ function onActivity(session, events) {
     const kind = safeKind(event.kind)
     const text = String(event.text ?? '')
     const line = `session ${session}: ${kind}: ${text}`
+    const spoken = speech.shouldSpeak(session, kind, text)
     if (kind === 'task_done') {
-      pendingSpeech.push(`task done: ${text}`)
+      if (spoken) pendingSpeech.push(`task done: ${text}`)
       const parts = text.match(/^Task: ([\s\S]*?)\nResult: ([\s\S]*)$/)
       addLog('result', parts ? parts[1] : 'Tarefa concluída', { body: parts ? parts[2] : text, who: session })
-    } else if (kind === 'done' || kind === 'attention') {
+    } else if (spoken) {
       pendingSpeech.push(line)
     } else {
       pendingActivity.push(line)
@@ -342,6 +344,7 @@ const clientTools = {
   luke_send_to_claude: async ({ prompt, when, session }) => {
     if (!gate.allows()) return REFUSED
     const out = await hub('POST', '/command', { type: 'send', prompt, when, session: session || undefined }).catch(error => ({ ok: false, message: error.message }))
+    if (out.ok) speech.expectReply(session || focused)
     addLog(out.ok ? 'sent' : 'failed', prompt, { who: session || focused })
     return out.message || (out.ok ? 'Sent.' : 'It did not go through.')
   },
@@ -420,6 +423,7 @@ async function endCall() {
   conversation = null
   pendingActivity = []
   pendingSpeech = []
+  speech.clear()
   await current?.endSession().catch(() => {})
   setCall('idle', 'Chamada encerrada. Toque em Chamar para falar de novo.')
 }
