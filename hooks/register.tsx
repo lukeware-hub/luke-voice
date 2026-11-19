@@ -36,6 +36,35 @@ let queued: string[] = []
 const tasks = new Map<string, string>()
 // Spawned tasks whose agent id is not known yet, by the prompt their subagent starts with.
 const pendingTasks = new Map<string, string>()
+// The effort each voice-task subagent runs at, by agent id, or by its prompt until the id is known.
+const taskEfforts = new Map<string, Effort>()
+
+// The model and effort for a voice task, by how complex it is (see CLAUDE.md, "Task orchestration").
+export type Complexity = 'complex' | 'medium' | 'simple'
+type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+export const TIERS: Record<Complexity, { model: 'opus' | 'sonnet' | 'haiku'; effort: Effort }> = {
+  complex: { model: 'opus', effort: 'high' },
+  medium: { model: 'sonnet', effort: 'medium' },
+  simple: { model: 'haiku', effort: 'low' },
+}
+
+// Architecture, multi-file changes, hard debugging. Stems, so Portuguese and English inflections match.
+const COMPLEX =
+  /arquitet|architect|refator|refactor|\bmigr[ae]|redesenh|redesign|reescrev|rewrite|v[aá]rios arquivos|multi-?file|projeto (inteiro|todo)|todo o (projeto|reposit)|orquestr|orchestrat|depur|\bdebug|investig|race condition|condi[cç][aã]o de corrida|vazamento de mem|memory leak|desempenho|performance|seguran[cç]a|security/i
+// A focused feature or fix in a few files.
+const MEDIUM =
+  /implement|corrij|corrig|consert|\bfix|adicion|\badd\b|\bcri[ae]r?\b|\bcreate|feature|funcionalidade|\bbug|\btestes?\b|\btests?\b|atualiz|\bupdate|alter[ae]|\bmud[ae]|\bchange|escrev|\bwrite|integr|endpoint|componente|component/i
+const LONG_TASK = 600
+const SHORT_TASK = 300
+
+/** Sorts a voice task into a complexity tier from its wording and length. */
+export function classifyTask(task: string): Complexity {
+  const text = task.trim()
+  if (COMPLEX.test(text) || text.length > LONG_TASK) return 'complex'
+  if (MEDIUM.test(text) || text.length > SHORT_TASK) return 'medium'
+  // Lookups, small edits, mechanical changes.
+  return 'simple'
+}
 
 const short = (text: string, max = 300) => (text.length > max ? `${text.slice(0, max - 1)}…` : text)
 
@@ -219,16 +248,21 @@ async function onCommand($: EngineInterface, command: Command) {
   if (command.type === 'task') {
     try {
       const prompt = frameTask(command.task)
+      const tier = TIERS[classifyTask(command.task)]
       pendingTasks.set(prompt, command.task)
-      const spawned = await $.agent.spawn({ prompt, description: 'luke-voice task' })
+      taskEfforts.set(prompt, tier.effort)
+      const spawned = await $.agent.spawn({ prompt, description: 'luke-voice task', model: tier.model })
       if (spawned.deny) {
         pendingTasks.delete(prompt)
+        taskEfforts.delete(prompt)
         return ack($, command.id, false, `Could not start the task: ${spawned.deny}`)
       }
       // The id comes with the spawn, or with the subagent's turn.start (matched by its prompt).
       if (spawned.agentId) {
         pendingTasks.delete(prompt)
         tasks.set(spawned.agentId, command.task)
+        taskEfforts.delete(prompt)
+        taskEfforts.set(spawned.agentId, tier.effort)
       }
       await startRunning($, spawned.agentId ?? prompt, command.task)
       await addLine($, { kind: 'task', text: command.task })
@@ -460,6 +494,9 @@ export const register: Register = (on, options) => {
     if (e.agentId !== undefined && pending !== undefined) {
       pendingTasks.delete(e.text)
       tasks.set(e.agentId, pending)
+      const effort = taskEfforts.get(e.text)
+      taskEfforts.delete(e.text)
+      if (effort) taskEfforts.set(e.agentId, effort)
       await stopRunning($, e.text)
       await startRunning($, e.agentId, pending)
     } else if (e.agentId !== undefined && tasks.has(e.agentId)) {
@@ -473,6 +510,12 @@ export const register: Register = (on, options) => {
       void refreshStatus($)
     }
     return next(e)
+  })
+
+  // Each request of a voice-task subagent asks for its tier's effort (a rewrite lasts one step).
+  on('turn.step', async function* ($, e, next) {
+    const effort = e.agentId !== undefined ? taskEfforts.get(e.agentId) : undefined
+    return yield* next(effort ? { ...e, effort } : e)
   })
 
   on('tool.call', async ($, e, next) => {
@@ -508,6 +551,7 @@ export const register: Register = (on, options) => {
         await addLine($, { kind: 'stop', text: `Tarefa parada: ${task}` })
       } else {
         tasks.delete(e.agentId)
+        taskEfforts.delete(e.agentId)
         const answer = e.answer || 'Done, with no answer.'
         report($, { kind: 'task_done', text: short(`Task: ${task}\nResult: ${answer}`, 1500) })
         await addLine($, { kind: 'result', text: answer })

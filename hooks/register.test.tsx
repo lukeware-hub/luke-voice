@@ -1,6 +1,8 @@
 import { expect, test } from 'claude-code/testing'
 import type { Args, On } from 'claude-code'
 
+import { classifyTask, TIERS } from './register'
+
 const FOOTER = { plugin: 'luke-voice', component: 'SessionMode', props: { modes: [] } } as const
 const run = (args: string) => ({ command: 'luke-voice', args, origin: { kind: 'composer' } }) as Args<'command.run'>
 
@@ -199,6 +201,54 @@ test('a refused subagent spawn acks the task as failed', async ($, on) => {
   const ack = calls.find(c => c.path === '/ack')?.body
   expect(ack?.ok).toBe(false)
   expect(String(ack?.message)).toContain('agent limit')
+})
+
+test('a voice task is sorted by complexity into its model and effort', async () => {
+  expect(classifyTask('Refatore a arquitetura do orquestrador em vários arquivos')).toBe('complex')
+  expect(classifyTask('Investigue por que o login falha às vezes')).toBe('complex')
+  expect(classifyTask('Corrija o bug do botão de salvar no formulário')).toBe('medium')
+  expect(classifyTask('Adicione um teste para a função de login')).toBe('medium')
+  expect(classifyTask('Qual é a versão do plugin?')).toBe('simple')
+  expect(classifyTask('Liste os arquivos da pasta hub')).toBe('simple')
+  expect(classifyTask('x'.repeat(700))).toBe('complex')
+  expect(TIERS.complex).toEqual({ model: 'opus', effort: 'high' })
+  expect(TIERS.medium).toEqual({ model: 'sonnet', effort: 'medium' })
+  expect(TIERS.simple).toEqual({ model: 'haiku', effort: 'low' })
+})
+
+test('a voice task subagent runs on its tier model, and each of its steps asks for its tier effort', async ($, on) => {
+  const models: Array<string | undefined> = []
+  const prompts: string[] = []
+  const efforts: Array<string | number | undefined> = []
+  on('agent.spawn', (_, e) => (models.push(e.model), prompts.push(e.prompt), { model: e.model ?? 'test', agentId: 'agent-h' }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.step', async function* (_, e) {
+    efforts.push(e.effort)
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: null }
+  })
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => (release = resolve))
+  const { calls } = engine(on, [
+    async () => ({ status: 200, body: { commands: [{ id: 't3', type: 'task', task: 'Liste os arquivos da pasta hub' }] } }),
+    async () => (await held, { status: 410, body: {} }),
+  ])
+
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/ack'))
+  // The engine names the subagent when its loop starts.
+  await $.turn.start({ text: prompts[0] ?? '', turnId: 'x', agentId: 'agent-h' })
+  // Reading each stream to its end sends the step.
+  for (const step of [
+    $.turn.step({ turnId: 'x', index: 0, model: 'haiku', effort: 'high', messageCount: 1, agentId: 'agent-h' }),
+    $.turn.step({ turnId: 'm', index: 0, model: 'opus', effort: 'high', messageCount: 1 }),
+  ]) {
+    for await (const _ of step);
+  }
+  await $.command.run(run('off'))
+  release()
+
+  expect(models).toEqual(['haiku'])
+  expect(efforts).toEqual(['low', 'high'])
 })
 
 test('the launcher gets the API key on stdin, so a hub it starts has it from the first call', async ($, on) => {
