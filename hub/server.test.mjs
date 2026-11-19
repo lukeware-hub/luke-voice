@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 
 process.env.LUKE_VOICE_HOME = mkdtempSync(join(tmpdir(), 'luke-voice-test-'))
-const { chromeArgs, createHub } = await import('./server.mjs')
+const { chromeArgs, createHub, loadSecrets } = await import('./server.mjs')
 
 const SERVICE = 'service-token'
 const WINDOW = 'window-key'
@@ -169,4 +169,12 @@ test('health reports a missing key, and a new key offered on subscribe is taken 
   const s = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/keys', apiKey: 'k-1' } })).body
   assert.equal((await call('GET', '/health')).body.keyStatus, 'set')
   await call('POST', '/unsubscribe', { auth: s.token })
+})
+
+test('loadSecrets keeps the window key across hub restarts', () => {
+  const first = loadSecrets()
+  const second = loadSecrets()
+  assert.equal(second.windowKey, first.windowKey)
+  assert.equal(second.serviceToken, first.serviceToken)
+  assert.ok(first.windowKey.length > 0)
 })
