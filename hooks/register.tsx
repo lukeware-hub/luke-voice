@@ -325,13 +325,86 @@ async function statusText($: EngineInterface) {
     .join('\n')
 }
 
+// The installed plugin's version, to tell when the running hub is an older one.
+async function pluginVersion($: EngineInterface) {
+  try {
+    const text = await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`)
+    return String(JSON.parse(text).version ?? '')
+  } catch {
+    return ''
+  }
+}
+
+// /luke-voice help: everything a person needs, starting with what is missing right now.
+async function helpText($: EngineInterface) {
+  const on = await read($, isOn)
+  const health = await hubFetch($, 'GET', '/health', undefined, null).catch(() => null)
+  const h = (health?.ok && health.json.app === 'luke-voice' ? health.json : null) as { version?: string; hasKey?: boolean } | null
+  const version = await pluginVersion($)
+  const mark = (ok: boolean) => (ok ? '✓' : '✗')
+  const checks = [
+    `${mark(on)} luke-voice ligado${on ? '' : ': clique no botão "✦ luke-voice: off" acima do prompt, ou digite /luke-voice'}`,
+    `${mark(Boolean(h))} Servidor local (hub)${h ? ` rodando, versão ${h.version}` : ': não está rodando. Ele sobe sozinho quando você liga o luke-voice'}`,
+    h ? `${mark(Boolean(h.hasKey))} Chave da ElevenLabs${h.hasKey ? ' configurada' : ': falta. Veja o passo 2 abaixo'}` : null,
+    h && version && h.version !== version
+      ? `✗ O hub é da versão ${h.version}, mas a instalada é ${version}: feche o Claude Code e abra de novo`
+      : null,
+  ].filter(Boolean)
+
+  return [
+    'luke-voice: ajuda',
+    '',
+    'Seu status agora:',
+    ...checks.map(line => `  ${line}`),
+    '',
+    'O que é: uma assistente de voz, em português, ao lado do Claude Code. Você fala o que quer, ela repete e pergunta "posso?", e depois do seu "sim" um subagente do Claude faz a tarefa no seu computador. Quando termina, ela conta o resultado.',
+    '',
+    'Antes de usar (uma vez só):',
+    '  1. Tenha o Node.js 20 ou mais novo (nodejs.org, versão LTS) e o Google Chrome.',
+    '  2. Crie uma conta grátis em elevenlabs.io e copie uma chave em elevenlabs.io/app/settings/api-keys.',
+    '     Salve a chave com: /plugin configure luke-voice@luke-voice',
+    '     O plano grátis dá cerca de 15 minutos de chamada por mês.',
+    '  3. Depois de instalar, atualizar ou salvar a chave: feche o Claude Code e abra de novo.',
+    '     O /reload-plugins não basta para trocar de versão.',
+    '',
+    'Como usar:',
+    '  1. Clique em "✦ luke-voice: off" acima do prompt. Ele vira "on", a janela abre e a chamada começa.',
+    '  2. Fale normalmente. Exemplo: "Verifica no repositório luke-voice onde o botão de ligar é desenhado."',
+    '  3. Ela repete o pedido e pergunta "posso?". Diga "sim".',
+    '  4. O pedido aparece em Histórico, na janela. Quando terminar, ela fala o resultado.',
+    '',
+    'Comandos:',
+    '  /luke-voice          liga ou desliga (ligar já começa a chamada)',
+    '  /luke-voice call     abre a janela e começa a chamada',
+    '  /luke-voice end      encerra a chamada',
+    '  /luke-voice window   traz a janela para a frente',
+    '  /luke-voice status   mostra o estado técnico',
+    '  /luke-voice help     mostra esta ajuda',
+    '',
+    'Bom saber:',
+    '  - Na primeira chamada, o luke-voice cria um agente chamado "luke-voice" e adiciona a voz "Roberta" na sua conta da ElevenLabs. Leva alguns segundos.',
+    '  - A janela usa um Chrome só dela, com o microfone e o som já liberados. O seu Chrome normal não muda.',
+    '  - Enquanto está ligado, o que acontece nesta sessão (seus pedidos e as ferramentas do Claude) é enviado ao agente na ElevenLabs. Desligado, nada sai do seu computador.',
+    '',
+    'Se algo não funcionar:',
+    '  - Não ouço nada: veja se o som do Windows está ligado e se a janela mostra "Em chamada".',
+    '  - "No ElevenLabs API key" ou "Chave faltando": salve a chave (passo 2) e reinicie o Claude Code.',
+    '  - "Hub offline" na janela: ligue o luke-voice no Claude Code; a janela volta sozinha.',
+    '  - A chamada não conecta mais: os minutos grátis do mês podem ter acabado. Veja em elevenlabs.io.',
+    '  - A janela está com o visual antigo: feche o Claude Code e abra de novo.',
+    '  - Outro erro: digite /luke-voice status e mande o resultado para quem cuida do luke-voice.',
+  ]
+    .filter(line => line !== null)
+    .join('\n')
+}
+
 export const register: Register = (on, options) => {
   const opts = options as Record<string, unknown>
 
   on('session.start', async ($, e, next) => {
     const saved = await $.store.get('isOn')
     if (typeof saved === 'boolean') await update($, isOn, () => saved)
-    await $.command.register({ name: NAME, description: 'Voice coworker: on/off, call, end, window, status' })
+    await $.command.register({ name: NAME, description: 'Voice coworker: on/off, call, end, window, status, help' })
     // Redraw the pane while a task runs, so its elapsed time moves.
     $.clock.every(15_000, () => {
       void read($, running)
@@ -360,8 +433,11 @@ export const register: Register = (on, options) => {
         return { text: 'Call ended.' }
       case 'status':
         return { text: await statusText($) }
+      case 'help':
+      case 'ajuda':
+        return { text: await helpText($) }
       default:
-        return { text: 'Usage: /luke-voice [on|off|call|end|window|status]. With no argument it turns luke-voice on or off.' }
+        return { text: `Não conheço "${short(arg, 40)}". Use /luke-voice help para ver tudo que dá para fazer.` }
     }
   }).catch((_$, error) => ({ text: `luke-voice: ${error instanceof Error ? error.message : String(error)}` }))
 

@@ -1,38 +1,88 @@
 # luke-voice
 
-A voice coworker beside your Claude Code session. You talk things through with it on a call, and when you agree on something it writes the prompt and sends it to Claude for you. When Claude finishes, or waits on a permission, it tells you out loud.
+**Leia em português: [README.pt-BR.md](README.pt-BR.md)**
 
-An on/off button sits above the prompt (`✦ luke-voice: on` / `✦ luke-voice: off`). While it is off, nothing about the session leaves your machine.
+A voice assistant beside your Claude Code session, in Brazilian Portuguese. You say what you want, she repeats it and asks "posso?", and after your "sim" a Claude Code subagent does the task on your computer. When it finishes, she tells you the result out loud.
 
 > Not affiliated with ElevenLabs. luke-voice calls the public ElevenLabs API with your own key.
 
-## What it does
+## Install in 6 steps
 
-luke-voice speaks **Brazilian Portuguese** with a Brazilian female voice (ElevenLabs "Roberta"). Whatever you ask out loud runs on your machine in a **Claude Code subagent**: the agent repeats the task, waits for your "sim", starts the subagent in the background, and tells you the result when it finishes. The main chat stays free.
+Each step says how to know it worked. Do them in order.
 
-**Example:** say *"Verifica no repositório luke-voice onde o botão de ligar é desenhado."* The agent answers *"Vou procurar no repositório luke-voice onde o botão de ligar é desenhado. Posso?"*. Say *"sim"*. The window log shows "▶" with the task, and a little later the agent says where it is (`hooks/register.tsx`, in the footer render).
+### 1. Have Claude Code working
 
-- **Watches the session** while it is on: your prompts, Claude's tool calls and failures, final answers and permission waits reach the voice agent as context.
-- **Talks with you** in a small call window: an orb that follows the agent's voice, the list of connected sessions, and every prompt it sent.
-- **Sends prompts to Claude** with the `luke_send_to_claude` tool:
-  - Claude idle: a new turn starts.
-  - Claude busy, `now`: the prompt is added as a note to the running turn (queued if that is refused).
-  - Claude busy, `after_current`: the prompt is queued until the turn ends.
-- **Stops Claude** with `luke_stop_claude`, only when you ask.
-- **Many sessions, one call.** Each session that turns luke-voice on joins one local hub under a short name (`api`, `api-2`); the agent sends to the focused one unless you name another.
+Install it from [claude.com/claude-code](https://claude.com/claude-code), open it, and sign in once.
+**Done when:** you can type a message in Claude Code and get an answer.
 
-## Install
+### 2. Install Node.js 20 or newer
 
-**Easiest: use the installer.** It checks what you need, installs the mod, asks for your ElevenLabs key and tells you when it is done. Step-by-step guide: [INSTALL.md](INSTALL.md).
+Download the **LTS** version from [nodejs.org](https://nodejs.org) and install it with the default options. luke-voice uses it to run a small local server.
+**Done when:** `node -v` in a terminal prints `v20` or higher.
 
-- **Windows:** download [install-luke-voice-windows.cmd](https://github.com/lukeware-hub/luke-voice/releases/latest/download/install-luke-voice-windows.cmd) and double-click it.
+### 3. Have Google Chrome
+
+The call window opens in Chrome, in a profile of its own, so your normal Chrome does not change. Any browser with a microphone works if Chrome is missing, but then you may have to allow the microphone by hand.
+
+### 4. Get an ElevenLabs key
+
+1. Create a free account at [elevenlabs.io](https://elevenlabs.io).
+2. Open [elevenlabs.io/app/settings/api-keys](https://elevenlabs.io/app/settings/api-keys) and click **Create API key**. If it asks which permissions, keep **Agents** and **Voices** allowed (the simplest is a key with no limits).
+3. Copy the key. It is shown only once.
+
+The free plan gives about **15 minutes of calls per month**. Calls are billed to your account.
+
+### 5. Run the installer
+
+- **Windows:** download [install-luke-voice-windows.cmd](https://github.com/lukeware-hub/luke-voice/releases/latest/download/install-luke-voice-windows.cmd) and double-click it. If Windows says "Windows protected your PC", click **More info** and then **Run anyway**.
 - **macOS / Linux:** paste this in the Terminal:
 
   ```bash
   curl -fsSL https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/install.sh | bash
   ```
 
-You need Claude Code, Node.js 20+ and an [ElevenLabs API key](https://elevenlabs.io/app/settings/api-keys). The first call creates a voice agent named `luke-voice` in your ElevenLabs account, and calls are billed to that account.
+When it asks for the **Key**, paste the key from step 4 and press Enter (it stays hidden).
+**Done when:** it ends with the green message **Installation complete**. If it stops, read the **What to do** line, fix that one thing and run it again.
+
+### 6. Restart Claude Code, then turn it on
+
+1. **Close Claude Code completely and open it again.** `/reload-plugins` is not enough to load a new install or update.
+2. Above the prompt you see **✦ luke-voice: off**. Click it. It turns **on**, a window opens and the call starts by itself.
+3. The first call takes a few seconds more: luke-voice creates an agent named `luke-voice` and adds the voice "Roberta" to your ElevenLabs account.
+
+**Done when:** you hear "Oi! Estou aqui. O que vamos fazer?". If anything is missing, type `/luke-voice help`: it checks your setup and says what to fix.
+
+## Use
+
+Speak normally, in Portuguese. Example: *"Verifica no repositório luke-voice onde o botão de ligar é desenhado."* She repeats it and asks "posso?". Say "sim". The request shows in **Histórico** in the window, and she tells you the answer when the subagent finishes. The main chat stays free.
+
+| | |
+| --- | --- |
+| the **✦ luke-voice** button | turn it on (opens the window and starts the call) or off |
+| `/luke-voice` | the same as the button |
+| `/luke-voice call` | open the window and start the call |
+| `/luke-voice end` | hang up |
+| `/luke-voice window` | bring the window to the front |
+| `/luke-voice status` | technical status: hub, call, key, queue |
+| `/luke-voice help` | everything you need to know, plus a check of what is missing |
+
+It starts **off**, and remembers your choice. When Claude Code opens with it already on, it only reconnects: it never starts a call you did not ask for. **While it is on**, what happens in the session (your prompts and Claude's tool calls) is sent to your agent at ElevenLabs. **While it is off**, nothing leaves your computer.
+
+## If something does not work
+
+| What you see | What to do |
+| --- | --- |
+| You hear nothing | Check that Windows sound is on and that the window says **Em chamada**. |
+| "No ElevenLabs API key" or "Chave: faltando" | Save the key with `/plugin configure luke-voice@luke-voice` (or run the installer again), then restart Claude Code. |
+| The window says **Hub offline** | Turn luke-voice on in Claude Code; the window reconnects by itself. |
+| The call stopped connecting | Your free minutes for the month may be over. Check your usage at elevenlabs.io. |
+| The window still has the old look | Close Claude Code completely and open it again. |
+| Installer: "Claude Code was not found" or "Node.js was not found" | Do step 1 or step 2, then run the installer again. |
+| Anything else | Type `/luke-voice status` and send the result to whoever maintains luke-voice. |
+
+## Uninstall
+
+In Claude Code, type `/plugin`, choose **luke-voice** and **Uninstall**. Or run `claude plugin uninstall luke-voice@luke-voice`.
 
 <details>
 <summary>Manual install (for developers)</summary>
@@ -46,24 +96,6 @@ printf '{"api_key":"%s"}' "$ELEVENLABS_API_KEY" | claude plugin configure luke-v
 Or export `ELEVENLABS_API_KEY` before you start Claude Code. Then restart Claude Code.
 
 </details>
-
-## Use
-
-| | |
-| --- | --- |
-| the footer button | turn luke-voice on (opens the window and **starts the call**) or off |
-| `/luke-voice` | the same as the button |
-| `/luke-voice on` / `off` | set it explicitly |
-| `/luke-voice call` | turn it on, open the call window and start the call |
-| `/luke-voice window` | open or raise the call window, focus this session |
-| `/luke-voice end` | hang up |
-| `/luke-voice status` | hub, call, key and queue |
-
-It starts **off** on a fresh install. The choice is remembered across sessions. Turning it on starts the call right away, and the agent greets you. When Claude Code opens with luke-voice already on, it only reconnects: it never starts a call you did not ask for.
-
-The call window is a Chrome window with a profile of its own (`~/.luke-voice/chrome`) that only loads the luke-voice page. It is started with the microphone and sound allowed, so the call needs no extra click. Your own Chrome profile is not changed.
-
-**Off** means: this session leaves the hub, stops sending activity, drops prompts still queued for it, and closes its pane. When no session is left on the hub, the call ends. **On** joins the hub again.
 
 ## How it works
 

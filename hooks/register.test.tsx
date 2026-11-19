@@ -7,7 +7,7 @@ const run = (args: string) => ({ command: 'luke-voice', args, origin: { kind: 'c
 type Call = { method: string; path: string; body: Record<string, unknown> }
 
 // Stands for the engine and the hub: records each hub request and each submitted prompt.
-function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unknown }>> = [], after = { status: 410, body: {} as unknown }, envKey?: string) {
+function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unknown }>> = [], after = { status: 410, body: {} as unknown }, envKey?: string, health?: Record<string, unknown>) {
   const launches: unknown[] = []
   const calls: Call[] = []
   const sent: string[] = []
@@ -36,6 +36,7 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
     let status = 200
     let body: unknown = { ok: true }
     if (url.pathname === '/subscribe') body = { token: 'session-1', name: 'api', hasKey: true }
+    if (url.pathname === '/health' && health) body = health
     if (url.pathname === '/inbox') {
       const answer = inbox[polls++]
       ;({ status, body } = answer ? await answer() : after)
@@ -268,4 +269,33 @@ test('a stopped task is not reported; its later, finished run is reported once',
   const done = calls.filter(c => c.path === '/events').map(c => JSON.stringify(c.body)).filter(b => b.includes('task_done'))
   expect(done.length).toBe(1)
   expect(done[0]).toContain('Achei dois pontos.')
+})
+
+test('/luke-voice help says what is missing and teaches every step, in Portuguese', async ($, on) => {
+  engine(on)
+  on('fs.read', () => ({ value: '{"version":"9.9.9"}' }))
+
+  const help = (await $.command.run(run('help'))).text
+
+  expect(help).toContain('✗ luke-voice ligado')
+  expect(help).toContain('/plugin configure luke-voice@luke-voice')
+  expect(help).toContain('feche o Claude Code e abra de novo')
+  expect(help).toContain('/luke-voice help')
+  expect(help).toContain('Se algo não funcionar')
+  expect((await $.command.run(run('ajuda'))).text).toBe(help)
+})
+
+test('a running hub of another version is called out in help', async ($, on) => {
+  engine(on, [], undefined, undefined, { app: 'luke-voice', version: '0.4.2', hasKey: true })
+  on('fs.read', () => ({ value: '{"version":"0.7.0"}' }))
+
+  const help = (await $.command.run(run('help'))).text
+
+  expect(help).toContain('O hub é da versão 0.4.2, mas a instalada é 0.7.0')
+  expect(help).toContain('✓ Chave da ElevenLabs configurada')
+})
+
+test('an unknown argument points to help instead of a bare usage line', async ($, on) => {
+  engine(on)
+  expect((await $.command.run(run('xyz'))).text).toContain('/luke-voice help')
 })
