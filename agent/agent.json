@@ -1,5 +1,10 @@
 {
   "name": "luke-voice",
+  "library_voice": {
+    "voice_id": "RGymW84CSmfVugnA5tvA",
+    "public_owner_id": "4a19cd68f5f2e5172b5eddbfaafdb226726e0b4035e27e952df6bbac94b8aada",
+    "name": "Roberta - Smooth and Confident"
+  },
   "tools": [
     {
       "type": "client",

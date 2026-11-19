@@ -45,10 +45,22 @@ async function upsertTools(apiKey, tools) {
   return ids
 }
 
-function agentBody(def, prompt, toolIds) {
-  const { tools: _tools, ...rest } = def
+// A voice from the ElevenLabs library must be in the account before an agent can use it.
+// Returns the id the account knows it by: the library id, or the id it got when added.
+export async function ensureVoice(apiKey, voice, request = call) {
+  if (!voice?.voice_id || !voice.public_owner_id) return voice?.voice_id
+  const listed = await request(apiKey, 'GET', `/voices?search=${encodeURIComponent(voice.name)}`).catch(() => ({ voices: [] }))
+  const mine = (listed.voices ?? []).find(v => v.voice_id === voice.voice_id || v.sharing?.original_voice_id === voice.voice_id || v.name === voice.name)
+  if (mine) return mine.voice_id
+  const added = await request(apiKey, 'POST', `/voices/add/${voice.public_owner_id}/${voice.voice_id}`, { new_name: voice.name })
+  return added.voice_id ?? voice.voice_id
+}
+
+function agentBody(def, prompt, toolIds, voiceId) {
+  const { tools: _tools, library_voice: _voice, ...rest } = def
   const config = structuredClone(rest.conversation_config)
   config.agent.prompt = { ...config.agent.prompt, prompt, tool_ids: toolIds }
+  if (voiceId) config.tts = { ...config.tts, voice_id: voiceId }
   return { ...rest, conversation_config: config }
 }
 
@@ -78,7 +90,8 @@ export async function ensureAgent(apiKey, root, { log = () => {} } = {}) {
   if (saved?.id && saved.hash === hash && (await exists(apiKey, saved.id))) return saved.id
 
   const toolIds = await upsertTools(apiKey, def.tools ?? [])
-  const body = agentBody(def, prompt, toolIds)
+  const voiceId = await ensureVoice(apiKey, def.library_voice)
+  const body = agentBody(def, prompt, toolIds, voiceId)
   let id = saved?.id && (await exists(apiKey, saved.id)) ? saved.id : await findByName(apiKey, def.name)
 
   if (id) {
