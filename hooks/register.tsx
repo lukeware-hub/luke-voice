@@ -92,7 +92,11 @@ async function apiKey($: EngineInterface, options: Record<string, unknown>) {
 // Starts the hub when it is down and subscribes this session to it.
 async function subscribeOnce($: EngineInterface, options: Record<string, unknown>): Promise<boolean> {
   try {
-    const launched = await $.process.run(['node', `${$.plugin.root}/hub/launch.mjs`], { timeoutMs: 20_000 })
+    // The key goes to the launcher on stdin, so a hub it starts has it from the first call.
+    const launched = await $.process.run(['node', `${$.plugin.root}/hub/launch.mjs`], {
+      timeoutMs: 20_000,
+      stdin: JSON.stringify({ apiKey: await apiKey($, options) }),
+    })
     const out = JSON.parse(launched.stdout.trim().split('\n').pop() || '{}') as { ok?: boolean; serviceToken?: string; error?: string }
     if (!out.ok || !out.serviceToken) {
       await setLink($, { state: 'down', reason: out.error || launched.stderr.trim() || 'the hub did not start' })
