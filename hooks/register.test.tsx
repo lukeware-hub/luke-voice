@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Args, On } from 'claude-code'
 
-import { classifyTask, TIERS } from './register'
+import { classifyTask, preview, TIERS } from './register'
 
 const FOOTER = { plugin: 'luke-voice', component: 'SessionMode', props: { modes: [] } } as const
 const run = (args: string) => ({ command: 'luke-voice', args, origin: { kind: 'composer' } }) as Args<'command.run'>
@@ -281,18 +281,76 @@ test('a running task shows in "Agora" and moves to "Histórico" with its answer 
   await $.turn.start({ text: spawned[0] ?? '', turnId: 'x', agentId: 'agent-p' })
 
   let ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect((await ui.find({ type: 'Text', text: /procura o botão de ligar/ }))?.text).toContain('▶')
+  expect(await ui.find({ type: 'Text', text: /procura o botão de ligar/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '▶' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Nada em andamento/ })).toBeUndefined()
   await ui.unmount()
 
   await $.turn.complete({ answer: 'Fica no **rodapé** do mod.', durationMs: 1, isAborted: false, turnId: 'x', agentId: 'agent-p', reason: 'answer' })
   ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /Nada em andamento/ })).toBeDefined()
-  expect(await ui.find({ type: 'Markdown' })).toBeDefined()
+  // The answer starts collapsed: its first line, without Markdown marks.
+  expect(await ui.find({ type: 'Text', text: /Fica no rodapé do mod\./ })).toBeDefined()
   await ui.unmount()
 
   await $.command.run(run('off'))
   release()
+})
+
+test('pane rows start collapsed to one line and open to their full text', async ($, on) => {
+  const spawned: string[] = []
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  on('agent.spawn', (_, e) => (spawned.push(e.prompt), { model: 'test' }))
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => (release = resolve))
+  const { calls } = engine(on, [
+    async () => ({ status: 200, body: { commands: [{ id: 'p2', type: 'task', task: 'lista os repositórios' }] } }),
+    async () => (await held, { status: 410, body: {} }),
+  ])
+  const answer = `**Sete** repositórios.
+
+- prompt-master
+- luke-voice
+
+${'linha longa '.repeat(200)}fim-da-resposta`
+
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/ack'))
+  await $.turn.start({ text: spawned[0] ?? '', turnId: 'y', agentId: 'agent-q' })
+  await $.turn.complete({ answer, durationMs: 1, isAborted: false, turnId: 'y', agentId: 'agent-q', reason: 'answer' })
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  // Collapsed: a one-line preview with the Markdown marks dropped, no full body.
+  expect(await ui.find({ type: 'Markdown' })).toBeUndefined()
+  expect((await ui.find({ type: 'Text', text: /Sete repositórios\./ }))?.text).toContain('Sete repositórios.')
+
+  const rows = (await ui.findAll({ type: 'Button' })).filter(b => String(b.props.key ?? '').startsWith('row-h:'))
+  expect(rows.length).toBe(2)
+  const resultRow = rows[0]!
+  await ui.press({ key: String(resultRow.props.key) })
+  // Opened: the whole answer, formatted, nothing cut.
+  const body = await ui.find({ type: 'Markdown' })
+  expect(String(body?.props.text)).toContain('fim-da-resposta')
+  expect(String(body?.props.text)).toContain('- luke-voice')
+
+  await ui.press({ key: String(resultRow.props.key) })
+  expect(await ui.find({ type: 'Markdown' })).toBeUndefined()
+
+  await ui.press({ key: 'expand-all' })
+  expect(await ui.find({ type: 'Markdown' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^lista os repositórios$/ })).toBeDefined()
+  await ui.press({ key: 'collapse-all' })
+  expect(await ui.find({ type: 'Markdown' })).toBeUndefined()
+  await ui.unmount()
+
+  await $.command.run(run('off'))
+  release()
+})
+
+test('preview keeps the first line of a Markdown text, without its marks', () => {
+  expect(preview('\n## **Achei** o `bug`\nsegunda linha')).toBe('Achei o bug')
+  expect(preview('- item um\n- item dois')).toBe('item um')
 })
 
 test('a stopped task is not reported; its later, finished run is reported once', async ($, on) => {
