@@ -18,8 +18,9 @@ const lines = atom({ plugin: 'luke-voice', key: 'lines' } as const, [] as Line[]
 type Command =
   | { id: string; type: 'send'; prompt: string; when: 'now' | 'after_current' }
   | { id: string; type: 'stop' }
+  | { id: string; type: 'task'; task: string }
 
-type Activity = { kind: 'prompt' | 'tool' | 'failure' | 'done' | 'attention' | 'info'; text: string }
+type Activity = { kind: 'prompt' | 'tool' | 'failure' | 'done' | 'attention' | 'info' | 'task_done'; text: string }
 
 // The module's own state; a reload starts it over and the next poll subscribes again.
 let generation = 0
@@ -28,8 +29,22 @@ let subscribing: Promise<boolean> | null = null
 let isBusy = false
 let turnId: string | null = null
 let queued: string[] = []
+// Subagents started for voice tasks, by agent id: the task, to report with its result.
+const tasks = new Map<string, string>()
+// Spawned tasks whose agent id is not known yet, by the prompt their subagent starts with.
+const pendingTasks = new Map<string, string>()
 
 const short = (text: string, max = 300) => (text.length > max ? `${text.slice(0, max - 1)}…` : text)
+
+function frameTask(task: string) {
+  return [
+    'The user asked for this out loud, through luke-voice, their voice assistant, and confirmed it:',
+    '',
+    task,
+    '',
+    'Do it on this machine. End with a short answer in Brazilian Portuguese, two or three sentences that are easy to say out loud: what you found or changed, and anything that failed. No code blocks or long paths in that answer.',
+  ].join('\n')
+}
 
 function frame(prompt: string) {
   return `The user asked luke-voice, their voice assistant, to pass this on:\n\n${prompt}`
@@ -147,6 +162,27 @@ async function onCommand($: EngineInterface, command: Command) {
       return ack($, command.id, true, 'Stopped Claude.')
     } catch (error) {
       return ack($, command.id, false, `Could not stop Claude: ${error instanceof Error ? error.message : error}`)
+    }
+  }
+
+  if (command.type === 'task') {
+    try {
+      const prompt = frameTask(command.task)
+      pendingTasks.set(prompt, command.task)
+      const spawned = await $.agent.spawn({ prompt, description: 'luke-voice task' })
+      if (spawned.deny) {
+        pendingTasks.delete(prompt)
+        return ack($, command.id, false, `Could not start the task: ${spawned.deny}`)
+      }
+      // The id comes with the spawn, or with the subagent's turn.start (matched by its prompt).
+      if (spawned.agentId) {
+        pendingTasks.delete(prompt)
+        tasks.set(spawned.agentId, command.task)
+      }
+      await addLine($, { kind: 'task', text: command.task })
+      return ack($, command.id, true, 'Started. A Claude Code subagent is working on it; the result comes as [task done].')
+    } catch (error) {
+      return ack($, command.id, false, `Could not start the task: ${error instanceof Error ? error.message : error}`)
     }
   }
 
@@ -282,6 +318,11 @@ export const register: Register = (on, options) => {
   }).catch(($, e, next) => next(e))
 
   on('turn.start', async ($, e, next) => {
+    const pending = e.agentId !== undefined ? pendingTasks.get(e.text) : undefined
+    if (e.agentId !== undefined && pending !== undefined) {
+      pendingTasks.delete(e.text)
+      tasks.set(e.agentId, pending)
+    }
     if (e.agentId === undefined) {
       isBusy = true
       turnId = e.turnId
@@ -308,6 +349,13 @@ export const register: Register = (on, options) => {
 
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
+    const task = e.agentId !== undefined ? tasks.get(e.agentId) : undefined
+    if (e.agentId !== undefined && task !== undefined) {
+      tasks.delete(e.agentId)
+      const answer = e.isAborted ? 'The task was stopped.' : e.answer || 'Done, with no answer.'
+      report($, { kind: 'task_done', text: short(`Task: ${task}\nResult: ${answer}`, 1500) })
+      await addLine($, { kind: 'result', text: answer })
+    }
     if (e.agentId === undefined) {
       isBusy = false
       turnId = null
@@ -369,7 +417,7 @@ export const register: Register = (on, options) => {
         {list.length === 0 && <Text dimColor>Nothing sent to Claude yet.</Text>}
         {list.slice(-room).map(line => (
           <Text dimColor={line.kind === 'info'}>
-            {line.kind === 'sent' ? '→' : line.kind === 'queued' ? '⏳' : line.kind === 'note' ? '+' : line.kind === 'stop' ? '■' : '·'} {line.text}
+            {line.kind === 'sent' ? '→' : line.kind === 'queued' ? '⏳' : line.kind === 'note' ? '+' : line.kind === 'stop' ? '■' : line.kind === 'task' ? '▶' : line.kind === 'result' ? '✓' : '·'} {line.text}
           </Text>
         ))}
       </Box>

@@ -102,18 +102,29 @@ function speakWhenQuiet() {
   if (mode === 'speaking' || Date.now() - silentSince < SPEAK_AFTER_SILENCE_MS) return
   flushActivity()
   const text = pendingSpeech.splice(0).join('\n')
-  conversation.sendUserMessage(`[activity] ${text}\nTell me about this briefly.`)
+  conversation.sendUserMessage(`${text}\nConte isso em poucas palavras, em português.`)
 }
 
 function onActivity(session, events) {
   for (const event of events) {
-    const line = `session ${session}: ${event.kind}: ${event.text}`
-    if (event.kind === 'done' || event.kind === 'attention') pendingSpeech.push(line)
-    else pendingActivity.push(line)
+    const line = `[activity] session ${session}: ${event.kind}: ${event.text}`
+    if (event.kind === 'task_done') {
+      pendingSpeech.push(`[task done] ${event.text}`)
+      addLog(`✓ ${event.text.slice(0, 200)}`)
+    } else if (event.kind === 'done' || event.kind === 'attention') {
+      pendingSpeech.push(line)
+    } else {
+      pendingActivity.push(line)
+    }
   }
 }
 
 const clientTools = {
+  luke_run_task: async ({ task, session }) => {
+    const out = await hub('POST', '/command', { type: 'task', task, session: session || undefined }).catch(error => ({ ok: false, message: error.message }))
+    addLog(`▶ ${task}`, !out.ok)
+    return out.message || (out.ok ? 'Started.' : 'It did not start.')
+  },
   luke_send_to_claude: async ({ prompt, when, session }) => {
     const out = await hub('POST', '/command', { type: 'send', prompt, when, session: session || undefined }).catch(error => ({ ok: false, message: error.message }))
     addLog(`${session || focused}: ${prompt}`, !out.ok)
