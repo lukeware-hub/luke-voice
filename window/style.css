@@ -1214,6 +1214,38 @@ body[data-compact='true'] .ghost {
   }
 }
 
+/* Narrow and short windows (the old 420x660 app window): a smaller stage, so the
+   sessions show above the tab bar instead of behind it. */
+@media (max-width: 640px) and (max-height: 780px) {
+  .top {
+    min-height: 48px;
+  }
+
+  .orb {
+    --size: 112px;
+    margin: -22px 0 0;
+  }
+
+  .stage {
+    padding: 0 0 14px;
+  }
+
+  .headline {
+    font-size: 19px;
+  }
+
+  .controls {
+    margin-top: 16px;
+    gap: 10px;
+  }
+
+  .call,
+  .ghost {
+    height: 48px;
+    font-size: 15px;
+  }
+}
+
 @media (max-height: 760px) and (min-width: 641px) {
   .orb {
     --size: 150px;

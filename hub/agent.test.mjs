@@ -26,3 +26,13 @@ test('a library voice already in the account is not added again', async () => {
   assert.equal(await ensureVoice('k', VOICE, request), 'acct-9')
   assert.equal(asked.length, 1)
 })
+
+test('the agent definition shipped in agent/ parses and builds a request body', async () => {
+  const { readDefinition } = await import('./agent.mjs')
+  const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
+  const { def, prompt, hash } = await readDefinition(root)
+  assert.equal(def.name, 'luke-voice')
+  assert.ok(def.tools.some(tool => tool.name === 'luke_run_task'))
+  assert.ok(prompt.length > 100)
+  assert.match(hash, /^[0-9a-f]{16}$/)
+})
