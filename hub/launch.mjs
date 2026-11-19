@@ -5,7 +5,7 @@ import { existsSync, openSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { ORIGIN, stateFile } from './paths.mjs'
+import { ORIGIN, isOlderVersion, stateFile } from './paths.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const VERSION = JSON.parse(readFileSync(join(here, '..', '.claude-plugin', 'plugin.json'), 'utf8')).version
@@ -48,8 +48,9 @@ function done(out) {
 let up = await health()
 if (up === 'foreign') done({ ok: false, error: `Another program is using ${ORIGIN}.` })
 
-// A hub from another version of the plugin is replaced, so an update takes effect at once.
-if (up && up.version !== VERSION && existsSync(stateFile('hub.json'))) {
+// An older hub is replaced, so an update takes effect at once. A newer one is kept: a mod left
+// over from before an update must not take the hub back to its own, older version.
+if (up && isOlderVersion(up.version, VERSION) && existsSync(stateFile('hub.json'))) {
   const { serviceToken } = JSON.parse(readFileSync(stateFile('hub.json'), 'utf8'))
   await fetch(`${ORIGIN}/shutdown`, { method: 'POST', headers: { authorization: `Bearer ${serviceToken}` } }).catch(() => undefined)
   for (let i = 0; i < 25 && up; i++) {

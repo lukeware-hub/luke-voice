@@ -14,3 +14,14 @@ export function stateDir() {
 export function stateFile(name) {
   return join(stateDir(), name)
 }
+
+// True when version a is older than version b ("0.7.3" < "0.7.10"). Unknown versions are never older.
+export function isOlderVersion(a, b) {
+  const parse = v => String(v ?? '').split('.').map(n => Number.parseInt(n, 10))
+  const [x, y] = [parse(a), parse(b)]
+  if (x.some(Number.isNaN) || y.some(Number.isNaN)) return false
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) < (y[i] ?? 0)
+  }
+  return false
+}
