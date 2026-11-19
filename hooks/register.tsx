@@ -58,12 +58,17 @@ async function setLink($: EngineInterface, patch: Partial<Link>) {
   await refreshStatus($)
 }
 
+// The status line under the prompt only when something needs attention. Claude Code draws a
+// plugin's status as a pinned notice (yellow, with the plugin's name in front), so a line on
+// every healthy moment read as a warning; the footer button and the pane already show the state.
+export function statusLine(l: Link): string | undefined {
+  if (l.state === 'down') return `servidor local fora do ar${l.reason ? ` (${short(l.reason, 80)})` : ''} · /luke-voice help`
+  if (l.state === 'up' && l.reason === 'no ElevenLabs key') return 'falta a chave da ElevenLabs · /luke-voice help'
+  return undefined
+}
+
 async function refreshStatus($: EngineInterface) {
-  const l = await read($, link)
-  if (l.state === 'off') return $.ui.status(undefined)
-  if (l.state === 'connecting') return $.ui.status('✦ luke-voice: connecting…')
-  if (l.state === 'down') return $.ui.status(`✦ luke-voice: hub down${l.reason ? ` (${short(l.reason, 80)})` : ''}`)
-  $.ui.status(`✦ luke-voice: ${l.name} · ${isBusy ? 'Claude is working' : 'Claude is idle'} · /luke-voice call`)
+  $.ui.status(statusLine(await read($, link)))
 }
 
 async function addLine($: EngineInterface, line: Omit<Line, 'at'>) {

@@ -9,6 +9,7 @@ type Call = { method: string; path: string; body: Record<string, unknown> }
 // Stands for the engine and the hub: records each hub request and each submitted prompt.
 function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unknown }>> = [], after = { status: 410, body: {} as unknown }, envKey?: string, health?: Record<string, unknown>) {
   const launches: unknown[] = []
+  const statuses: unknown[] = []
   const calls: Call[] = []
   const sent: string[] = []
   const stored: unknown[] = []
@@ -23,7 +24,7 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
   on('ui.close', () => ({ value: undefined }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('process.run', (_, e) => (launches.push(e), { value: { exitCode: 0, stdout: '{"ok":true,"serviceToken":"svc"}\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
-  on('ui.status', () => ({ value: undefined }))
+  on('ui.status', (_, e) => (statuses.push(e.text), { value: undefined }))
   on('ui.toast', () => ({ value: undefined }))
   on('clock.sleep', () => ({ value: undefined }))
   on('clock.now', () => ({ value: 1_700_000_000_000 }))
@@ -44,7 +45,7 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
     return { value: { status, ok: status < 400, headers: {}, text: JSON.stringify(body) } }
   })
 
-  return { calls, sent, stored, launches }
+  return { calls, sent, stored, launches, statuses }
 }
 
 // The hooks answer in promise turns: yield until the check holds.
@@ -298,4 +299,19 @@ test('a running hub of another version is called out in help', async ($, on) => 
 test('an unknown argument points to help instead of a bare usage line', async ($, on) => {
   engine(on)
   expect((await $.command.run(run('xyz'))).text).toContain('/luke-voice help')
+})
+
+test('the status line under the prompt shows only when something needs attention', async ($, on) => {
+  const { statuses: shown, calls } = engine(on, [], { status: 200, body: { commands: [] } })
+
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/subscribe'))
+  await until(() => false)
+  await $.command.run(run('off'))
+
+  expect(shown.length).toBeGreaterThan(0)
+
+  // Connected and healthy: the line is cleared, never filled.
+  expect(JSON.stringify(shown)).not.toContain('Claude is')
+  expect(JSON.stringify(shown)).not.toContain('working')
 })
