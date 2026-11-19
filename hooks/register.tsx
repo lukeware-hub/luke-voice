@@ -16,7 +16,12 @@ const link = atom({ plugin: 'luke-voice', key: 'link' } as const, { state: 'off'
 const lines = atom({ plugin: 'luke-voice', key: 'lines' } as const, [] as Line[], { shape: 'lines-2' })
 const running = atom({ plugin: 'luke-voice', key: 'running' } as const, [] as Running[], { shape: 'running-1' })
 const lastTool = atom({ plugin: 'luke-voice', key: 'lastTool' } as const, null as LastTool, { shape: 'last-tool-1' })
+// The pane rows opened to their full text, by row id; the rest show one line.
+const expanded = atom({ plugin: 'luke-voice', key: 'expanded' } as const, [] as string[], { shape: 'expanded-1' })
 const MAX_LINES = 40
+// Long enough that an opened row shows a whole answer, not a cut one.
+const MAX_LINE_TEXT = 8000
+const MAX_TOOL_TEXT = 2000
 
 type Command =
   | { id: string; type: 'send'; prompt: string; when: 'now' | 'after_current' }
@@ -102,7 +107,7 @@ async function refreshStatus($: EngineInterface) {
 
 async function addLine($: EngineInterface, line: Omit<Line, 'at'>) {
   const at = await $.clock.now()
-  await update($, lines, list => [...list, { ...line, text: short(line.text, 1500), at }].slice(-MAX_LINES))
+  await update($, lines, list => [...list, { ...line, text: short(line.text, MAX_LINE_TEXT), at }].slice(-MAX_LINES))
 }
 
 async function startRunning($: EngineInterface, key: string, task: string) {
@@ -131,11 +136,21 @@ const MARKS: Record<string, { glyph: string; color?: string }> = {
   stop: { glyph: '■', color: 'error' },
   info: { glyph: '·' },
 }
+const markOf = (kind: string) => MARKS[kind] ?? { glyph: '·' }
 
-// Keeps the first lines of a Markdown answer, so a long result does not fill the pane.
-function clampLines(text: string, max: number) {
-  const all = text.trim().split('\n')
-  return all.length <= max ? text.trim() : `${all.slice(0, max).join('\n')}\n…`
+// A row's one-line preview: its first non-empty line, Markdown marks dropped.
+export function preview(text: string) {
+  const first = text.trim().split('\n').find(l => l.trim()) ?? ''
+  return first.replace(/^#+\s+|^[-*>]\s+/, '').replace(/[*_`]/g, '').trim()
+}
+
+// Ids for the pane's rows, so an opened row stays open across redraws and new rows.
+const historyId = (line: Line) => `h:${line.at}:${line.kind}`
+const runningId = (r: Running) => `r:${r.key}`
+const toolId = (tool: NonNullable<LastTool>) => `t:${tool.at}`
+
+async function toggleRow($: EngineInterface, id: string) {
+  await update($, expanded, ids => (ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id].slice(-200)))
 }
 
 function hhmm(at: number) {
@@ -526,8 +541,10 @@ export const register: Register = (on, options) => {
         const args = e as unknown as Record<string, unknown>
         const detail = [args.command, args.file_path, args.pattern, args.url].find(v => typeof v === 'string') as string | undefined
         const failed = 'deny' in result ? Boolean(result.deny) : Boolean(result.isError)
-        const text = short(`${e.tool}${detail ? ` ${detail}` : ''}`, 200)
-        report($, { kind: failed ? 'failure' : 'tool', text })
+        const full = `${e.tool}${detail ? ` ${detail}` : ''}`
+        report($, { kind: failed ? 'failure' : 'tool', text: short(full, 200) })
+        // The pane keeps more: an opened row shows the whole command.
+        const text = short(full, MAX_TOOL_TEXT)
         // The pane shows the last tool call; only failures go into its history.
         void $.clock
           .now()
@@ -606,12 +623,13 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text, Markdown } = $.ui.resolve(e)
+    const { Box, Text, Markdown, Button } = $.ui.resolve(e)
     const l = await read($, link)
     const list = await read($, lines)
     const now = await $.clock.now()
     const tasksNow = await read($, running)
     const tool = await read($, lastTool)
+    const open = new Set(await read($, expanded))
     const status =
       l.state === 'up'
         ? { color: 'success', text: `● conectado · ${l.name}` }
@@ -620,16 +638,44 @@ export const register: Register = (on, options) => {
           : l.state === 'down'
             ? { color: 'error', text: '● hub offline' }
             : { color: 'inactive', text: '○ desligado' }
-    // Rows left for history: header 3, "Agora" title + its rows + spacing, "Histórico" title.
-    const nowRows = Math.max(1, tasksNow.length) + (tool ? 1 : 0)
-    const room = Math.max(4, (e.viewport?.rows ?? 24) - 7 - nowRows)
-    const history: Line[] = []
-    let used = 0
-    for (const line of [...list].reverse()) {
-      const cost = line.kind === 'result' ? 7 : 3
-      if (used + cost > room && history.length > 0) break
-      history.push(line)
-      used += cost
+    // Every kept row is drawn, newest first; the pane scrolls when they do not fit.
+    const history = [...list].reverse()
+    const allIds = [...tasksNow.map(runningId), ...(tool ? [toolId(tool)] : []), ...history.map(historyId)]
+
+    // One row: a Button with the chevron, its mark and a one-line preview; opened, the full text under it.
+    type Row = { id: string; mark: { glyph: string; color?: string }; time?: string; side?: string; text: string; isMarkdown?: boolean; color?: string; dim?: boolean }
+    const row = (o: Row) => {
+      const isOpen = open.has(o.id)
+      return (
+        <Box key={o.id} flexDirection="column" marginBottom={isOpen ? 1 : 0}>
+          <Box justifyContent="space-between" gap={1}>
+            <Box flexShrink={1}>
+              <Button key={`row-${o.id}`} label={isOpen ? 'Recolher' : 'Expandir'} plain onPress={() => void toggleRow($, o.id)}>
+                <Text dimColor>{isOpen ? '▾ ' : '▸ '}</Text>
+                <Text color={o.mark.color} dimColor={o.mark.color === undefined}>
+                  {o.mark.glyph}
+                </Text>
+                <Text dimColor tabular>
+                  {o.time ? ` ${o.time}` : ''}
+                </Text>
+                <Text color={o.color} dimColor={o.dim} wrap="truncate-end">
+                  {isOpen ? '' : ` ${preview(o.text)}`}
+                </Text>
+              </Button>
+            </Box>
+            {o.side ? (
+              <Text dimColor tabular>
+                {o.side}
+              </Text>
+            ) : null}
+          </Box>
+          {isOpen ? (
+            <Box paddingLeft={2} flexDirection="column">
+              {o.isMarkdown ? <Markdown text={o.text.trim()} /> : <Text color={o.color} wrap="wrap">{o.text.trim()}</Text>}
+            </Box>
+          ) : null}
+        </Box>
+      )
     }
 
     return (
@@ -641,55 +687,24 @@ export const register: Register = (on, options) => {
           <Text color={status.color}>{status.text}</Text>
         </Box>
         <Text dimColor>{isBusy ? 'Claude trabalhando' : 'Claude ocioso'}{l.reason ? ` · ${l.reason}` : ''}</Text>
+        {allIds.length > 0 && (
+          <Box gap={2}>
+            <Button key="expand-all" label="▾ Expandir tudo" plain dimColor onPress={() => void update($, expanded, () => allIds)} />
+            <Button key="collapse-all" label="▸ Recolher tudo" plain dimColor onPress={() => void update($, expanded, () => [])} />
+          </Box>
+        )}
 
         <Box flexDirection="column" marginTop={1}>
           <Text bold>Agora</Text>
           {tasksNow.length === 0 && <Text dimColor>Nada em andamento</Text>}
-          {tasksNow.map(r => (
-            <Box key={r.key} justifyContent="space-between" gap={1}>
-              <Box flexShrink={1}>
-                <Text color="suggestion" wrap="truncate-end">
-                  ▶ {r.task}
-                </Text>
-              </Box>
-              <Text dimColor tabular>
-                {elapsed(r.startedAt, now)}
-              </Text>
-            </Box>
-          ))}
-          {tool && (
-            <Text dimColor wrap="truncate-end" color={tool.isFailed ? 'error' : undefined}>
-              {tool.isFailed ? '✗' : '·'} {tool.text}
-            </Text>
-          )}
+          {tasksNow.map(r => row({ id: runningId(r), mark: markOf('task'), side: elapsed(r.startedAt, now), text: r.task, color: 'suggestion' }))}
+          {tool && row({ id: toolId(tool), mark: markOf(tool.isFailed ? 'failure' : 'info'), text: tool.text, dim: !tool.isFailed, color: tool.isFailed ? 'error' : undefined })}
         </Box>
 
         <Box flexDirection="column" marginTop={1}>
           <Text bold>Histórico</Text>
           {history.length === 0 && <Text dimColor>Nada enviado ao Claude ainda.</Text>}
-          {history.map((line, i) => {
-            const mark = MARKS[line.kind] ?? { glyph: '·' }
-            return (
-              <Box key={`${line.at}-${i}`} marginBottom={1}>
-                <Box width={9} flexShrink={0}>
-                  <Text color={mark.color} dimColor={mark.color === undefined}>
-                    {mark.glyph}
-                  </Text>
-                  <Text dimColor tabular>
-                    {' '}
-                    {hhmm(line.at)}
-                  </Text>
-                </Box>
-                <Box flexGrow={1} flexShrink={1}>
-                  {line.kind === 'result' ? (
-                    <Markdown text={clampLines(line.text, 6)} />
-                  ) : (
-                    <Text wrap="truncate-end">{line.text}</Text>
-                  )}
-                </Box>
-              </Box>
-            )
-          })}
+          {history.map(line => row({ id: historyId(line), mark: markOf(line.kind), time: hhmm(line.at), text: line.text, isMarkdown: line.kind === 'result' }))}
         </Box>
       </Box>
     )

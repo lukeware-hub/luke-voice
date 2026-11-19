@@ -27,6 +27,8 @@ declare module 'claude-code' {
       lines: Shaped<Line[]>
       running: Shaped<Running[]>
       lastTool: Shaped<LastTool>
+      /** The pane rows opened to their full text, by row id. */
+      expanded: Shaped<string[]>
     }
   }
 }
