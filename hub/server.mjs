@@ -19,6 +19,7 @@ const STALE_SESSION_MS = 90_000
 
 const STATIC = {
   '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
+  '/guard.js': ['guard.js', 'text/javascript; charset=utf-8'],
   '/style.css': ['style.css', 'text/css; charset=utf-8'],
 }
 

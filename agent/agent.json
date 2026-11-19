@@ -9,7 +9,7 @@
     {
       "type": "client",
       "name": "luke_run_task",
-      "description": "Runs a task on the user's computer in a Claude Code subagent (read code, search a repository, run a command, change files). Call it only after you said the task back in one sentence and the user clearly said yes. Returns at once; the result arrives later as a [task done] message.",
+      "description": "Runs a task on the user's computer in a Claude Code subagent (read code, search a repository, run a command, change files). Call it only after you said the task back in one sentence and the user clearly said yes. Returns at once; the result arrives later in a [news] update, on a "task done:" line.",
       "expects_response": true,
       "response_timeout_secs": 20,
       "parameters": {

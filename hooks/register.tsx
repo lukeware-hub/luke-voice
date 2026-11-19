@@ -184,7 +184,7 @@ async function onCommand($: EngineInterface, command: Command) {
         tasks.set(spawned.agentId, command.task)
       }
       await addLine($, { kind: 'task', text: command.task })
-      return ack($, command.id, true, 'Started. A Claude Code subagent is working on it; the result comes as [task done].')
+      return ack($, command.id, true, 'Started. A Claude Code subagent is working on it; the result comes in a [news] update.')
     } catch (error) {
       return ack($, command.id, false, `Could not start the task: ${error instanceof Error ? error.message : error}`)
     }
