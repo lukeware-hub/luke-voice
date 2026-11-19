@@ -1,7 +1,18 @@
 // The call window: one voice call for every subscribed Claude session.
 // The ElevenLabs key never reaches this page; the hub hands it a per-call token.
 // The ElevenLabs client comes from a pinned CDN file that index.html loads with an integrity hash.
-import { NOTICE, REFUSED, createSpeechFilter, createVoiceGate, quoteUntrusted, safeKind } from '/guard.js'
+import {
+  NOTICE,
+  QUIET_NOTICE,
+  QUIET_OFF,
+  QUIET_ON,
+  REFUSED,
+  createQuietMode,
+  createSpeechFilter,
+  createVoiceGate,
+  quoteUntrusted,
+  safeKind,
+} from '/guard.js'
 
 const { Conversation } = window.ElevenLabsClient
 
@@ -102,6 +113,7 @@ let restoreRect = null
 let compactRect = null
 const gate = createVoiceGate()
 const speech = createSpeechFilter()
+const quiet = createQuietMode()
 
 async function hub(method, path, body) {
   const res = await fetch(path, {
@@ -312,7 +324,8 @@ function speakWhenQuiet() {
   // The news goes in as context, never as the user's words; the user message is fixed text.
   conversation.sendContextualUpdate(`[news]\n${quoteUntrusted(text)}`)
   gate.noticeSent()
-  conversation.sendUserMessage(NOTICE)
+  // In silent mode the agent only says it got a notification; the result waits as context.
+  conversation.sendUserMessage(quiet.on ? QUIET_NOTICE : NOTICE)
 }
 
 function onActivity(session, events) {
@@ -403,12 +416,19 @@ async function startCall() {
         mode = next
         if (callState === 'live') {
           setOrb(isMuted ? 'muted' : next === 'speaking' ? 'speaking' : 'listening')
-          ui.headline.textContent = next === 'speaking' ? 'Falando…' : STATES.live.headline
+          ui.headline.textContent = next === 'speaking' ? 'Falando…' : quiet.on ? 'Modo silêncio' : STATES.live.headline
         }
         if (next !== 'speaking') silentSince = Date.now()
       },
       onMessage: ({ source, message }) => {
-        if (source === 'user') gate.userSpoke(message)
+        if (source === 'user') {
+          gate.userSpoke(message)
+          const change = quiet.userSpoke(message)
+          if (change) {
+            conversation?.sendContextualUpdate(change === 'on' ? QUIET_ON : QUIET_OFF)
+            ui.headline.textContent = change === 'on' ? 'Modo silêncio' : STATES.live.headline
+          }
+        }
         if (source === 'ai') setCaption(message.replace(/\[[a-z ]+\]\s*/gi, ''), true)
       },
     })
@@ -424,6 +444,7 @@ async function endCall() {
   pendingActivity = []
   pendingSpeech = []
   speech.clear()
+  quiet.clear()
   await current?.endSession().catch(() => {})
   setCall('idle', 'Chamada encerrada. Toque em Chamar para falar de novo.')
 }

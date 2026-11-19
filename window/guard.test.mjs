@@ -1,7 +1,53 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { CLOSE, NOTICE, OPEN, createSpeechFilter, createVoiceGate, quoteUntrusted, safeKind } from './guard.js'
+import {
+  CLOSE,
+  NOTICE,
+  OPEN,
+  QUIET_NOTICE,
+  asksForSilence,
+  createQuietMode,
+  createSpeechFilter,
+  createVoiceGate,
+  quoteUntrusted,
+  safeKind,
+} from './guard.js'
+
+test('a short "silenciar" asks for silence; a long sentence that mentions it does not', () => {
+  assert.equal(asksForSilence('Silenciar.'), true)
+  assert.equal(asksForSilence('pode silenciar'), true)
+  assert.equal(asksForSilence('Modo silêncio!'), true)
+  assert.equal(asksForSilence('implementar o modo silêncio na luke-voice quando eu disser silenciar'), false)
+  assert.equal(asksForSilence('oi'), false)
+  assert.equal(asksForSilence(''), false)
+})
+
+test('silent mode turns on with "silenciar" and off when the user speaks again', () => {
+  const quiet = createQuietMode()
+  assert.equal(quiet.on, false)
+  assert.equal(quiet.userSpoke('oi'), null)
+  assert.equal(quiet.userSpoke('silenciar'), 'on')
+  assert.equal(quiet.on, true)
+  assert.equal(quiet.userSpoke('silenciar'), null, 'already on')
+  assert.equal(quiet.userSpoke(QUIET_NOTICE), null, 'the notice echoed back is not the user')
+  assert.equal(quiet.userSpoke(NOTICE), null)
+  assert.equal(quiet.on, true)
+  assert.equal(quiet.userSpoke('e aí, terminou?'), 'off')
+  assert.equal(quiet.on, false)
+  quiet.userSpoke('silenciar')
+  quiet.clear()
+  assert.equal(quiet.on, false)
+})
+
+test('the silent-mode notice does not open the tools either', () => {
+  let t = 0
+  const gate = createVoiceGate(() => ++t)
+  gate.userSpoke('faz isso')
+  gate.noticeSent()
+  gate.userSpoke(QUIET_NOTICE)
+  assert.equal(gate.allows(), false)
+})
 
 test('only finished work is said out loud, and only once', () => {
   const speech = createSpeechFilter()
