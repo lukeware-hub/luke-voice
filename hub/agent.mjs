@@ -106,6 +106,26 @@ export async function ensureAgent(apiKey, root, { log = () => {} } = {}) {
   return id
 }
 
+// The account's credits for the month: { used, limit, resetAt } or null when the key may not read it.
+export async function credits(apiKey, request = call) {
+  try {
+    const sub = await request(apiKey, 'GET', '/user/subscription')
+    if (typeof sub.character_count !== 'number' || typeof sub.character_limit !== 'number') return null
+    const reset = Number(sub.next_character_count_reset_unix)
+    return { used: sub.character_count, limit: sub.character_limit, resetAt: reset > 0 ? reset * 1000 : null }
+  } catch {
+    return null
+  }
+}
+
+// What the user reads when the month's credits are gone, in their language.
+export function outOfCreditsMessage({ used, limit, resetAt }) {
+  const when = resetAt
+    ? ` Eles voltam em ${new Date(resetAt).toLocaleDateString('pt-BR', { day: 'numeric', month: 'long' })}.`
+    : ''
+  return `Os créditos da ElevenLabs deste mês acabaram (${used.toLocaleString('pt-BR')} de ${limit.toLocaleString('pt-BR')}). Sem créditos, a ElevenLabs não inicia a chamada.${when} Para falar antes disso, assine um plano em elevenlabs.io/pricing.`
+}
+
 export async function conversationToken(apiKey, agentId) {
   const { token } = await call(apiKey, 'GET', `/convai/conversation/token?agent_id=${encodeURIComponent(agentId)}`)
   return token

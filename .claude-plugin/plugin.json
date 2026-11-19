@@ -1,6 +1,6 @@
 {
   "name": "luke-voice",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "A voice coworker beside your Claude Code session: talk it through, and it sends the prompt to Claude. On/off button above the prompt.",
   "author": { "name": "lukeware-hub" },
   "license": "MIT",

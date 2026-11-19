@@ -10,6 +10,7 @@ const KEY = params.get('k') ?? ''
 const SPEAK_AFTER_SILENCE_MS = 1500
 const ACTIVITY_FLUSH_MS = 3000
 const MIC_TIMEOUT_MS = 10_000
+const EARLY_DROP_MS = 4000
 const MAX_ENTRIES = 60
 const RECENT = 3
 const COMPACT_SIZE = [380, 560]
@@ -95,6 +96,7 @@ let focused = null
 let pendingActivity = []
 let pendingSpeech = []
 let silentSince = Date.now()
+let connectedAt = 0
 let entries = 0
 let restoreRect = null
 let compactRect = null
@@ -376,13 +378,21 @@ async function startCall() {
       connectionType: 'webrtc',
       clientTools,
       onConnect: async () => {
+        connectedAt = Date.now()
         window.focus()
         setCall('live')
         const snapshot = await hub('GET', '/activity').catch(() => ({ text: '' }))
         conversation?.sendContextualUpdate(`${sessionsLine()}\n[activity]\n${quoteUntrusted(snapshot.text)}`)
       },
-      onDisconnect: () => {
+      onDisconnect: details => {
+        const wasEnded = conversation === null
         conversation = null
+        // A call the agent drops in its first seconds never really started: say so, with the reason.
+        if (!wasEnded && Date.now() - connectedAt < EARLY_DROP_MS) {
+          const reason = details?.message || details?.reason || ''
+          setCall('error', `A ElevenLabs encerrou a chamada logo no início${reason && reason !== 'agent' ? `: ${reason}` : ''}. Veja os créditos da sua conta em elevenlabs.io e tente de novo.`)
+          return
+        }
         setCall('idle', 'Chamada encerrada. Toque em Chamar para falar de novo.')
       },
       onError: message => setCall('error', `Erro na chamada: ${message}`),

@@ -36,3 +36,18 @@ test('the agent definition shipped in agent/ parses and builds a request body', 
   assert.ok(prompt.length > 100)
   assert.match(hash, /^[0-9a-f]{16}$/)
 })
+
+test('credits reads the month quota, and a key that cannot read it gives null', async () => {
+  const { credits } = await import('./agent.mjs')
+  const left = await credits('k', async () => ({ character_count: 10000, character_limit: 10000, next_character_count_reset_unix: 1767225600 }))
+  assert.deepEqual(left, { used: 10000, limit: 10000, resetAt: 1767225600000 })
+  assert.equal(await credits('k', async () => Promise.reject(Object.assign(new Error('forbidden'), { status: 403 }))), null)
+})
+
+test('the out-of-credits message says how many were used, when they come back and what to do', async () => {
+  const { outOfCreditsMessage } = await import('./agent.mjs')
+  const text = outOfCreditsMessage({ used: 10000, limit: 10000, resetAt: Date.UTC(2026, 11, 1, 12) })
+  assert.match(text, /acabaram \(10\.000 de 10\.000\)/)
+  assert.match(text, /voltam em 1 de dezembro/)
+  assert.match(text, /elevenlabs\.io\/pricing/)
+})
