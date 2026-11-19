@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>luke-voice</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <span class="brand">luke-voice</span>
+        <span id="status" class="status">offline</span>
+      </header>
+
+      <section class="stage">
+        <div id="orb" class="orb" aria-hidden="true">
+          <div class="ring"></div>
+          <div class="core"></div>
+        </div>
+        <p id="caption" class="caption">Press Call and talk it through. When you agree, I send the prompt to Claude.</p>
+      </section>
+
+      <div class="controls">
+        <button id="callButton" class="primary" type="button">Call</button>
+        <button id="muteButton" type="button" disabled>Mute</button>
+      </div>
+
+      <section class="sessions">
+        <h2>Sessions</h2>
+        <ul id="sessions"></ul>
+      </section>
+
+      <section class="log">
+        <h2>Sent to Claude</h2>
+        <ol id="log"></ol>
+      </section>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

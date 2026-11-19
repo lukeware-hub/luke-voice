@@ -1,0 +1,88 @@
+{
+  "name": "luke-voice",
+  "tools": [
+    {
+      "type": "client",
+      "name": "luke_send_to_claude",
+      "description": "Send a prompt to Claude Code. Use it only after the user agreed on what to ask. Write the prompt as a clear, complete instruction for Claude.",
+      "expects_response": true,
+      "response_timeout_secs": 20,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "prompt",
+          "when"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "The full prompt for Claude, in the user's language."
+          },
+          "when": {
+            "type": "string",
+            "enum": [
+              "now",
+              "after_current"
+            ],
+            "description": "now: start it, or add it as a note to the running turn. after_current: queue it until Claude is done."
+          },
+          "session": {
+            "type": "string",
+            "description": "The short name of the session to send to. Leave empty for the focused one."
+          }
+        }
+      }
+    },
+    {
+      "type": "client",
+      "name": "luke_stop_claude",
+      "description": "Stop Claude's running turn. Use it only when the user explicitly asks to stop.",
+      "expects_response": true,
+      "response_timeout_secs": 10,
+      "parameters": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "session": {
+            "type": "string",
+            "description": "The short name of the session. Leave empty for the focused one."
+          }
+        }
+      }
+    },
+    {
+      "type": "client",
+      "name": "luke_session_activity",
+      "description": "Read the latest activity of a Claude session: prompts, tool calls, failures and answers.",
+      "expects_response": true,
+      "response_timeout_secs": 10,
+      "parameters": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "session": {
+            "type": "string",
+            "description": "The short name of the session. Leave empty for the focused one."
+          }
+        }
+      }
+    }
+  ],
+  "conversation_config": {
+    "agent": {
+      "first_message": "Hey, I'm here. What are we working on?",
+      "language": "en",
+      "prompt": {
+        "llm": "gemini-2.5-flash"
+      }
+    },
+    "tts": {
+      "voice_id": "21m00Tcm4TlvDq8ikWAM"
+    }
+  },
+  "platform_settings": {
+    "auth": {
+      "enable_auth": true
+    }
+  }
+}
