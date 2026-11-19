@@ -150,3 +150,16 @@ test('a voice task reaches the named session, and an empty task is refused', asy
   assert.deepEqual((await started).body, { ok: true, message: 'Started.' })
   await call('POST', '/unsubscribe', { auth: s1.token })
 })
+
+test('the window font is served locally as font/woff2', async () => {
+  const res = await new Promise((resolve, reject) => {
+    const req = request({ host: '127.0.0.1', port, path: '/fonts/schibsted-grotesk-latin-wght-normal.woff2', headers: { host: `127.0.0.1:${port}` } }, r => {
+      r.resume()
+      r.on('end', () => resolve(r))
+    })
+    req.on('error', reject)
+    req.end()
+  })
+  assert.equal(res.statusCode, 200)
+  assert.equal(res.headers['content-type'], 'font/woff2')
+})

@@ -26,6 +26,8 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
   on('ui.status', () => ({ value: undefined }))
   on('ui.toast', () => ({ value: undefined }))
   on('clock.sleep', () => ({ value: undefined }))
+  on('clock.now', () => ({ value: 1_700_000_000_000 }))
+  on('clock.every', () => ({ value: undefined }))
   on('prompt.submit', (_, e) => (sent.push(e.text), { text: e.text }))
   on('http.fetch', async (_, e) => {
     const url = new URL(e.url)
@@ -206,4 +208,64 @@ test('the launcher gets the API key on stdin, so a hub it starts has it from the
 
   expect(JSON.stringify(launches[0])).toContain('key-from-env')
   expect(JSON.stringify(launches[0])).not.toContain('"argv":["node","key')
+})
+
+const PANE = { plugin: 'luke-voice', component: 'Pane', requestId: 'luke-voice', props: { title: 'luke-voice', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} } } as const
+
+test('a running task shows in "Agora" and moves to "Histórico" with its answer when it finishes', async ($, on) => {
+  const spawned: string[] = []
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  on('agent.spawn', (_, e) => (spawned.push(e.prompt), { model: 'test' }))
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => (release = resolve))
+  const { calls } = engine(on, [
+    async () => ({ status: 200, body: { commands: [{ id: 'p1', type: 'task', task: 'procura o botão de ligar' }] } }),
+    async () => (await held, { status: 410, body: {} }),
+  ])
+
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/ack'))
+  await $.turn.start({ text: spawned[0] ?? '', turnId: 'x', agentId: 'agent-p' })
+
+  let ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /procura o botão de ligar/ }))?.text).toContain('▶')
+  expect(await ui.find({ type: 'Text', text: /Nada em andamento/ })).toBeUndefined()
+  await ui.unmount()
+
+  await $.turn.complete({ answer: 'Fica no **rodapé** do mod.', durationMs: 1, isAborted: false, turnId: 'x', agentId: 'agent-p', reason: 'answer' })
+  ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /Nada em andamento/ })).toBeDefined()
+  expect(await ui.find({ type: 'Markdown' })).toBeDefined()
+  await ui.unmount()
+
+  await $.command.run(run('off'))
+  release()
+})
+
+test('a stopped task is not reported; its later, finished run is reported once', async ($, on) => {
+  const spawned: string[] = []
+  on('agent.spawn', (_, e) => (spawned.push(e.prompt), { model: 'test' }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => (release = resolve))
+  const { calls } = engine(on, [
+    async () => ({ status: 200, body: { commands: [{ id: 's1', type: 'task', task: 'analisa o repo' }] } }),
+    async () => (await held, { status: 410, body: {} }),
+  ])
+
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/ack'))
+  await $.turn.start({ text: spawned[0] ?? '', turnId: 'a', agentId: 'agent-s' })
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: true, turnId: 'a', agentId: 'agent-s', reason: 'aborted' })
+  await $.turn.start({ text: 'continua', turnId: 'b', agentId: 'agent-s' })
+  await $.turn.complete({ answer: 'Achei dois pontos.', durationMs: 1, isAborted: false, turnId: 'b', agentId: 'agent-s', reason: 'answer' })
+  await until(() => calls.some(c => c.path === '/events' && JSON.stringify(c.body).includes('task_done')))
+  await $.command.run(run('off'))
+  release()
+
+  const done = calls.filter(c => c.path === '/events').map(c => JSON.stringify(c.body)).filter(b => b.includes('task_done'))
+  expect(done.length).toBe(1)
+  expect(done[0]).toContain('Achei dois pontos.')
 })
