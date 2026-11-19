@@ -7,7 +7,7 @@ const run = (args: string) => ({ command: 'luke-voice', args, origin: { kind: 'c
 type Call = { method: string; path: string; body: Record<string, unknown> }
 
 // Stands for the engine and the hub: records each hub request and each submitted prompt.
-function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unknown }>> = []) {
+function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unknown }>> = [], after = { status: 410, body: {} as unknown }) {
   const calls: Call[] = []
   const sent: string[] = []
   const stored: unknown[] = []
@@ -16,6 +16,7 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
   on('command.register', (_, e) => ({ value: { command: e.name } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: '/repos/api' }))
+  on('session.id', () => ({ value: 'claude-session-1' }))
   on('env.get', () => ({ value: undefined }))
   on('store.set', (_, e) => (stored.push(e.value), { value: undefined }))
   on('ui.close', () => ({ value: undefined }))
@@ -34,7 +35,7 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
     if (url.pathname === '/subscribe') body = { token: 'session-1', name: 'api', hasKey: true }
     if (url.pathname === '/inbox') {
       const answer = inbox[polls++]
-      ;({ status, body } = answer ? await answer() : { status: 410, body: {} })
+      ;({ status, body } = answer ? await answer() : after)
     }
     return { value: { status, ok: status < 400, headers: {}, text: JSON.stringify(body) } }
   })
@@ -110,4 +111,39 @@ test('a stored on reconnects at session start', async ($, on) => {
   await $.command.run(run('off'))
 
   expect(calls.some(c => c.path === '/subscribe')).toBe(true)
+})
+
+test('turning it on starts the call; a stored on at session start only connects', async ($, on) => {
+  const { calls } = engine(on)
+
+  await $.command.run(run(''))
+  await until(() => calls.some(c => c.path === '/show'))
+  await $.command.run(run('off'))
+
+  expect(calls.find(c => c.path === '/subscribe')?.body.sessionId).toBe('claude-session-1')
+  expect(calls.find(c => c.path === '/show')?.body).toEqual({ call: true })
+})
+
+test('a stored on at session start does not start a call', async ($, on) => {
+  on('store.get', () => ({ value: true }))
+  const { calls } = engine(on)
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await until(() => calls.some(c => c.path === '/subscribe'))
+  await until(() => false)
+  await $.command.run(run('off'))
+
+  expect(calls.some(c => c.path === '/show')).toBe(false)
+})
+
+test('a poll answered 409 (a reload took over) ends the loop without subscribing again', async ($, on) => {
+  const { calls } = engine(on, [async () => ({ status: 409, body: { error: 'replaced' } })], { status: 200, body: { commands: [] } })
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.command.run(run('window'))
+  await until(() => calls.filter(c => c.path === '/inbox').length >= 1)
+  await until(() => false)
+
+  expect(calls.filter(c => c.path === '/subscribe').length).toBe(1)
+  expect(calls.filter(c => c.path === '/inbox').length).toBe(1)
 })

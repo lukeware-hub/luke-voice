@@ -6,6 +6,7 @@ const params = new URLSearchParams(location.search)
 const KEY = params.get('k') ?? ''
 const SPEAK_AFTER_SILENCE_MS = 1500
 const ACTIVITY_FLUSH_MS = 3000
+const MIC_TIMEOUT_MS = 10_000
 
 const $ = id => document.getElementById(id)
 const ui = {
@@ -129,17 +130,28 @@ const clientTools = {
   },
 }
 
+// The microphone, or a clear error instead of a call stuck at "connecting".
+async function microphone() {
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Microphone not available: allow it for this window and press Call.')), MIC_TIMEOUT_MS),
+  )
+  const stream = await Promise.race([navigator.mediaDevices.getUserMedia({ audio: true }), timeout])
+  for (const track of stream.getTracks()) track.stop()
+}
+
 async function startCall() {
   if (conversation || callState === 'connecting') return
   setCall('connecting', 'Connecting…')
   try {
-    await navigator.mediaDevices.getUserMedia({ audio: true })
+    // The token first: it also sets up the agent, and its errors say what is missing.
     const { token } = await hub('POST', '/token')
+    await microphone()
     conversation = await Conversation.startSession({
       conversationToken: token,
       connectionType: 'webrtc',
       clientTools,
       onConnect: async () => {
+        window.focus()
         setCall('live', 'Listening. Talk it through.')
         const snapshot = await hub('GET', '/activity').catch(() => ({ text: '' }))
         conversation?.sendContextualUpdate(`${sessionsLine()}\n${snapshot.text}`)

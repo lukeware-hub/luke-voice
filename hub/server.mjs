@@ -51,19 +51,33 @@ function chromePath() {
   return candidates.find(path => existsSync(path)) ?? null
 }
 
-// A Chrome app window with its own profile, so the mic grant sticks; else the default browser.
+// The Chrome app window runs in a profile of its own that only ever loads this page, so it can
+// allow the microphone and play the agent's voice without a prompt or a click.
+export function chromeArgs(url, profile) {
+  return [
+    `--app=${url}`,
+    `--user-data-dir=${profile}`,
+    '--window-size=420,660',
+    '--no-first-run',
+    '--use-fake-ui-for-media-stream',
+    '--autoplay-policy=no-user-gesture-required',
+  ]
+}
+
+// A Chrome app window; else the default browser.
 export function openWindow(url) {
   const chrome = chromePath()
   const [cmd, args] = chrome
-    ? [chrome, [`--app=${url}`, `--user-data-dir=${join(stateDir(), 'chrome')}`, '--window-size=420,660', '--no-first-run']]
+    ? [chrome, chromeArgs(url, join(stateDir(), 'chrome'))]
     : process.platform === 'win32'
       ? ['cmd', ['/c', 'start', '', url]]
       : [process.platform === 'darwin' ? 'open' : 'xdg-open', [url]]
   spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true }).unref()
 }
 
-export function createHub({ serviceToken, windowKey, apiKey = '', root = ROOT, open = openWindow, log = () => {} }) {
+export function createHub({ serviceToken, windowKey, apiKey = '', root = ROOT, open = openWindow, log = () => {}, onShutdown = () => process.exit(0) }) {
   const sessions = new Map() // token -> session
+  const replaced = new Set() // tokens a newer subscription of the same Claude session took over
   const streams = new Set() // window SSE responses
   const acks = new Map() // command id -> resolve
   let focused = null
@@ -156,6 +170,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', root = ROOT, o
         })
       }
       session.seenAt = Date.now()
+      if (replaced.has(session.token)) return [409, { error: 'replaced' }]
       if (!sessions.has(session.token)) return [410, { error: 'unsubscribed' }]
       return [200, { commands: session.inbox.splice(0), call, isFocused: focused === session.name }]
     },
@@ -261,16 +276,32 @@ export function createHub({ serviceToken, windowKey, apiKey = '', root = ROOT, o
         const body = await readBody(req)
         if (!key && typeof body.apiKey === 'string' && body.apiKey.trim()) key = body.apiKey.trim()
         const token = newSecret()
-        const session = { token, name: uniqueName(body.cwd), cwd: String(body.cwd ?? ''), inbox: [], waiters: [], activity: [], isBusy: false, needsYou: false, seenAt: Date.now() }
+        const sessionId = typeof body.sessionId === 'string' ? body.sessionId.slice(0, 200) : ''
+        // A reloaded mod subscribes again from the same Claude session: it takes over the old row.
+        const previous = sessionId ? [...sessions.values()].find(s => s.sessionId === sessionId) : undefined
+        if (previous) {
+          sessions.delete(previous.token)
+          replaced.add(previous.token)
+          wake(previous)
+        }
+        const session = { token, sessionId, name: previous?.name ?? uniqueName(body.cwd), cwd: String(body.cwd ?? ''), inbox: [], waiters: [], activity: [], isBusy: false, needsYou: false, seenAt: Date.now() }
         sessions.set(token, session)
         focused ??= session.name
         sendRoster()
         return send(res, 200, { token, name: session.name, hasKey: Boolean(key) })
       }
 
+      if (route === 'POST /shutdown') {
+        if (!sameSecret(bearer, serviceToken)) return send(res, 401, { error: 'token' })
+        broadcast({ type: 'end' })
+        send(res, 200, { ok: true })
+        setTimeout(onShutdown, 100)
+        return
+      }
+
       if (sessionRoutes[route]) {
         const session = sessions.get(bearer)
-        if (!session) return send(res, 401, { error: 'session' })
+        if (!session) return send(res, replaced.has(bearer) ? 409 : 401, { error: replaced.has(bearer) ? 'replaced' : 'session' })
         const body = req.method === 'POST' ? await readBody(req) : {}
         const [status, out] = await sessionRoutes[route](session, body, url)
         return send(res, status, out)

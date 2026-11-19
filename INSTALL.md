@@ -44,7 +44,7 @@ Then:
 
 1. Close Claude Code and open it again.
 2. Above the prompt you now see the button **✦ luke-voice: off**. Click it, and it changes to **✦ luke-voice: on**.
-3. Type `/luke-voice call` and press Enter. A small window opens. Allow the microphone, and start talking.
+3. A small window opens and the call starts by itself. The assistant says hello. Start talking.
 
 If you see **Installation stopped**, read the **What to do** line under it, fix that one thing, and run the installer again. Running it again is always safe: it keeps what is already installed and only finishes what is missing.
 
