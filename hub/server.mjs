@@ -75,7 +75,8 @@ export function openWindow(url) {
     : process.platform === 'win32'
       ? ['cmd', ['/c', 'start', '', url]]
       : [process.platform === 'darwin' ? 'open' : 'xdg-open', [url]]
-  spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true }).unref()
+  // windowsHide only for cmd: Chrome opens its first window with the hidden show flag it is given.
+  spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: cmd === 'cmd' }).unref()
 }
 
 export function createHub({ serviceToken, windowKey, apiKey = '', root = ROOT, open = openWindow, log = () => {}, onShutdown = () => process.exit(0) }) {
