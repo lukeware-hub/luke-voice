@@ -11,6 +11,25 @@ const here = dirname(fileURLToPath(import.meta.url))
 const VERSION = JSON.parse(readFileSync(join(here, '..', '.claude-plugin', 'plugin.json'), 'utf8')).version
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
+// The mod sends { apiKey } on stdin. Read it with a short limit: a terminal, or an empty
+// stdin, gives nothing.
+async function readStdinKey() {
+  if (process.stdin.isTTY) return ''
+  const chunks = []
+  const read = (async () => {
+    for await (const chunk of process.stdin) chunks.push(chunk)
+  })()
+  await Promise.race([read, sleep(1000)])
+  try {
+    const key = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}').apiKey
+    return typeof key === 'string' ? key.trim() : ''
+  } catch {
+    return ''
+  }
+}
+const stdinKey = await readStdinKey()
+process.stdin.destroy()
+
 async function health() {
   try {
     const res = await fetch(`${ORIGIN}/health`, { signal: AbortSignal.timeout(1500) })
@@ -46,7 +65,7 @@ if (!up) {
     detached: true,
     stdio: ['ignore', logFd, logFd],
     windowsHide: true,
-    env: process.env,
+    env: stdinKey ? { ...process.env, ELEVENLABS_API_KEY: stdinKey } : process.env,
   }).unref()
   for (let i = 0; i < 40 && !up; i++) {
     await sleep(200)

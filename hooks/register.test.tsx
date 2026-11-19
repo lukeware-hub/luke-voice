@@ -7,7 +7,8 @@ const run = (args: string) => ({ command: 'luke-voice', args, origin: { kind: 'c
 type Call = { method: string; path: string; body: Record<string, unknown> }
 
 // Stands for the engine and the hub: records each hub request and each submitted prompt.
-function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unknown }>> = [], after = { status: 410, body: {} as unknown }) {
+function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unknown }>> = [], after = { status: 410, body: {} as unknown }, envKey?: string) {
+  const launches: unknown[] = []
   const calls: Call[] = []
   const sent: string[] = []
   const stored: unknown[] = []
@@ -17,11 +18,11 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: '/repos/api' }))
   on('session.id', () => ({ value: 'claude-session-1' }))
-  on('env.get', () => ({ value: undefined }))
+  on('env.get', (_, e) => ({ value: e.name === 'ELEVENLABS_API_KEY' ? envKey : undefined }))
   on('store.set', (_, e) => (stored.push(e.value), { value: undefined }))
   on('ui.close', () => ({ value: undefined }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
-  on('process.run', () => ({ value: { exitCode: 0, stdout: '{"ok":true,"serviceToken":"svc"}\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('process.run', (_, e) => (launches.push(e), { value: { exitCode: 0, stdout: '{"ok":true,"serviceToken":"svc"}\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
   on('ui.status', () => ({ value: undefined }))
   on('ui.toast', () => ({ value: undefined }))
   on('clock.sleep', () => ({ value: undefined }))
@@ -40,7 +41,7 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
     return { value: { status, ok: status < 400, headers: {}, text: JSON.stringify(body) } }
   })
 
-  return { calls, sent, stored }
+  return { calls, sent, stored, launches }
 }
 
 // The hooks answer in promise turns: yield until the check holds.
@@ -194,4 +195,15 @@ test('a refused subagent spawn acks the task as failed', async ($, on) => {
   const ack = calls.find(c => c.path === '/ack')?.body
   expect(ack?.ok).toBe(false)
   expect(String(ack?.message)).toContain('agent limit')
+})
+
+test('the launcher gets the API key on stdin, so a hub it starts has it from the first call', async ($, on) => {
+  const { calls, launches } = engine(on, [], { status: 410, body: {} }, 'key-from-env')
+
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/subscribe'))
+  await $.command.run(run('off'))
+
+  expect(JSON.stringify(launches[0])).toContain('key-from-env')
+  expect(JSON.stringify(launches[0])).not.toContain('"argv":["node","key')
 })
