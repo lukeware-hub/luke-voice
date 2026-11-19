@@ -21,6 +21,8 @@ const STATIC = {
   '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
   '/guard.js': ['guard.js', 'text/javascript; charset=utf-8'],
   '/style.css': ['style.css', 'text/css; charset=utf-8'],
+  '/fonts/schibsted-grotesk-latin-wght-normal.woff2': ['fonts/schibsted-grotesk-latin-wght-normal.woff2', 'font/woff2'],
+  '/fonts/schibsted-grotesk-latin-ext-wght-normal.woff2': ['fonts/schibsted-grotesk-latin-ext-wght-normal.woff2', 'font/woff2'],
 }
 
 const newSecret = () => randomBytes(24).toString('base64url')

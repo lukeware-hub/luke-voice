@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Line, Link } from '../types'
+import type { LastTool, Line, Link, Running } from '../types'
 
 const NAME = 'luke-voice'
 const HUB = 'http://127.0.0.1:4848'
@@ -13,7 +13,10 @@ const RETRY_MS = 3_000
 const isOn = atom({ plugin: 'luke-voice', key: 'isOn' } as const, false)
 // Change a tag when that value's fields change: it declines what an earlier version stored.
 const link = atom({ plugin: 'luke-voice', key: 'link' } as const, { state: 'off', name: null, reason: null } as Link, { shape: 'link-1' })
-const lines = atom({ plugin: 'luke-voice', key: 'lines' } as const, [] as Line[], { shape: 'lines-1' })
+const lines = atom({ plugin: 'luke-voice', key: 'lines' } as const, [] as Line[], { shape: 'lines-2' })
+const running = atom({ plugin: 'luke-voice', key: 'running' } as const, [] as Running[], { shape: 'running-1' })
+const lastTool = atom({ plugin: 'luke-voice', key: 'lastTool' } as const, null as LastTool, { shape: 'last-tool-1' })
+const MAX_LINES = 40
 
 type Command =
   | { id: string; type: 'send'; prompt: string; when: 'now' | 'after_current' }
@@ -63,8 +66,47 @@ async function refreshStatus($: EngineInterface) {
   $.ui.status(`✦ luke-voice: ${l.name} · ${isBusy ? 'Claude is working' : 'Claude is idle'} · /luke-voice call`)
 }
 
-async function addLine($: EngineInterface, line: Line) {
-  await update($, lines, list => [...list, { ...line, text: short(line.text, 400) }].slice(-30))
+async function addLine($: EngineInterface, line: Omit<Line, 'at'>) {
+  const at = await $.clock.now()
+  await update($, lines, list => [...list, { ...line, text: short(line.text, 1500), at }].slice(-MAX_LINES))
+}
+
+async function startRunning($: EngineInterface, key: string, task: string) {
+  const startedAt = await $.clock.now()
+  await update($, running, list => [...list.filter(r => r.key !== key), { key, task, startedAt }])
+}
+
+async function stopRunning($: EngineInterface, key: string) {
+  await update($, running, list => list.filter(r => r.key !== key))
+}
+
+// Seconds or minutes since a moment, for the pane.
+function elapsed(from: number, now: number) {
+  const s = Math.max(0, Math.round((now - from) / 1000))
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}min ${String(s % 60).padStart(2, '0')}s`
+}
+
+// The pane's markers: one glyph and one theme color per kind of entry.
+const MARKS: Record<string, { glyph: string; color?: string }> = {
+  task: { glyph: '▶', color: 'suggestion' },
+  result: { glyph: '✓', color: 'success' },
+  failure: { glyph: '✗', color: 'error' },
+  sent: { glyph: '→', color: 'success' },
+  note: { glyph: '+', color: 'success' },
+  queued: { glyph: '⏳', color: 'warning' },
+  stop: { glyph: '■', color: 'error' },
+  info: { glyph: '·' },
+}
+
+// Keeps the first lines of a Markdown answer, so a long result does not fill the pane.
+function clampLines(text: string, max: number) {
+  const all = text.trim().split('\n')
+  return all.length <= max ? text.trim() : `${all.slice(0, max).join('\n')}\n…`
+}
+
+function hhmm(at: number) {
+  const d = new Date(at)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
 async function hubFetch($: EngineInterface, method: string, path: string, body?: unknown, auth = token) {
@@ -162,7 +204,7 @@ async function onCommand($: EngineInterface, command: Command) {
     if (!isBusy || !turnId) return ack($, command.id, false, 'Claude is not working right now.')
     try {
       await $.turn.abort({ turnId })
-      await addLine($, { kind: 'stop', text: 'Stopped Claude.' })
+      await addLine($, { kind: 'stop', text: 'Claude parado.' })
       return ack($, command.id, true, 'Stopped Claude.')
     } catch (error) {
       return ack($, command.id, false, `Could not stop Claude: ${error instanceof Error ? error.message : error}`)
@@ -183,6 +225,7 @@ async function onCommand($: EngineInterface, command: Command) {
         pendingTasks.delete(prompt)
         tasks.set(spawned.agentId, command.task)
       }
+      await startRunning($, spawned.agentId ?? prompt, command.task)
       await addLine($, { kind: 'task', text: command.task })
       return ack($, command.id, true, 'Started. A Claude Code subagent is working on it; the result comes in a [news] update.')
     } catch (error) {
@@ -289,6 +332,12 @@ export const register: Register = (on, options) => {
     const saved = await $.store.get('isOn')
     if (typeof saved === 'boolean') await update($, isOn, () => saved)
     await $.command.register({ name: NAME, description: 'Voice coworker: on/off, call, end, window, status' })
+    // Redraw the pane while a task runs, so its elapsed time moves.
+    $.clock.every(15_000, () => {
+      void read($, running)
+        .then(list => (list.length > 0 ? update($, running, l => [...l]) : undefined))
+        .catch(() => undefined)
+    })
     const started = await next(e)
     if (await read($, isOn)) await turnOn($, opts)
     return started
@@ -326,6 +375,12 @@ export const register: Register = (on, options) => {
     if (e.agentId !== undefined && pending !== undefined) {
       pendingTasks.delete(e.text)
       tasks.set(e.agentId, pending)
+      await stopRunning($, e.text)
+      await startRunning($, e.agentId, pending)
+    } else if (e.agentId !== undefined && tasks.has(e.agentId)) {
+      // A stopped task its subagent picked up again.
+      const resumed = tasks.get(e.agentId) ?? ''
+      if (!(await read($, running)).some(r => r.key === e.agentId)) await startRunning($, e.agentId, resumed)
     }
     if (e.agentId === undefined) {
       isBusy = true
@@ -343,7 +398,14 @@ export const register: Register = (on, options) => {
         const args = e as unknown as Record<string, unknown>
         const detail = [args.command, args.file_path, args.pattern, args.url].find(v => typeof v === 'string') as string | undefined
         const failed = 'deny' in result ? Boolean(result.deny) : Boolean(result.isError)
-        report($, { kind: failed ? 'failure' : 'tool', text: short(`${e.tool}${detail ? ` ${detail}` : ''}`, 200) })
+        const text = short(`${e.tool}${detail ? ` ${detail}` : ''}`, 200)
+        report($, { kind: failed ? 'failure' : 'tool', text })
+        // The pane shows the last tool call; only failures go into its history.
+        void $.clock
+          .now()
+          .then(at => update($, lastTool, () => ({ text, isFailed: failed, at })))
+          .then(() => (failed ? addLine($, { kind: 'failure', text }) : undefined))
+          .catch(() => undefined)
       }
     } catch {
       // Activity is best effort.
@@ -355,10 +417,16 @@ export const register: Register = (on, options) => {
     const result = await next(e)
     const task = e.agentId !== undefined ? tasks.get(e.agentId) : undefined
     if (e.agentId !== undefined && task !== undefined) {
-      tasks.delete(e.agentId)
-      const answer = e.isAborted ? 'The task was stopped.' : e.answer || 'Done, with no answer.'
-      report($, { kind: 'task_done', text: short(`Task: ${task}\nResult: ${answer}`, 1500) })
-      await addLine($, { kind: 'result', text: answer })
+      await stopRunning($, e.agentId)
+      if (e.isAborted) {
+        // Stopped, not finished: keep tracking it, so a resumed run still reports its answer.
+        await addLine($, { kind: 'stop', text: `Tarefa parada: ${task}` })
+      } else {
+        tasks.delete(e.agentId)
+        const answer = e.answer || 'Done, with no answer.'
+        report($, { kind: 'task_done', text: short(`Task: ${task}\nResult: ${answer}`, 1500) })
+        await addLine($, { kind: 'result', text: answer })
+      }
     }
     if (e.agentId === undefined) {
       isBusy = false
@@ -409,21 +477,91 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text } = $.ui.resolve(e)
+    const { Box, Text, Markdown } = $.ui.resolve(e)
     const l = await read($, link)
     const list = await read($, lines)
-    const room = Math.max(1, (e.viewport?.rows ?? 20) - 4)
+    const now = await $.clock.now()
+    const tasksNow = await read($, running)
+    const tool = await read($, lastTool)
+    const status =
+      l.state === 'up'
+        ? { color: 'success', text: `● conectado · ${l.name}` }
+        : l.state === 'connecting'
+          ? { color: 'warning', text: '● conectando' }
+          : l.state === 'down'
+            ? { color: 'error', text: '● hub offline' }
+            : { color: 'inactive', text: '○ desligado' }
+    // Rows left for history: header 3, "Agora" title + its rows + spacing, "Histórico" title.
+    const nowRows = Math.max(1, tasksNow.length) + (tool ? 1 : 0)
+    const room = Math.max(4, (e.viewport?.rows ?? 24) - 7 - nowRows)
+    const history: Line[] = []
+    let used = 0
+    for (const line of [...list].reverse()) {
+      const cost = line.kind === 'result' ? 7 : 3
+      if (used + cost > room && history.length > 0) break
+      history.push(line)
+      used += cost
+    }
 
     return (
-      <Box flexDirection="column">
-        <Text bold>{l.state === 'up' ? `Session "${l.name}"` : `Hub: ${l.state}`}</Text>
-        {l.reason && <Text dimColor>{l.reason}</Text>}
-        {list.length === 0 && <Text dimColor>Nothing sent to Claude yet.</Text>}
-        {list.slice(-room).map(line => (
-          <Text dimColor={line.kind === 'info'}>
-            {line.kind === 'sent' ? '→' : line.kind === 'queued' ? '⏳' : line.kind === 'note' ? '+' : line.kind === 'stop' ? '■' : line.kind === 'task' ? '▶' : line.kind === 'result' ? '✓' : '·'} {line.text}
+      <Box flexDirection="column" paddingX={1}>
+        <Box justifyContent="space-between">
+          <Text bold color="success">
+            ◉ luke-voice
           </Text>
-        ))}
+          <Text color={status.color}>{status.text}</Text>
+        </Box>
+        <Text dimColor>{isBusy ? 'Claude trabalhando' : 'Claude ocioso'}{l.reason ? ` · ${l.reason}` : ''}</Text>
+
+        <Box flexDirection="column" marginTop={1}>
+          <Text bold>Agora</Text>
+          {tasksNow.length === 0 && <Text dimColor>Nada em andamento</Text>}
+          {tasksNow.map(r => (
+            <Box key={r.key} justifyContent="space-between" gap={1}>
+              <Box flexShrink={1}>
+                <Text color="suggestion" wrap="truncate-end">
+                  ▶ {r.task}
+                </Text>
+              </Box>
+              <Text dimColor tabular>
+                {elapsed(r.startedAt, now)}
+              </Text>
+            </Box>
+          ))}
+          {tool && (
+            <Text dimColor wrap="truncate-end" color={tool.isFailed ? 'error' : undefined}>
+              {tool.isFailed ? '✗' : '·'} {tool.text}
+            </Text>
+          )}
+        </Box>
+
+        <Box flexDirection="column" marginTop={1}>
+          <Text bold>Histórico</Text>
+          {history.length === 0 && <Text dimColor>Nada enviado ao Claude ainda.</Text>}
+          {history.map((line, i) => {
+            const mark = MARKS[line.kind] ?? { glyph: '·' }
+            return (
+              <Box key={`${line.at}-${i}`} marginBottom={1}>
+                <Box width={9} flexShrink={0}>
+                  <Text color={mark.color} dimColor={mark.color === undefined}>
+                    {mark.glyph}
+                  </Text>
+                  <Text dimColor tabular>
+                    {' '}
+                    {hhmm(line.at)}
+                  </Text>
+                </Box>
+                <Box flexGrow={1} flexShrink={1}>
+                  {line.kind === 'result' ? (
+                    <Markdown text={clampLines(line.text, 6)} />
+                  ) : (
+                    <Text wrap="truncate-end">{line.text}</Text>
+                  )}
+                </Box>
+              </Box>
+            )
+          })}
+        </Box>
       </Box>
     )
   })

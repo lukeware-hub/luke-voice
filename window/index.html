@@ -1,41 +1,71 @@
 <!doctype html>
-<html lang="en">
+<html lang="pt-BR">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
     <title>luke-voice</title>
+    <link rel="preload" href="/fonts/schibsted-grotesk-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
-    <main>
-      <header>
-        <span class="brand">luke-voice</span>
-        <span id="status" class="status">offline</span>
+    <svg width="0" height="0" class="sprite" aria-hidden="true">
+      <symbol id="i-phone" viewBox="0 0 24 24"><path d="M6.6 3.5h2.3l1.4 4.1-2 1.4a12 12 0 0 0 6.7 6.7l1.4-2 4.1 1.4v2.3a2 2 0 0 1-2.1 2A16.5 16.5 0 0 1 4.6 5.6a2 2 0 0 1 2-2.1Z" /></symbol>
+      <symbol id="i-hangup" viewBox="0 0 24 24"><path d="M3.3 13.9 2.6 12a2 2 0 0 1 .8-2.4 15.8 15.8 0 0 1 17.2 0 2 2 0 0 1 .8 2.4l-.7 1.9-4.2-.7-.5-2.4a10.6 10.6 0 0 0-8 0l-.5 2.4Z" /></symbol>
+      <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" /></symbol>
+      <symbol id="i-mic-off" viewBox="0 0 24 24"><path d="M15 9.4V6a3 3 0 0 0-5.7-1.3M9 9v2a3 3 0 0 0 4.6 2.5M5.5 11a6.5 6.5 0 0 0 10.4 5.2M18.5 11a6.4 6.4 0 0 1-.4 2.2M12 17.5V21M3.5 3.5l17 17" /></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10-6.5Z" /></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.2 4.2L19 7" /></symbol>
+      <symbol id="i-send" viewBox="0 0 24 24"><path d="M4 12h14M13 6l6 6-6 6" /></symbol>
+      <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="2" /></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" /></symbol>
+    </svg>
+
+    <div class="app">
+      <header class="bar">
+        <div class="brand">
+          <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+            <circle cx="16" cy="16" r="14" />
+            <circle cx="16" cy="16" r="9.5" />
+            <circle cx="16" cy="16" r="5" />
+          </svg>
+          <span class="wordmark">luke-voice</span>
+        </div>
+        <p id="status" class="pill" data-state="idle" role="status"><span class="dot"></span><span id="statusText">pronto</span></p>
       </header>
 
-      <section class="stage">
-        <div id="orb" class="orb" aria-hidden="true">
-          <div class="ring"></div>
-          <div class="core"></div>
+      <section class="stage" aria-label="Chamada">
+        <div id="orb" class="orb" data-mode="idle" aria-hidden="true">
+          <span class="ring r1"></span>
+          <span class="ring r2"></span>
+          <span class="ring r3"></span>
         </div>
-        <p id="caption" class="caption">Press Call and talk it through. When you agree, I send the prompt to Claude.</p>
+        <p id="caption" class="caption" aria-live="polite">Toque em Ligar e fale. Quando vocês combinarem algo, eu peço ao Claude.</p>
+        <div class="controls">
+          <button id="callButton" class="call" type="button" data-live="false">
+            <svg class="icon" aria-hidden="true"><use id="callIcon" href="#i-phone" /></svg>
+            <span id="callLabel">Ligar</span>
+          </button>
+          <button id="muteButton" class="mute" type="button" disabled aria-pressed="false">
+            <svg class="icon" aria-hidden="true"><use id="muteIcon" href="#i-mic" /></svg>
+            <span id="muteLabel">Silenciar</span>
+          </button>
+        </div>
       </section>
 
-      <div class="controls">
-        <button id="callButton" class="primary" type="button">Call</button>
-        <button id="muteButton" type="button" disabled>Mute</button>
+      <div class="side">
+        <section class="panel" aria-labelledby="sessionsTitle">
+          <h2 id="sessionsTitle">Sessões</h2>
+          <div id="sessions" class="sessions"></div>
+        </section>
+
+        <section class="panel grow" aria-labelledby="logTitle">
+          <h2 id="logTitle">Atividade</h2>
+          <ol id="log" class="log"></ol>
+        </section>
       </div>
+    </div>
 
-      <section class="sessions">
-        <h2>Sessions</h2>
-        <ul id="sessions"></ul>
-      </section>
-
-      <section class="log">
-        <h2>Sent to Claude</h2>
-        <ol id="log"></ol>
-      </section>
-    </main>
     <script
       src="https://cdn.jsdelivr.net/npm/@elevenlabs/client@1.26.0/dist/lib.iife.js"
       integrity="sha384-GAgUf1yx/dGreo/QTqLRVycB5sMQdsPKOmbMWlKec+fjMXzz+OXy4c6EfjB7Anb7"

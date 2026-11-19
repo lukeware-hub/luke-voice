@@ -14,13 +14,24 @@ const MIC_TIMEOUT_MS = 10_000
 const $ = id => document.getElementById(id)
 const ui = {
   status: $('status'),
+  statusText: $('statusText'),
   orb: $('orb'),
   caption: $('caption'),
   call: $('callButton'),
+  callIcon: $('callIcon'),
+  callLabel: $('callLabel'),
   mute: $('muteButton'),
+  muteIcon: $('muteIcon'),
+  muteLabel: $('muteLabel'),
   sessions: $('sessions'),
   log: $('log'),
 }
+const MAX_ENTRIES = 50
+const SVG = 'http://www.w3.org/2000/svg'
+const STATE_TEXT = { idle: 'pronto', connecting: 'conectando', live: 'em chamada', error: 'erro', offline: 'hub offline' }
+const ICONS = { task: 'i-play', result: 'i-check', sent: 'i-send', stop: 'i-stop', failed: 'i-x' }
+const KIND_TEXT = { task: 'Tarefa', result: 'Resultado', sent: 'Enviado ao Claude', stop: 'Parar', failed: 'Falhou' }
+const CHIP_TEXT = { attention: 'precisa de você', working: 'trabalhando', idle: 'ocioso' }
 
 let conversation = null
 let callState = 'idle'
@@ -44,47 +55,90 @@ async function hub(method, path, body) {
   return out
 }
 
+function setStatus(state) {
+  ui.status.dataset.state = state
+  ui.statusText.textContent = STATE_TEXT[state] ?? state
+}
+
+function setMuted(next) {
+  isMuted = next
+  conversation?.setMicMuted(isMuted)
+  ui.mute.setAttribute('aria-pressed', String(isMuted))
+  ui.muteIcon.setAttribute('href', isMuted ? '#i-mic-off' : '#i-mic')
+  ui.muteLabel.textContent = isMuted ? 'Ativar som' : 'Silenciar'
+}
+
 function setCall(state, caption) {
   callState = state
-  ui.status.dataset.state = state
-  ui.status.textContent = { idle: 'ready', connecting: 'connecting', live: 'on call', error: 'error' }[state]
-  ui.call.textContent = state === 'live' || state === 'connecting' ? 'End call' : 'Call'
-  ui.call.dataset.live = String(state === 'live' || state === 'connecting')
+  setStatus(state)
+  const isLive = state === 'live' || state === 'connecting'
+  ui.call.dataset.live = String(isLive)
+  ui.callIcon.setAttribute('href', isLive ? '#i-hangup' : '#i-phone')
+  ui.callLabel.textContent = isLive ? 'Encerrar' : 'Ligar'
   ui.mute.disabled = state !== 'live'
-  if (state !== 'live') ui.orb.dataset.mode = 'idle'
+  if (state !== 'live') {
+    ui.orb.dataset.mode = 'idle'
+    setMuted(false)
+  }
   if (caption) ui.caption.textContent = caption
   void hub('POST', '/call', { state }).catch(() => {})
 }
 
-function addLog(text, isFailed = false) {
+// Builds an element; text goes in through textContent only.
+function el(tag, className, text) {
+  const node = document.createElement(tag)
+  if (className) node.className = className
+  if (text !== undefined) node.textContent = text
+  return node
+}
+
+function icon(id) {
+  const svg = document.createElementNS(SVG, 'svg')
+  svg.setAttribute('class', 'icon')
+  svg.setAttribute('aria-hidden', 'true')
+  const use = document.createElementNS(SVG, 'use')
+  use.setAttribute('href', `#${id}`)
+  svg.append(use)
+  return svg
+}
+
+const clock = () => new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+
+// One activity entry, newest first. A long answer opens in full inside a <details>.
+function addLog(kind, title, { body, who } = {}) {
   ui.log.querySelector('.empty')?.remove()
-  const item = document.createElement('li')
-  item.textContent = text
-  if (isFailed) item.classList.add('failed')
+  const item = el('li', 'entry')
+  item.dataset.kind = kind
+  const badge = el('span', 'badge')
+  badge.append(icon(ICONS[kind] ?? 'i-send'))
+  const meta = el('p', 'meta')
+  meta.append(el('strong', '', KIND_TEXT[kind] ?? kind), el('span', '', clock()))
+  if (who) meta.append(el('span', '', who))
+  item.append(badge, meta, el('p', 'title', title))
+  if (body) {
+    const details = el('details')
+    details.append(el('summary', '', 'Ver resposta'), el('p', 'body', body))
+    item.append(details)
+  }
   ui.log.prepend(item)
-  while (ui.log.children.length > 20) ui.log.lastChild.remove()
+  while (ui.log.children.length > MAX_ENTRIES) ui.log.lastChild.remove()
 }
 
 function renderRoster() {
   ui.sessions.replaceChildren()
   if (roster.length === 0) {
-    const empty = document.createElement('li')
-    empty.className = 'empty'
-    empty.textContent = 'No Claude session. Turn luke-voice on in Claude Code.'
-    ui.sessions.append(empty)
+    ui.sessions.append(el('p', 'empty', 'Nenhuma sessão do Claude. Ligue o luke-voice no Claude Code.'))
     return
   }
   for (const session of roster) {
-    const item = document.createElement('li')
-    item.dataset.focused = String(session.name === focused)
-    item.title = session.cwd
-    const name = document.createElement('span')
-    name.textContent = session.name
-    const state = document.createElement('span')
-    state.className = 'state'
-    state.dataset.attention = String(session.needsYou)
-    state.textContent = session.needsYou ? 'needs you' : session.isBusy ? 'working' : 'idle'
-    item.append(name, state)
+    const item = el('button', 'session')
+    item.type = 'button'
+    item.setAttribute('aria-current', String(session.name === focused))
+    item.title = session.cwd || session.name
+    const state = session.needsYou ? 'attention' : session.isBusy ? 'working' : 'idle'
+    const chip = el('span', 'chip', CHIP_TEXT[state])
+    chip.dataset.state = state
+    item.append(el('span', 'name', session.name), chip, el('span', 'cwd', session.cwd || ''))
     item.addEventListener('click', () => void hub('POST', '/focus', { name: session.name }))
     ui.sessions.append(item)
   }
@@ -119,7 +173,8 @@ function onActivity(session, events) {
     const line = `session ${session}: ${kind}: ${text}`
     if (kind === 'task_done') {
       pendingSpeech.push(`task done: ${text}`)
-      addLog(`✓ ${text.slice(0, 200)}`)
+      const parts = text.match(/^Task: ([\s\S]*?)\nResult: ([\s\S]*)$/)
+      addLog('result', parts ? parts[1] : 'Tarefa concluída', { body: parts ? parts[2] : text, who: session })
     } else if (kind === 'done' || kind === 'attention') {
       pendingSpeech.push(line)
     } else {
@@ -133,19 +188,19 @@ const clientTools = {
   luke_run_task: async ({ task, session }) => {
     if (!gate.allows()) return REFUSED
     const out = await hub('POST', '/command', { type: 'task', task, session: session || undefined }).catch(error => ({ ok: false, message: error.message }))
-    addLog(`▶ ${task}`, !out.ok)
+    addLog(out.ok ? 'task' : 'failed', task, { who: session || focused })
     return out.message || (out.ok ? 'Started.' : 'It did not start.')
   },
   luke_send_to_claude: async ({ prompt, when, session }) => {
     if (!gate.allows()) return REFUSED
     const out = await hub('POST', '/command', { type: 'send', prompt, when, session: session || undefined }).catch(error => ({ ok: false, message: error.message }))
-    addLog(`${session || focused}: ${prompt}`, !out.ok)
+    addLog(out.ok ? 'sent' : 'failed', prompt, { who: session || focused })
     return out.message || (out.ok ? 'Sent.' : 'It did not go through.')
   },
   luke_stop_claude: async ({ session }) => {
     if (!gate.allows()) return REFUSED
     const out = await hub('POST', '/command', { type: 'stop', session: session || undefined }).catch(error => ({ ok: false, message: error.message }))
-    addLog(`${session || focused}: stop`, !out.ok)
+    addLog(out.ok ? 'stop' : 'failed', 'Parar o Claude', { who: session || focused })
     return out.message || (out.ok ? 'Stopped.' : 'It did not stop.')
   },
   luke_session_activity: async ({ session }) => {
@@ -157,7 +212,7 @@ const clientTools = {
 // The microphone, or a clear error instead of a call stuck at "connecting".
 async function microphone() {
   const timeout = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error('Microphone not available: allow it for this window and press Call.')), MIC_TIMEOUT_MS),
+    setTimeout(() => reject(new Error('Microfone indisponível: libere o microfone nesta janela e toque em Ligar.')), MIC_TIMEOUT_MS),
   )
   const stream = await Promise.race([navigator.mediaDevices.getUserMedia({ audio: true }), timeout])
   for (const track of stream.getTracks()) track.stop()
@@ -165,7 +220,7 @@ async function microphone() {
 
 async function startCall() {
   if (conversation || callState === 'connecting') return
-  setCall('connecting', 'Connecting…')
+  setCall('connecting', 'Conectando…')
   try {
     // The token first: it also sets up the agent, and its errors say what is missing.
     const { token } = await hub('POST', '/token')
@@ -176,15 +231,15 @@ async function startCall() {
       clientTools,
       onConnect: async () => {
         window.focus()
-        setCall('live', 'Listening. Talk it through.')
+        setCall('live', 'Estou ouvindo. Pode falar.')
         const snapshot = await hub('GET', '/activity').catch(() => ({ text: '' }))
         conversation?.sendContextualUpdate(`${sessionsLine()}\n[activity]\n${quoteUntrusted(snapshot.text)}`)
       },
       onDisconnect: () => {
         conversation = null
-        setCall('idle', 'Call ended.')
+        setCall('idle', 'Chamada encerrada.')
       },
-      onError: message => setCall('error', `Call error: ${message}`),
+      onError: message => setCall('error', `Erro na chamada: ${message}`),
       onModeChange: ({ mode: next }) => {
         mode = next
         ui.orb.dataset.mode = next
@@ -207,7 +262,7 @@ async function endCall() {
   pendingActivity = []
   pendingSpeech = []
   await current?.endSession().catch(() => {})
-  setCall('idle', 'Call ended.')
+  setCall('idle', 'Chamada encerrada.')
 }
 
 function connectStream() {
@@ -230,17 +285,12 @@ function connectStream() {
       void endCall()
     }
   }
-  stream.onerror = () => {
-    ui.status.textContent = 'hub offline'
-  }
+  stream.onopen = () => setStatus(callState)
+  stream.onerror = () => setStatus('offline')
 }
 
 ui.call.addEventListener('click', () => void (conversation || callState === 'connecting' ? endCall() : startCall()))
-ui.mute.addEventListener('click', () => {
-  isMuted = !isMuted
-  conversation?.setMicMuted(isMuted)
-  ui.mute.textContent = isMuted ? 'Unmute' : 'Mute'
-})
+ui.mute.addEventListener('click', () => setMuted(!isMuted))
 window.addEventListener('beforeunload', () => void conversation?.endSession())
 
 // The orb follows the agent's voice.
@@ -250,10 +300,7 @@ function animate() {
   requestAnimationFrame(animate)
 }
 
-const empty = document.createElement('li')
-empty.className = 'empty'
-empty.textContent = 'Nothing sent yet.'
-ui.log.append(empty)
+ui.log.append(el('li', 'empty', 'Nada por aqui ainda. O que você pedir aparece nesta lista.'))
 
 setCall('idle')
 renderRoster()
