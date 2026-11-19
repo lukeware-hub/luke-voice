@@ -516,6 +516,16 @@ function animate() {
 
 ui.log.append(el('li', 'empty', 'Nada por aqui ainda. O que você pedir por voz aparece nesta lista.'))
 
+// Chrome reopens the app window at the size it last had. A narrow one from an older version
+// hides the rail, so give it the size this layout is made for, once per load.
+if (window.outerWidth < 640 && window.outerHeight > 0 && document.body.dataset.compact !== 'true') {
+  try {
+    window.resizeTo(760, 900)
+  } catch {
+    // A normal browser tab cannot be resized; the narrow layout still works there.
+  }
+}
+
 setCall('idle')
 renderRoster()
 syncMaxIcon()
