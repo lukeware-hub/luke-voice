@@ -1,0 +1,385 @@
+// The native engine (gpu profile). llama.cpp's llama-server runs three local servers: Ceci's voice
+// (Qwen3-TTS 0.6B, streamed, cloned from agent/ceci-voice.wav), her ears (Qwen3-ASR 0.6B) and the
+// instant router of the hybrid brain (Qwen3.5 0.8B, on the CPU). The binaries are llama.cpp's
+// official release builds (Vulkan on Windows and Linux, Metal on macOS), pinned by sha256; the
+// models are in hub/models.mjs. No Python, no PyTorch.
+import { execFile, spawn as nodeSpawn } from 'node:child_process'
+import { createWriteStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:net'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+import { MODELS, ensureFile, ensureModel, modelsDir } from './models.mjs'
+import { stateDir } from './paths.mjs'
+import { routerBody } from './router.mjs'
+
+export const LLAMA_BUILD = 'b12556'
+const RELEASE = `https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_BUILD}`
+
+// The llama.cpp build per platform: where llama-server is inside the archive.
+export const BINARIES = {
+  'win32-x64': {
+    url: `${RELEASE}/llama-${LLAMA_BUILD}-bin-win-vulkan-x64.zip`,
+    sha256: '73f3346fbbad14db8f5a5b35c4e9dbae7debf306309bfc77aca4a17096cb2f93',
+    size: 38690012,
+    exe: 'llama-server.exe',
+  },
+  'darwin-arm64': {
+    url: `${RELEASE}/llama-${LLAMA_BUILD}-bin-macos-arm64.tar.gz`,
+    sha256: 'eb92254d5ada74c6753bd6ef0d23f498ffe2872b7222043eb48743abcaac8333',
+    size: 16449908,
+    exe: `llama-${LLAMA_BUILD}/llama-server`,
+  },
+  'linux-x64': {
+    url: `${RELEASE}/llama-${LLAMA_BUILD}-bin-ubuntu-vulkan-x64.tar.gz`,
+    sha256: '75ea69b93eea3abfb9539cc0bb21701cfa1f7f791e6fc30b290eab4d5dbcee4f',
+    size: 36721000,
+    exe: `llama-${LLAMA_BUILD}/llama-server`,
+  },
+}
+
+// The three servers: their models and llama-server flags. The voice and the ears use the GPU;
+// the router stays on the CPU, so it never competes with them for video memory.
+export const SERVICES = {
+  tts: {
+    models: ['native/qwen3-tts-0.6b-base-q8_0.gguf', 'native/qwen3-tts-0.6b-base-mmproj-icl-q8_0.gguf'],
+    // One slot: every request reuses the cached reference voice, so the first audio comes in ~100 ms.
+    args: ([model, mmproj]) => ['-m', model, '-mm', mmproj, '-ngl', '99', '-c', '2048', '-np', '1'],
+  },
+  asr: {
+    models: ['native/qwen3-asr-0.6b-q8_0.gguf', 'native/qwen3-asr-0.6b-mmproj-q8_0.gguf'],
+    args: ([model, mmproj]) => ['-m', model, '-mm', mmproj, '-ngl', '99', '-c', '2048', '-np', '1'],
+  },
+  router: {
+    models: ['native/qwen3.5-0.8b-q4_k_m.gguf'],
+    args: ([model]) => ['-m', model, '-ngl', '0', '-c', '4096', '-np', '1', '--jinja'],
+  },
+}
+
+// How Ceci's voice is sampled. With the reference clip in agent/ceci-voice.wav (a real Brazilian
+// speaker, picked by the owner by ear), 40 pt-BR sentences ran with no failed or looping sentence
+// and 8% word errors (Whisper large-v3-turbo). The fixed seed makes the same sentence always sound
+// the same.
+export const VOICE_SETTINGS = { temperature: 0.75, top_p: 0.9, seed: 7 }
+
+// What Qwen3-ASR is told, so English tech words, Ceci's name and session names come out right.
+// The same prompt warms the engine up, so the first real transcription is not a cold one.
+export const ASR_GLOSSARY = 'Conversa em português do Brasil com a Ceci, uma assistente de programação. Termos comuns: API, commit, branch, main, deploy, build, bug, pull request, GitHub, Claude, Ceci, lint, TypeScript, token, login, checkout, README.'
+
+// Audio frames allowed for a text (12.5 per second; ~14 characters per second in pt-BR), so a
+// rare generation loop stops after a few seconds instead of babbling for 40.
+export const maxFrames = text => Math.ceil(String(text).length * 1.5) + 25
+
+// Below this much video memory the voice and the ears would not fit together: the light profile.
+export const MIN_VRAM_MIB = 6000
+
+export const engineDir = () => join(stateDir(), 'engine')
+const profileFile = dir => join(dir, 'profile.json')
+
+export function platformKey(platform = process.platform, arch = process.arch) {
+  const key = `${platform}-${arch}`
+  return BINARIES[key] ? key : null
+}
+
+// `llama-server --list-devices` lines such as "  Vulkan0: NVIDIA GeForce RTX 3060 Ti (8238 MiB, 7469 MiB free)".
+export function parseDevices(text) {
+  const devices = []
+  for (const line of String(text ?? '').split('\n')) {
+    const m = line.match(/^\s*(\w+?\d+):\s*(.+?)\s*\((\d+)\s*MiB/)
+    if (m) devices.push({ id: m[1], name: m[2], mib: Number(m[3]) })
+  }
+  return devices
+}
+
+// gpu when this platform has a build and a device with enough memory; light otherwise.
+// LUKE_VOICE_PROFILE=gpu|light overrides the choice.
+export function pickProfile({ key, devices = [], override = '' }) {
+  if (override === 'light') return { profile: 'light', reason: 'chosen' }
+  if (!key) return { profile: 'light', reason: 'no native build for this platform' }
+  const best = [...devices].sort((a, b) => b.mib - a.mib)[0]
+  if (override === 'gpu') return { profile: 'gpu', reason: 'chosen', device: best?.name ?? null }
+  if (!best) return { profile: 'light', reason: 'no GPU found' }
+  if (best.mib < MIN_VRAM_MIB) return { profile: 'light', reason: `GPU with ${best.mib} MiB (needs ${MIN_VRAM_MIB})`, device: best.name }
+  return { profile: 'gpu', reason: `${best.name}, ${best.mib} MiB`, device: best.name }
+}
+
+const runFile = (file, args, { timeoutMs = 20_000 } = {}) =>
+  new Promise(resolve => {
+    execFile(file, args, { timeout: timeoutMs, windowsHide: true }, (error, stdout, stderr) =>
+      resolve({ ok: !error, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') }),
+    )
+  })
+
+// The system tar: bsdtar on Windows 10+ reads zip; GNU tar from Git Bash does not.
+const tarCommand = () => (process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar')
+
+// The llama.cpp build for this platform, downloaded, checked and unpacked once. Returns llama-server's path.
+export async function ensureBinaries({ dir = engineDir(), key = platformKey(), request, onProgress, run = runFile } = {}) {
+  const entry = BINARIES[key]
+  if (!entry) throw new Error(`No native engine for ${process.platform}-${process.arch}.`)
+  const target = join(dir, LLAMA_BUILD)
+  const exe = join(target, ...entry.exe.split('/'))
+  const marker = join(target, '.unpacked')
+  if (existsSync(marker) && existsSync(exe)) return exe
+  const archive = join(dir, 'downloads', entry.url.slice(entry.url.lastIndexOf('/') + 1))
+  await ensureFile(entry, archive, { request, onProgress })
+  mkdirSync(target, { recursive: true })
+  const out = await run(tarCommand(), ['-xf', archive, '-C', target], { timeoutMs: 120_000 })
+  if (!out.ok || !existsSync(exe)) throw new Error(`Could not unpack the voice engine: ${out.stderr.trim() || 'llama-server is missing'}`)
+  writeFileSync(marker, LLAMA_BUILD)
+  return exe
+}
+
+export async function listDevices(exe, run = runFile) {
+  const out = await run(exe, ['--list-devices'])
+  return parseDevices(`${out.stdout}\n${out.stderr}`)
+}
+
+export function readProfile(dir = engineDir()) {
+  try {
+    return JSON.parse(readFileSync(profileFile(dir), 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+// The model groups each profile downloads at install time. The light profile's Kokoro is fp32 for
+// a browser with WebGPU (a machine with a GPU), fp16 for the CPU; the other one, if ever needed,
+// is downloaded on first use.
+export function profileGroups(profile, devices = []) {
+  if (profile === 'gpu') return ['turn', 'native']
+  return ['turn', 'light', devices.length ? 'light-webgpu' : 'light-cpu']
+}
+
+const groupPaths = groups => Object.keys(MODELS).filter(path => groups.includes(MODELS[path].group))
+export const groupBytes = groups => groupPaths(groups).reduce((n, p) => n + MODELS[p].size, 0)
+export const nativeBytes = () => groupBytes(['native'])
+
+// Whether every model file of a saved profile is on disk (by size; the hash was checked on download).
+export function profileReady(profile, { models = modelsDir() } = {}) {
+  if (profile?.profile === 'gpu' && !(profile.exe && existsSync(profile.exe))) return false
+  return groupPaths(profileGroups(profile?.profile, profile?.devices ?? [])).every(path => {
+    const file = join(models, ...path.split('/'))
+    return existsSync(file) && statSync(file).size === MODELS[path].size
+  })
+}
+
+// Everything a profile needs, downloaded and checked: the build and the profile decision, then the
+// models of that profile. onProgress(loaded, total, label) reports bytes over all model files.
+// Returns the profile.
+export async function prepareEngine({ dir = engineDir(), models = modelsDir(), request, onProgress = () => {}, run = runFile, override = process.env.LUKE_VOICE_PROFILE ?? '' } = {}) {
+  const key = platformKey()
+  let exe = null
+  let devices = []
+  if (key && override !== 'light') {
+    exe = await ensureBinaries({ dir, key, request, run, onProgress: (loaded, total) => onProgress(loaded, total, 'llama.cpp') })
+    devices = await listDevices(exe, run)
+  }
+  const choice = pickProfile({ key, devices, override })
+  const profile = { ...choice, build: LLAMA_BUILD, exe, devices, at: new Date().toISOString() }
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(profileFile(dir), JSON.stringify(profile, null, 2))
+  const groups = profileGroups(profile.profile, devices)
+  const total = groupBytes(groups)
+  let done = 0
+  for (const path of groupPaths(groups)) {
+    await ensureModel(path, { dir: models, request, onProgress: loaded => onProgress(done + loaded, total, 'modelos') })
+    done += MODELS[path].size
+  }
+  onProgress(total, total, 'modelos')
+  return profile
+}
+
+const freePort = () =>
+  new Promise((resolve, reject) => {
+    const probe = createServer()
+    probe.once('error', reject)
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address()
+      probe.close(() => resolve(port))
+    })
+  })
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+
+// Runs the servers and keeps them up. `command` replaces llama-server in tests.
+// The guard process (hub/guard.mjs): stops the servers when the hub is killed. One per hub, started
+// with the first server. It must not keep the hub alive by itself, so its handles are unref'd.
+const GUARD = fileURLToPath(new URL('./guard.mjs', import.meta.url))
+function startGuard(log) {
+  try {
+    const child = nodeSpawn(process.execPath, [GUARD], { stdio: ['pipe', 'ignore', 'ignore'], windowsHide: true })
+    child.on('error', () => {})
+    child.stdin.on('error', () => {})
+    child.unref()
+    child.stdin.unref?.()
+    return {
+      add: pid => child.stdin.writable && child.stdin.write(`+${pid}
+`),
+      remove: pid => child.stdin.writable && child.stdin.write(`-${pid}
+`),
+    }
+  } catch (error) {
+    log(`engine guard: ${error.message}`)
+    return { add() {}, remove() {} }
+  }
+}
+
+export function createEngine({ dir = engineDir(), models = modelsDir(), spawn = nodeSpawn, request = fetch, log = () => {}, command = null, readyTimeoutMs = 90_000, latePollMs = 2000, guard = null } = {}) {
+  const services = new Map() // name -> { port, child, isReady, restarts: number[], isStopping, firstWait }
+  let isStopped = false
+  let guarded = guard
+
+  // The service is still the one in the map, and nobody asked it to stop.
+  const isCurrent = (name, service) => services.get(name) === service && !service.isStopping && !isStopped
+  const isRunning = child => child.exitCode === null && child.signalCode === null
+
+  async function waitReady(name, port, timeoutMs = readyTimeoutMs) {
+    const until = Date.now() + timeoutMs
+    while (Date.now() < until) {
+      const service = services.get(name)
+      if (!service || service.isStopping) return false
+      try {
+        const res = await request(`http://127.0.0.1:${port}/health`)
+        if (res.ok) return true
+      } catch {
+        // not listening yet
+      }
+      await sleep(300)
+    }
+    return false
+  }
+
+  async function startOne(name, exe) {
+    const spec = SERVICES[name]
+    const files = spec.models.map(path => join(models, ...path.split('/')))
+    const port = await freePort()
+    const base = command ?? [exe]
+    const args = [...base.slice(1), ...spec.args(files), '--host', '127.0.0.1', '--port', String(port)]
+    mkdirSync(dir, { recursive: true })
+    const out = createWriteStream(join(dir, `${name}.log`), { flags: 'a' })
+    // Never two servers for one service: one left over (a start that timed out) is stopped first,
+    // or it would keep its GPU memory with nothing tracking it.
+    const previous = services.get(name)
+    if (previous) {
+      previous.isStopping = true
+      previous.child.kill()
+    }
+    const child = spawn(base[0], args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+    child.stdout?.pipe(out)
+    child.stderr?.pipe(out)
+    guarded ??= startGuard(log)
+    if (child.pid) guarded.add(child.pid)
+    child.on('exit', () => child.pid && guarded.remove(child.pid))
+    const service = { port, child, isReady: false, restarts: previous?.restarts ?? [], isStopping: false, firstWait: null }
+    services.set(name, service)
+    child.on('exit', code => {
+      service.isReady = false
+      if (service.isStopping || isStopped) return
+      // Crashed: start it again, unless it keeps crashing (5 times in 5 minutes).
+      const now = Date.now()
+      service.restarts = [...service.restarts.filter(t => now - t < 300_000), now]
+      log(`engine ${name} exited (${code}); ${service.restarts.length < 5 ? 'restarting' : 'giving up'}`)
+      if (service.restarts.length < 5) {
+        setTimeout(() => {
+          // Stopped (setup, hub exit) or replaced during the wait: no new server.
+          if (isCurrent(name, service)) void startOne(name, exe).catch(() => {})
+        }, 1000)
+      }
+    })
+    service.firstWait = waitReady(name, port)
+    service.isReady = await service.firstWait
+    log(`engine ${name} ${service.isReady ? `ready on ${port}` : 'did not become ready'}`)
+    if (!service.isReady) void waitLate(name, service)
+    return service.isReady
+  }
+
+  // A server slower than the timeout (a cold disk, a first shader compile) is still running: keep
+  // checking, and use it once it answers, instead of marking it down for the life of the hub.
+  async function waitLate(name, service) {
+    while (isCurrent(name, service) && isRunning(service.child)) {
+      if (await waitReady(name, service.port, latePollMs)) {
+        if (!isCurrent(name, service)) return
+        service.isReady = true
+        log(`engine ${name} ready on ${service.port} (late)`)
+        return
+      }
+    }
+  }
+
+  return {
+    // Starts the servers that have their files, in parallel. Resolves to { name: isReady }.
+    async start(names = Object.keys(SERVICES), { exe } = {}) {
+      isStopped = false
+      const result = {}
+      await Promise.all(
+        names.map(async name => {
+          const current = services.get(name)
+          if (current?.isReady) return (result[name] = true)
+          // Already starting, or late but running: wait for it, do not start a second one.
+          if (current && !current.isStopping && isRunning(current.child) && current.firstWait) return (result[name] = await current.firstWait)
+          const ready = SERVICES[name].models.every(path => existsSync(join(models, ...path.split('/'))))
+          result[name] = ready ? await startOne(name, exe).catch(error => (log(`engine ${name}: ${error.message}`), false)) : false
+        }),
+      )
+      return result
+    },
+    // The first request of each model compiles its GPU shaders (~10 s): pay it at start, not on
+    // the user's first words. Errors are ignored; the real request will say what is wrong.
+    async warm({ speakerRefB64 = '', speakerRefText = '' } = {}) {
+      const silence = new Uint8Array(44 + 16_000 * 2)
+      const view = new DataView(silence.buffer)
+      ;[...'RIFF'].forEach((c, i) => view.setUint8(i, c.charCodeAt(0)))
+      view.setUint32(4, 36 + 16_000 * 2, true)
+      ;[...'WAVEfmt '].forEach((c, i) => view.setUint8(8 + i, c.charCodeAt(0)))
+      view.setUint32(16, 16, true)
+      view.setUint16(20, 1, true)
+      view.setUint16(22, 1, true)
+      view.setUint32(24, 16_000, true)
+      view.setUint32(28, 32_000, true)
+      view.setUint16(32, 2, true)
+      view.setUint16(34, 16, true)
+      ;[...'data'].forEach((c, i) => view.setUint8(36 + i, c.charCodeAt(0)))
+      view.setUint32(40, 16_000 * 2, true)
+      const jobs = []
+      const asr = this.url('asr')
+      if (asr) {
+        const form = new FormData()
+        form.append('file', new Blob([silence], { type: 'audio/wav' }), 'warm.wav')
+        form.append('model', 'qwen3-asr')
+        form.append('language', 'pt')
+        form.append('prompt', ASR_GLOSSARY)
+        jobs.push(request(`${asr}/v1/audio/transcriptions`, { method: 'POST', body: form }).then(r => r.arrayBuffer()))
+      }
+      const tts = this.url('tts')
+      if (tts) {
+        const body = JSON.stringify({ input: 'Oi, tudo bem?', lang: 'pt', response_format: 'wav', ...VOICE_SETTINGS, ...(speakerRefB64 ? { speaker_ref_b64: speakerRefB64, speaker_ref_text: speakerRefText } : {}) })
+        jobs.push(request(`${tts}/v1/audio/speech`, { method: 'POST', headers: { 'content-type': 'application/json' }, body }).then(r => r.arrayBuffer()))
+      }
+      const router = this.url('router')
+      if (router) {
+        // The router's whole prompt, so its long prefix is in the cache before the first utterance.
+        const body = JSON.stringify(routerBody('oi'))
+        jobs.push(request(`${router}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body }).then(r => r.arrayBuffer()))
+      }
+      const started = Date.now()
+      await Promise.allSettled(jobs)
+      log(`engine warmed up in ${Date.now() - started} ms`)
+    },
+    stop() {
+      isStopped = true
+      for (const service of services.values()) {
+        service.isStopping = true
+        service.child.kill()
+      }
+      services.clear()
+    },
+    url(name) {
+      const service = services.get(name)
+      return service?.isReady ? `http://127.0.0.1:${service.port}` : null
+    },
+    status() {
+      return Object.fromEntries(Object.keys(SERVICES).map(name => [name, Boolean(services.get(name)?.isReady)]))
+    },
+  }
+}

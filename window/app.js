@@ -1,6 +1,5 @@
 // The call window: one voice call for every subscribed Claude session.
-// The ElevenLabs key never reaches this page; the hub hands it a per-call token.
-// The ElevenLabs client comes from a pinned CDN file that index.html loads with an integrity hash.
+// The voice itself comes from an engine (engines/*.js); this page drives its session the same way for each.
 import {
   NOTICE,
   QUIET_NOTICE,
@@ -13,8 +12,6 @@ import {
   quoteUntrusted,
   safeKind,
 } from '/guard.js'
-
-const { Conversation } = window.ElevenLabsClient
 
 const params = new URLSearchParams(location.search)
 const KEY = params.get('k') ?? ''
@@ -75,7 +72,7 @@ const STATES = {
     pill: 'Em chamada',
     headline: 'Aguardando sua voz…',
     caption: 'Fale naturalmente.',
-    banner: ['i-waveform', 'Em chamada', 'Peça algo. Antes de agir no computador, ela confirma com você.'],
+    banner: ['i-waveform', 'Em chamada', 'Peça algo à Ceci. Antes de agir no computador, ela confirma com você.'],
   },
   error: {
     pill: 'Erro',
@@ -284,6 +281,51 @@ function addLog(kind, title, { body, who } = {}) {
 
 /* ---------- Settings ---------- */
 
+// The voice rows: which voice, and what it needs or runs on.
+function voiceFacts(health) {
+  if (health.provider !== 'local') {
+    return [
+      ['Voz', 'ElevenLabs (Roberta)', ''],
+      health.keyStatus === 'rejected'
+        ? ['Chave da ElevenLabs', 'Recusada pela ElevenLabs', 'bad']
+        : ['Chave da ElevenLabs', health.hasKey ? 'Configurada' : 'Faltando', health.hasKey ? 'ok' : 'bad'],
+    ]
+  }
+  const info = engine?.name === 'local' ? engine.getVoiceInfo?.() : null
+  const native = health.native ?? {}
+  const isNative = info ? info.tts === 'native' : Boolean(native.tts && native.asr)
+  const download = health.download
+  const profile = download?.error
+    ? [`Erro ao preparar: ${download.error}. Rode /luke-voice setup`, 'bad']
+    : download?.total
+      ? [`Baixando a voz natural: ${Math.min(99, Math.round((download.loaded / download.total) * 100))}%`, '']
+      : health.profile === 'gpu'
+        ? ['Voz natural, na placa de vídeo', 'ok']
+        : health.profile === 'light'
+          ? ['Voz leve, no navegador (sem placa de vídeo com 6 GB)', 'ok']
+          : ['Ainda não preparado: rode /luke-voice setup', '']
+  const model = isNative
+    ? 'Qwen3-TTS (voz), Qwen3-ASR (ouvido), Qwen3.5 (respostas rápidas)'
+    : info
+      ? info.tts === 'piper'
+        ? 'Piper (voz leve, para computadores mais lentos)'
+        : 'Kokoro (voz), Whisper (ouvido)'
+      : null
+  const runsOn = isNative
+    ? `placa de vídeo, pelo llama.cpp (${['tts', 'asr', 'router'].filter(name => native[name]).length} de 3 servidores rodando)`
+    : info
+      ? info.device === 'webgpu'
+        ? 'placa de vídeo (WebGPU)'
+        : `processador (${info.threads} threads)`
+      : 'carrega na primeira chamada'
+  return [
+    ['Voz', 'Ceci, gratuita, no seu computador', 'ok'],
+    ['Perfil', ...profile],
+    ...(model ? [['Modelos', model, '']] : []),
+    ['Roda em', runsOn, ''],
+  ]
+}
+
 async function renderFacts() {
   const health = await fetch('/health')
     .then(r => r.json())
@@ -291,10 +333,7 @@ async function renderFacts() {
   const rows = health
     ? [
         ['Versão', health.version, ''],
-        health.keyStatus === 'rejected'
-          ? ['Chave da ElevenLabs', 'Recusada pela ElevenLabs', 'bad']
-          : ['Chave da ElevenLabs', health.hasKey ? 'Configurada' : 'Faltando', health.hasKey ? 'ok' : 'bad'],
-        ['Voz', 'Roberta, português do Brasil', ''],
+        ...voiceFacts(health),
         ['Sessões ligadas', String(health.sessions), ''],
         ['Chamada', STATES[health.call]?.pill ?? health.call, ''],
       ]
@@ -385,17 +424,27 @@ async function microphone() {
   for (const track of stream.getTracks()) track.stop()
 }
 
+// The voice engine the hub picked: the free local voice, or ElevenLabs. Loaded once per page.
+let engine = null
+// Asked on every call: /luke-voice voz can switch the voice while this window stays open.
+async function voiceEngine() {
+  const { provider } = await hub('GET', '/config')
+  if (engine?.name !== provider) engine = provider === 'elevenlabs' ? await import('/engines/elevenlabs.js') : await import('/engines/local.js')
+  return engine
+}
+
 async function startCall() {
   if (conversation || callState === 'connecting') return
   setCall('connecting')
   try {
-    // The token first: it also sets up the agent, and its errors say what is missing.
-    const { token } = await hub('POST', '/token')
-    await microphone()
-    conversation = await Conversation.startSession({
-      conversationToken: token,
-      connectionType: 'webrtc',
+    const voice = await voiceEngine()
+    conversation = await voice.startSession({
+      hub,
+      prepare: microphone,
       clientTools,
+      onStatus: text => {
+        if (callState === 'connecting') setCaption(text)
+      },
       onConnect: async () => {
         connectedAt = Date.now()
         window.focus()
@@ -409,7 +458,7 @@ async function startCall() {
         // A call the agent drops in its first seconds never really started: say so, with the reason.
         if (!wasEnded && Date.now() - connectedAt < EARLY_DROP_MS) {
           const reason = details?.message || details?.reason || ''
-          setCall('error', `A ElevenLabs encerrou a chamada logo no início${reason && reason !== 'agent' ? `: ${reason}` : ''}. Veja os créditos da sua conta em elevenlabs.io e tente de novo.`)
+          setCall('error', engine?.earlyDropMessage(reason) ?? reason)
           return
         }
         setCall('idle', 'Chamada encerrada. Toque em Chamar para falar de novo.')
@@ -531,7 +580,7 @@ async function closeWindow() {
   await endCall()
   window.close()
   // A tab the page did not open stays open: say how to close it.
-  setTimeout(() => setCaption('Chamada encerrada. Feche esta janela pela barra do Windows.'), 300)
+  setTimeout(() => setCaption('Chamada encerrada. Pode fechar esta janela pelo botão de fechar do sistema.'), 300)
 }
 
 /* ---------- Wiring ---------- */

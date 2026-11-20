@@ -51,3 +51,22 @@ test('the out-of-credits message says how many were used, when they come back an
   assert.match(text, /voltam em 1 de dezembro/)
   assert.match(text, /elevenlabs\.io\/pricing/)
 })
+
+test('both voices are Ceci: same name, age and creator, told only when asked, and she never invents', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+  const root = join(import.meta.dirname, '..')
+  for (const file of ['agent/prompt.md', 'agent/brain-prompt.md']) {
+    const text = await readFile(join(root, file), 'utf8')
+    assert.match(text, /^Você é a Ceci, a assistente de voz que orquestra o Claude Code/, file)
+    assert.match(text, /mulher de 22 anos/, file)
+    assert.match(text, /criada por Diego Morais na Lukeware Inteligência Digital LTDA, a empresa da qual ele é dono. Lukeware é o nome da empresa, não o seu/, file)
+    assert.match(text, /Só fale da sua idade, da sua aparência ou de quem te criou quando o usuário perguntar/, file)
+    assert.match(text, /Nunca invente/, file)
+  }
+  const def = JSON.parse(await readFile(join(root, 'agent/agent.json'), 'utf8'))
+  assert.match(def.conversation_config.agent.first_message, /Eu sou a Ceci/)
+  // The free local voice greets with the same words.
+  const local = await readFile(join(root, 'window/engines/local.js'), 'utf8')
+  assert.ok(local.includes(`const GREETING = '${def.conversation_config.agent.first_message}'`))
+})

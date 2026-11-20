@@ -1,16 +1,34 @@
 import { expect, test } from 'claude-code/testing'
 import type { Args, On } from 'claude-code'
 
-import { classifyTask, preview, TIERS } from './register'
+import { brainArgs, brainInput, classifyTask, parseBrain, parseBrainText, preview, TIERS } from './register'
+import type { BrainRequest } from './register'
 
 const FOOTER = { plugin: 'luke-voice', component: 'SessionMode', props: { modes: [] } } as const
 const run = (args: string) => ({ command: 'luke-voice', args, origin: { kind: 'composer' } }) as Args<'command.run'>
 
-type Call = { method: string; path: string; body: Record<string, unknown> }
+type Call = { method: string; path: string; port: string; body: Record<string, unknown> }
+
+// What `claude -p` prints in the brain tests; the launcher answer is used for every other process.
+let brainStdout = ''
+// What $.model.complete answers in the brain tests.
+let brainComplete: Record<string, unknown> = { isAnswered: true, text: '{"say":"","tool":null}' }
+// What hub/setup.mjs prints in the /luke-voice setup tests.
+let setupStdout = ''
+// LUKE_VOICE_PORT as the engine reports it; unset in every test but the port one.
+let envPort: string | undefined
+// What store.get answers for the next engine(), given the event (the key is in it).
+let storeGet: (e: unknown) => unknown = () => undefined
+// The engine's clock; a test may move it, from inside a handler, to stand for time passing.
+let clockNow = 1_700_000_000_000
+// When set, the direct model call throws this, after the clock moved by `brainThrowsAfterMs`.
+let brainThrows: string | null = null
+let brainThrowsAfterMs = 0
 
 // Stands for the engine and the hub: records each hub request and each submitted prompt.
 function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unknown }>> = [], after = { status: 410, body: {} as unknown }, envKey?: string, health?: Record<string, unknown>) {
   const launches: unknown[] = []
+  const completes: unknown[] = []
   const statuses: unknown[] = []
   const calls: Call[] = []
   const sent: string[] = []
@@ -21,25 +39,41 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: '/repos/api' }))
   on('session.id', () => ({ value: 'claude-session-1' }))
-  on('env.get', (_, e) => ({ value: e.name === 'ELEVENLABS_API_KEY' ? envKey : undefined }))
+  on('env.get', (_, e) => ({ value: e.name === 'ELEVENLABS_API_KEY' ? envKey : e.name === 'LUKE_VOICE_PORT' ? envPort : undefined }))
   on('store.set', (_, e) => (stored.push(e.value), { value: undefined }))
+  // What the store holds: set by the test before engine(), nothing otherwise.
+  const get = storeGet
+  storeGet = () => undefined
+  on('store.get', (_, e) => ({ value: get(e) }))
   on('ui.close', () => ({ value: undefined }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
-  on('process.run', (_, e) => (launches.push(e), { value: { exitCode: 0, stdout: '{"ok":true,"serviceToken":"svc"}\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('model.complete', (_, e) => {
+    completes.push(e)
+    if (brainThrows) {
+      clockNow += brainThrowsAfterMs
+      throw new Error(brainThrows)
+    }
+    return { value: brainComplete }
+  })
+  on('process.run', (_, e) => (
+    launches.push(e),
+    { value: { exitCode: 0, stdout: e.argv[0] === 'claude' ? brainStdout : String(e.argv[1]).endsWith('setup.mjs') ? setupStdout : '{"ok":true,"serviceToken":"svc"}\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  ))
   on('ui.status', (_, e) => (statuses.push(e.text), { value: undefined }))
   on('ui.toast', () => ({ value: undefined }))
   on('clock.sleep', () => ({ value: undefined }))
-  on('clock.now', () => ({ value: 1_700_000_000_000 }))
+  on('clock.now', () => ({ value: clockNow }))
   on('clock.every', () => ({ value: undefined }))
   on('prompt.submit', (_, e) => (sent.push(e.text), { text: e.text }))
   on('http.fetch', async (_, e) => {
     const url = new URL(e.url)
     const raw = e.init?.body
-    calls.push({ method: e.init?.method ?? 'GET', path: url.pathname, body: typeof raw === 'string' ? JSON.parse(raw) : {} })
+    calls.push({ method: e.init?.method ?? 'GET', path: url.pathname, port: url.port, body: typeof raw === 'string' ? JSON.parse(raw) : {} })
     let status = 200
     let body: unknown = { ok: true }
     if (url.pathname === '/subscribe') body = { token: 'session-1', name: 'api', hasKey: true }
     if (url.pathname === '/health' && health) body = health
+    if (url.pathname === '/setup') body = { started: true }
     if (url.pathname === '/inbox') {
       const answer = inbox[polls++]
       ;({ status, body } = answer ? await answer() : after)
@@ -47,7 +81,7 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
     return { value: { status, ok: status < 400, headers: {}, text: JSON.stringify(body) } }
   })
 
-  return { calls, sent, stored, launches, statuses }
+  return { calls, sent, stored, launches, statuses, completes }
 }
 
 // The hooks answer in promise turns: yield until the check holds.
@@ -110,7 +144,7 @@ test('a prompt sent from the call starts a turn, framed as relayed, and is acked
 })
 
 test('a stored on reconnects at session start', async ($, on) => {
-  on('store.get', () => ({ value: true }))
+  storeGet = () => true
   const { calls } = engine(on)
 
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -132,7 +166,7 @@ test('turning it on starts the call; a stored on at session start only connects'
 })
 
 test('a stored on at session start does not start a call', async ($, on) => {
-  on('store.get', () => ({ value: true }))
+  storeGet = () => true
   const { calls } = engine(on)
 
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -422,4 +456,261 @@ test('the status line under the prompt shows only when something needs attention
   // Connected and healthy: the line is cleared, never filled.
   expect(JSON.stringify(shown)).not.toContain('Claude is')
   expect(JSON.stringify(shown)).not.toContain('working')
+})
+
+const REQUEST: BrainRequest = {
+  kind: 'user',
+  text: 'verifica os testes de login',
+  context: ['[news]\n<<<untrusted>>>\ntask done: ok\n<<</untrusted>>>'],
+  turns: [{ role: 'user', text: 'oi' }, { role: 'luke', text: 'Oi! Em que posso ajudar?' }],
+  sessions: [{ name: 'api', isBusy: true }, { name: 'site', isBusy: false }],
+  focused: 'api',
+}
+
+test('the fallback brain call is one lean Claude Haiku 5.5 run at low effort: no tools, MCP servers, settings or saved session', () => {
+  const argv = brainArgs('/plugin')
+  expect(argv.slice(0, 2)).toEqual(['claude', '-p'])
+  expect(argv[argv.indexOf('--model') + 1]).toBe('claude-haiku-5-5')
+  expect(argv[argv.indexOf('--effort') + 1]).toBe('low')
+  expect(argv).toContain('--strict-mcp-config')
+  expect(argv).toContain('--no-session-persistence')
+  expect(argv[argv.indexOf('--tools') + 1]).toBe('')
+  expect(argv[argv.indexOf('--setting-sources') + 1]).toBe('')
+  expect(argv[argv.indexOf('--system-prompt-file') + 1]).toBe('/plugin/agent/brain-prompt.md')
+})
+
+test('the brain reads the sessions, the quoted context, the conversation and what the user just said', () => {
+  const input = brainInput(REQUEST)
+  expect(input).toContain('[sessões] api (ocupada, em foco), site (livre)')
+  expect(input).toContain('<<<untrusted>>>')
+  expect(input).toContain('ceci: Oi! Em que posso ajudar?')
+  expect(input.split('\n').pop()).toBe('[agora] usuário disse: verifica os testes de login')
+  expect(brainInput({ ...REQUEST, kind: 'notice', text: 'conte' }).split('\n').pop()).toBe('[agora] aviso automático: conte')
+})
+
+test('a brain reply in a code fence is read, an unknown tool is dropped, and plain words are only said', () => {
+  const envelope = (result: string) => JSON.stringify({ type: 'result', is_error: false, result })
+  expect(parseBrain(envelope('```json\n{"say":"Comecei.","tool":{"name":"luke_run_task","args":{"task":"x"}}}\n```'))).toEqual({
+    say: 'Comecei.',
+    tool: { name: 'luke_run_task', args: { task: 'x' } },
+    pending: null,
+  })
+  expect(parseBrain(envelope('{"say":"Ok.","tool":{"name":"rm_rf","args":{}}}'))).toEqual({ say: 'Ok.', tool: null, pending: null })
+  expect(parseBrain(envelope('Oi, tudo bem?'))).toEqual({ say: 'Oi, tudo bem?', tool: null, pending: null })
+  expect(() => parseBrain(JSON.stringify({ is_error: true, result: 'rate limited' }))).toThrow('rate limited')
+})
+
+test('a pending action is kept only for a tool that acts, and never next to a tool that runs now', () => {
+  const ask = '{"say":"Posso?","tool":null,"pending":{"name":"luke_run_task","args":{"task":"rodar testes"}}}'
+  expect(parseBrainText(ask).pending).toEqual({ name: 'luke_run_task', args: { task: 'rodar testes' } })
+  expect(parseBrainText('{"say":"Posso?","pending":{"name":"luke_stop_claude","args":{}}}').pending).toBeNull()
+  expect(parseBrainText('{"say":"Posso?","pending":{"name":"rm_rf"}}').pending).toBeNull()
+  const both = parseBrainText('{"say":"Comecei.","tool":{"name":"luke_run_task","args":{"task":"a"}},"pending":{"name":"luke_run_task","args":{"task":"b"}}}')
+  expect(both.tool?.args).toEqual({ task: 'a' })
+  expect(both.pending).toBeNull()
+})
+
+test('a think command runs the brain as one direct Haiku call at low effort, with the prompt cached, and acks its reply', async ($, on) => {
+  brainComplete = { isAnswered: true, text: '{"say":"Posso verificar os testes de login?","tool":null,"pending":{"name":"luke_run_task","args":{"task":"verificar os testes de login"}}}' }
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => (release = resolve))
+  on('fs.read', () => ({ value: 'BRAIN PROMPT' }))
+  const { calls, launches, completes } = engine(on, [
+    async () => ({ status: 200, body: { commands: [{ id: 'b1', type: 'think', request: REQUEST }] } }),
+    async () => (await held, { status: 410, body: {} }),
+  ])
+
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/ack'))
+  await $.command.run(run('off'))
+  release()
+
+  // No `claude -p` process: the engine's model call.
+  expect(launches.some(l => (l as { argv: string[] }).argv[0] === 'claude')).toBe(false)
+  const sent = completes[0] as { model: string; effort: string; prompt: string; systemBlocks?: Array<{ text: string; cache?: boolean }> }
+  expect(sent.model).toBe('claude-haiku-5-5')
+  expect(sent.effort).toBe('low')
+  expect(sent.prompt).toContain('[agora] usuário disse: verifica os testes de login')
+  expect(sent.systemBlocks?.[0]?.cache).toBe(true)
+  const ack = calls.find(c => c.path === '/ack')?.body
+  expect(ack?.ok).toBe(true)
+  expect(JSON.parse(String(ack?.message))).toEqual({
+    say: 'Posso verificar os testes de login?',
+    tool: null,
+    pending: { name: 'luke_run_task', args: { task: 'verificar os testes de login' } },
+  })
+})
+
+test('a brain that fails acks the think command as failed, with the reason', async ($, on) => {
+  brainComplete = { isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded' }
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => (release = resolve))
+  on('fs.read', () => ({ value: 'BRAIN PROMPT' }))
+  const { calls } = engine(on, [
+    async () => ({ status: 200, body: { commands: [{ id: 'b2', type: 'think', request: REQUEST }] } }),
+    async () => (await held, { status: 410, body: {} }),
+  ])
+
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/ack'))
+  await $.command.run(run('off'))
+  release()
+
+  const ack = calls.find(c => c.path === '/ack')?.body
+  expect(ack?.ok).toBe(false)
+  expect(String(ack?.message)).toContain('api-error')
+})
+
+for (const [name, afterMs, isFallback] of [
+  ['a direct model call the engine cannot make falls back to claude -p, in the time left', 0, true],
+  ['a direct model call that timed out is not followed by a second, paid call past the hub wait', 36_000, false],
+] as const) {
+  test(name, async ($, on) => {
+    brainThrows = 'model call failed'
+    brainThrowsAfterMs = afterMs
+    brainStdout = JSON.stringify({ result: '{"say":"Oi!","tool":null}' })
+    let release: () => void = () => undefined
+    const held = new Promise<void>(resolve => (release = resolve))
+    on('fs.read', () => ({ value: 'BRAIN PROMPT' }))
+    const { calls, launches } = engine(on, [
+      async () => ({ status: 200, body: { commands: [{ id: 'b3', type: 'think', request: REQUEST }] } }),
+      async () => (await held, { status: 410, body: {} }),
+    ])
+
+    await $.command.run(run('on'))
+    await until(() => calls.some(c => c.path === '/ack'))
+    await $.command.run(run('off'))
+    release()
+    brainThrows = null
+    brainStdout = ''
+
+    const fallback = launches.find(l => (l as { argv: string[] }).argv[0] === 'claude')
+    const ack = calls.find(c => c.path === '/ack')?.body
+    expect(Boolean(fallback)).toBe(isFallback)
+    expect(ack?.ok).toBe(isFallback)
+    // Nothing else took time here, so the fallback gets the whole budget under the hub's 40 s.
+    if (fallback) expect(JSON.stringify(fallback)).toContain('"timeoutMs":38000')
+    else expect(String(ack?.message)).toContain('did not answer in time')
+  })
+}
+
+test('/luke-voice voz shows the voice the hub uses, and an unknown voice points to the two choices', async ($, on) => {
+  engine(on, [], undefined, undefined, { app: 'luke-voice', version: '0.8.0', provider: 'local', hasKey: false })
+
+  expect((await $.command.run(run('voz'))).text).toContain('Voz atual: gratuita (Ceci, no seu computador)')
+  expect((await $.command.run(run('voz banana'))).text).toContain('/luke-voice voz local ou /luke-voice voz elevenlabs')
+})
+
+test('in help, the free voice needs no key, and ElevenLabs without a key is called out', async ($, on) => {
+  engine(on, [], undefined, undefined, { app: 'luke-voice', version: '0.8.0', provider: 'local', hasKey: false })
+  on('fs.read', () => ({ value: '{"version":"0.8.0"}' }))
+  const free = (await $.command.run(run('help'))).text
+  expect(free).toContain('✓ Voz: gratuita')
+  expect(free).not.toContain('✗ Chave da ElevenLabs')
+})
+
+test('in help, the ElevenLabs voice without a key is called out', async ($, on) => {
+  engine(on, [], undefined, undefined, { app: 'luke-voice', version: '0.8.0', provider: 'elevenlabs', hasKey: false })
+  on('fs.read', () => ({ value: '{"version":"0.8.0"}' }))
+  const paid = (await $.command.run(run('help'))).text
+  expect(paid).toContain('✓ Voz: ElevenLabs')
+  expect(paid).toContain('✗ Chave da ElevenLabs: falta')
+})
+
+// The tests below change module state (the stored voice, the hub port), so they run last.
+
+test('/luke-voice voz elevenlabs stores the choice, tells the hub, and says the key is missing', async ($, on) => {
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => (release = resolve))
+  const { calls, stored } = engine(on, [async () => (await held, { status: 410, body: {} })])
+
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/subscribe'))
+  const answer = (await $.command.run(run('voz elevenlabs'))).text
+  await $.command.run(run('off'))
+  release()
+
+  expect(stored).toContain('elevenlabs')
+  expect(calls.find(c => c.path === '/provider')?.body).toEqual({ provider: 'elevenlabs' })
+  expect(answer).toContain('Voz trocada para ElevenLabs')
+  expect(answer).toContain('Falta a chave da ElevenLabs')
+})
+
+test('the stored voice goes to the launcher on stdin and to the hub on subscribe', async ($, on) => {
+  storeGet = e => (JSON.stringify(e).includes('voiceProvider') ? 'local' : true)
+  const { calls, launches } = engine(on)
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await until(() => calls.some(c => c.path === '/subscribe'))
+  await $.command.run(run('off'))
+
+  expect(JSON.stringify(launches[0])).toContain('\\"provider\\":\\"local\\"')
+  expect(calls.find(c => c.path === '/subscribe')?.body.provider).toBe('local')
+})
+
+test('a voice changed in another session since this one started is the one sent on subscribe', async ($, on) => {
+  let saved = 'local'
+  storeGet = e => (JSON.stringify(e).includes('voiceProvider') ? saved : true)
+  const { calls } = engine(on)
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await until(() => calls.some(c => c.path === '/subscribe'))
+  await $.command.run(run('off'))
+  // Another Claude session runs /luke-voice voz elevenlabs; this one reconnects later.
+  saved = 'elevenlabs'
+  await $.command.run(run('on'))
+  await until(() => calls.filter(c => c.path === '/subscribe').length === 2)
+  await $.command.run(run('off'))
+
+  expect(calls.filter(c => c.path === '/subscribe').map(c => c.body.provider)).toEqual(['local', 'elevenlabs'])
+})
+
+test('LUKE_VOICE_PORT moves the hub address the mod calls', async ($, on) => {
+  envPort = '4861'
+  storeGet = () => true
+  const { calls } = engine(on)
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await until(() => calls.some(c => c.path === '/subscribe'))
+  await $.command.run(run('off'))
+  envPort = undefined
+
+  expect(calls.find(c => c.path === '/subscribe')?.port).toBe('4861')
+})
+
+test('in help, the free voice shows its profile: natural on the GPU, light, or downloading', async ($, on) => {
+  engine(on, [], undefined, undefined, { app: 'luke-voice', version: '0.9.0', provider: 'local', hasKey: false, profile: 'gpu', native: { tts: true, asr: true, router: true }, download: null })
+  on('fs.read', () => ({ value: '{"version":"0.9.0"}' }))
+  const help = (await $.command.run(run('help'))).text
+  expect(help).toContain('✓ Perfil: voz natural na placa de vídeo (tts, asr, router rodando)')
+  expect(help).toContain('/luke-voice setup')
+})
+
+test('/luke-voice setup with luke-voice on asks the hub to prepare the voice in the background', async ($, on) => {
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => (release = resolve))
+  // The inbox stays open, so the session keeps its token.
+  const { calls } = engine(on, [async () => (await held, { status: 410, body: {} })])
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/inbox'))
+  const text = (await $.command.run(run('setup'))).text
+  await $.command.run(run('off'))
+  release()
+  expect(calls.some(c => c.path === '/setup' && c.method === 'POST')).toBe(true)
+  expect(text).toContain('Acompanhe com /luke-voice status')
+})
+
+test('/luke-voice setup with luke-voice off runs the setup here and says how it went', async ($, on) => {
+  const { launches } = engine(on)
+  setupStdout = 'Voice models: 100%\n{"ok":true,"profile":"gpu","reason":"RTX 3060 Ti, 8238 MiB","heard":"Oi, eu sou a Ceci.","problems":[]}\n'
+  const text = (await $.command.run(run('setup'))).text
+  expect(text).toContain('Voz natural pronta, na placa de vídeo (RTX 3060 Ti, 8238 MiB)')
+  expect(text).toContain('a Ceci disse: "Oi, eu sou a Ceci."')
+  const argv = (launches.at(-1) as { argv: string[] }).argv
+  expect(String(argv[1]).endsWith('hub/setup.mjs')).toBe(true)
+  expect(argv.slice(2)).toEqual(['--json'])
+  setupStdout = '{"ok":true,"profile":"light","reason":"no GPU found","problems":[]}\n'
+  expect((await $.command.run(run('setup'))).text).toContain('Voz leve pronta, no navegador (no GPU found)')
+  setupStdout = '{"ok":false,"error":"Download failed (404)"}\n'
+  expect((await $.command.run(run('setup'))).text).toContain('Não consegui preparar a voz: Download failed (404)')
 })

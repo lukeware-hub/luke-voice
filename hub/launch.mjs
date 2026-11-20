@@ -11,23 +11,26 @@ const here = dirname(fileURLToPath(import.meta.url))
 const VERSION = JSON.parse(readFileSync(join(here, '..', '.claude-plugin', 'plugin.json'), 'utf8')).version
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
-// The mod sends { apiKey } on stdin. Read it with a short limit: a terminal, or an empty
-// stdin, gives nothing.
-async function readStdinKey() {
-  if (process.stdin.isTTY) return ''
+// The mod sends { apiKey, provider } on stdin. Read it with a short limit: a terminal, or an
+// empty stdin, gives nothing.
+async function readStdin() {
+  if (process.stdin.isTTY) return {}
   const chunks = []
   const read = (async () => {
     for await (const chunk of process.stdin) chunks.push(chunk)
   })()
   await Promise.race([read, sleep(1000)])
   try {
-    const key = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}').apiKey
-    return typeof key === 'string' ? key.trim() : ''
+    const { apiKey, provider } = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')
+    return {
+      key: typeof apiKey === 'string' ? apiKey.trim() : '',
+      provider: provider === 'local' || provider === 'elevenlabs' ? provider : '',
+    }
   } catch {
-    return ''
+    return {}
   }
 }
-const stdinKey = await readStdinKey()
+const { key: stdinKey = '', provider: stdinProvider = '' } = await readStdin()
 process.stdin.destroy()
 
 async function health() {
@@ -66,7 +69,11 @@ if (!up) {
     detached: true,
     stdio: ['ignore', logFd, logFd],
     windowsHide: true,
-    env: stdinKey ? { ...process.env, ELEVENLABS_API_KEY: stdinKey } : process.env,
+    env: {
+      ...process.env,
+      ...(stdinKey ? { ELEVENLABS_API_KEY: stdinKey } : {}),
+      ...(stdinProvider ? { LUKE_VOICE_PROVIDER: stdinProvider } : {}),
+    },
   }).unref()
   for (let i = 0; i < 40 && !up; i++) {
     await sleep(200)

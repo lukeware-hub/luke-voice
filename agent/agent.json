@@ -98,7 +98,7 @@
   ],
   "conversation_config": {
     "agent": {
-      "first_message": "Oi! Estou aqui. O que vamos fazer?",
+      "first_message": "Oi! Eu sou a Ceci. O que vamos fazer hoje?",
       "language": "pt",
       "prompt": {
         "llm": "gemini-2.5-flash",
