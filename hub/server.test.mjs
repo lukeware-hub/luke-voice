@@ -93,7 +93,7 @@ test('every external script on the page carries an integrity hash, and the page 
     assert.match(tag, /\bintegrity="sha(256|384|512)-[A-Za-z0-9+/=]+"/)
     assert.match(tag, /\bcrossorigin="anonymous"/)
   }
-  for (const path of ['/app.js', '/guard.js', '/engines/elevenlabs.js', '/engines/local.js', '/engines/speech-text.js', '/engines/vad.js', '/engines/mic-worklet.js', '/engines/voice-worker.js']) {
+  for (const path of ['/app.js', '/guard.js', '/engines/elevenlabs.js', '/engines/local.js', '/engines/speech-text.js', '/engines/fast-path.js', '/engines/vad.js', '/engines/mic-worklet.js', '/engines/voice-worker.js']) {
     const res = await call('GET', path)
     assert.equal(res.status, 200)
     assert.doesNotMatch(res.body, /\bfrom\s*['"]https?:|import\s*\(\s*['"]https?:/)
@@ -280,6 +280,47 @@ test('vendored files are served from the hub, unknown ones are 404, and the page
     served.closeAllConnections()
     served.close()
   }
+})
+
+test('the brain turn goes to the focused session as a think command, and its JSON reply comes back', async () => {
+  const s1 = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/brainy' } })).body
+  await call('POST', '/focus', { key: WINDOW, body: { name: s1.name } })
+  const asked = call('POST', '/brain', { key: WINDOW, body: { kind: 'user', text: 'oi', context: Array(20).fill('x'), turns: [{ role: 'user', text: 'oi' }] } })
+  const inbox = await call('GET', '/inbox?wait=2000', { auth: s1.token })
+  const command = inbox.body.commands[0]
+  assert.equal(command.type, 'think')
+  assert.equal(command.request.text, 'oi')
+  assert.equal(command.request.context.length, 8)
+  assert.ok(command.request.sessions.some(s => s.name === s1.name))
+  await call('POST', '/ack', { auth: s1.token, body: { id: command.id, ok: true, message: '{"say":"Oi!","tool":null}' } })
+  assert.deepEqual((await asked).body, { say: 'Oi!', tool: null })
+
+  const failing = call('POST', '/brain', { key: WINDOW, body: { kind: 'user', text: 'oi' } })
+  const next = (await call('GET', '/inbox?wait=2000', { auth: s1.token })).body.commands[0]
+  await call('POST', '/ack', { auth: s1.token, body: { id: next.id, ok: false, message: 'The brain did not answer: no credits' } })
+  const failed = await failing
+  assert.equal(failed.status, 502)
+  assert.match(failed.body.error, /no credits/)
+  await call('POST', '/unsubscribe', { auth: s1.token })
+})
+
+test('with no Claude session, the brain says how to connect one instead of failing', async () => {
+  const lonely = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {} })
+  await new Promise(resolve => lonely.listen(0, '127.0.0.1', resolve))
+  const p = lonely.address().port
+  const body = await new Promise((resolve, reject) => {
+    const req = request({ host: '127.0.0.1', port: p, method: 'POST', path: '/brain', headers: { host: `127.0.0.1:${p}`, 'x-luke-key': WINDOW, 'content-type': 'application/json' } }, res => {
+      let text = ''
+      res.on('data', chunk => (text += chunk))
+      res.on('end', () => resolve(JSON.parse(text)))
+    })
+    req.on('error', reject)
+    req.end(JSON.stringify({ kind: 'user', text: 'oi' }))
+  })
+  lonely.closeAllConnections()
+  lonely.close()
+  assert.equal(body.tool, null)
+  assert.match(body.say, /Ligue o luke-voice/)
 })
 
 test('loadSecrets keeps the window key across hub restarts', () => {

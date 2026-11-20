@@ -1,12 +1,16 @@
 import { expect, test } from 'claude-code/testing'
 import type { Args, On } from 'claude-code'
 
-import { classifyTask, preview, TIERS } from './register'
+import { brainArgs, brainInput, classifyTask, parseBrain, preview, TIERS } from './register'
+import type { BrainRequest } from './register'
 
 const FOOTER = { plugin: 'luke-voice', component: 'SessionMode', props: { modes: [] } } as const
 const run = (args: string) => ({ command: 'luke-voice', args, origin: { kind: 'composer' } }) as Args<'command.run'>
 
 type Call = { method: string; path: string; body: Record<string, unknown> }
+
+// What `claude -p` prints in the brain tests; the launcher answer is used for every other process.
+let brainStdout = ''
 
 // Stands for the engine and the hub: records each hub request and each submitted prompt.
 function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unknown }>> = [], after = { status: 410, body: {} as unknown }, envKey?: string, health?: Record<string, unknown>) {
@@ -25,7 +29,10 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
   on('store.set', (_, e) => (stored.push(e.value), { value: undefined }))
   on('ui.close', () => ({ value: undefined }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
-  on('process.run', (_, e) => (launches.push(e), { value: { exitCode: 0, stdout: '{"ok":true,"serviceToken":"svc"}\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('process.run', (_, e) => (
+    launches.push(e),
+    { value: { exitCode: 0, stdout: e.argv[0] === 'claude' ? brainStdout : '{"ok":true,"serviceToken":"svc"}\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  ))
   on('ui.status', (_, e) => (statuses.push(e.text), { value: undefined }))
   on('ui.toast', () => ({ value: undefined }))
   on('clock.sleep', () => ({ value: undefined }))
@@ -422,4 +429,87 @@ test('the status line under the prompt shows only when something needs attention
   // Connected and healthy: the line is cleared, never filled.
   expect(JSON.stringify(shown)).not.toContain('Claude is')
   expect(JSON.stringify(shown)).not.toContain('working')
+})
+
+const REQUEST: BrainRequest = {
+  kind: 'user',
+  text: 'verifica os testes de login',
+  context: ['[news]\n<<<untrusted>>>\ntask done: ok\n<<</untrusted>>>'],
+  turns: [{ role: 'user', text: 'oi' }, { role: 'luke', text: 'Oi! Em que posso ajudar?' }],
+  sessions: [{ name: 'api', isBusy: true }, { name: 'site', isBusy: false }],
+  focused: 'api',
+}
+
+test('the brain call is one lean Claude Haiku 5.5 run at max effort: no tools, MCP servers, settings or saved session', () => {
+  const argv = brainArgs('/plugin')
+  expect(argv.slice(0, 2)).toEqual(['claude', '-p'])
+  expect(argv[argv.indexOf('--model') + 1]).toBe('claude-haiku-5-5')
+  expect(argv[argv.indexOf('--effort') + 1]).toBe('max')
+  expect(argv).toContain('--strict-mcp-config')
+  expect(argv).toContain('--no-session-persistence')
+  expect(argv[argv.indexOf('--tools') + 1]).toBe('')
+  expect(argv[argv.indexOf('--setting-sources') + 1]).toBe('')
+  expect(argv[argv.indexOf('--system-prompt-file') + 1]).toBe('/plugin/agent/brain-prompt.md')
+})
+
+test('the brain reads the sessions, the quoted context, the conversation and what the user just said', () => {
+  const input = brainInput(REQUEST)
+  expect(input).toContain('[sessões] api (ocupada, em foco), site (livre)')
+  expect(input).toContain('<<<untrusted>>>')
+  expect(input).toContain('luke: Oi! Em que posso ajudar?')
+  expect(input.split('\n').pop()).toBe('[agora] usuário disse: verifica os testes de login')
+  expect(brainInput({ ...REQUEST, kind: 'notice', text: 'conte' }).split('\n').pop()).toBe('[agora] aviso automático: conte')
+})
+
+test('a brain reply in a code fence is read, an unknown tool is dropped, and plain words are only said', () => {
+  const envelope = (result: string) => JSON.stringify({ type: 'result', is_error: false, result })
+  expect(parseBrain(envelope('```json\n{"say":"Comecei.","tool":{"name":"luke_run_task","args":{"task":"x"}}}\n```'))).toEqual({
+    say: 'Comecei.',
+    tool: { name: 'luke_run_task', args: { task: 'x' } },
+  })
+  expect(parseBrain(envelope('{"say":"Ok.","tool":{"name":"rm_rf","args":{}}}'))).toEqual({ say: 'Ok.', tool: null })
+  expect(parseBrain(envelope('Oi, tudo bem?'))).toEqual({ say: 'Oi, tudo bem?', tool: null })
+  expect(() => parseBrain(JSON.stringify({ is_error: true, result: 'rate limited' }))).toThrow('rate limited')
+})
+
+test('a think command from the hub runs the brain with the turn on stdin and acks its reply', async ($, on) => {
+  brainStdout = JSON.stringify({ type: 'result', is_error: false, result: '{"say":"Posso verificar os testes de login?","tool":null}' }) + '\n'
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => (release = resolve))
+  const { calls, launches } = engine(on, [
+    async () => ({ status: 200, body: { commands: [{ id: 'b1', type: 'think', request: REQUEST }] } }),
+    async () => (await held, { status: 410, body: {} }),
+  ])
+
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/ack'))
+  await $.command.run(run('off'))
+  release()
+
+  const brainRun = launches.find(l => (l as { argv: string[] }).argv[0] === 'claude')
+  // The turn goes on stdin, never in argv.
+  expect(JSON.stringify(brainRun)).toContain('[agora] usuário disse: verifica os testes de login')
+  expect(JSON.stringify((brainRun as { argv: string[] }).argv)).not.toContain('verifica')
+  const ack = calls.find(c => c.path === '/ack')?.body
+  expect(ack?.ok).toBe(true)
+  expect(JSON.parse(String(ack?.message))).toEqual({ say: 'Posso verificar os testes de login?', tool: null })
+})
+
+test('a brain that fails acks the think command as failed, with the reason', async ($, on) => {
+  brainStdout = JSON.stringify({ type: 'result', is_error: true, result: 'Credit balance is too low' }) + '\n'
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => (release = resolve))
+  const { calls } = engine(on, [
+    async () => ({ status: 200, body: { commands: [{ id: 'b2', type: 'think', request: REQUEST }] } }),
+    async () => (await held, { status: 410, body: {} }),
+  ])
+
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/ack'))
+  await $.command.run(run('off'))
+  release()
+
+  const ack = calls.find(c => c.path === '/ack')?.body
+  expect(ack?.ok).toBe(false)
+  expect(String(ack?.message)).toContain('Credit balance is too low')
 })

@@ -2,15 +2,26 @@
 // voice detector, Whisper writes down what the user said, the brain decides what to do and say,
 // and Kokoro speaks it. Only the brain leaves the machine (through the hub, to Claude).
 // It gives the window the same session the ElevenLabs engine does.
+import { isStopOnly } from '/engines/fast-path.js'
 import { speechChunks } from '/engines/speech-text.js'
 import { FRAME, RATE, createVad } from '/engines/vad.js'
 
 export const name = 'local'
 
-const MAX_CONTEXT = 20
-const MAX_CONTEXT_CHARS = 6000
-const NO_BRAIN = 'Ainda não consigo pensar sozinho nesta versão. Use a voz da ElevenLabs por enquanto.'
+// The brain reads the latest context on every turn: keep it short, it is paid in tokens.
+const MAX_CONTEXT = 8
+const MAX_CONTEXT_CHARS = 3000
 const BRAIN_FAILED = 'Não consegui pensar numa resposta agora. Tente de novo.'
+const STOPPED = 'Parei o Claude.'
+const NOT_STOPPED = 'O Claude não está trabalhando agora.'
+// Said when a tool worked but the brain gave no words.
+const DONE_SAY = {
+  luke_run_task: 'Comecei, te aviso quando terminar.',
+  luke_send_to_claude: 'Mandei para o Claude.',
+  luke_stop_claude: STOPPED,
+}
+// Tool answers that mean it worked; anything else goes back to the brain to explain.
+const TOOL_OK = /^(Started|Claude started|Added as a note|Queued|Stopped|Sent)/i
 
 // One worker for the whole page: the models stay loaded between calls.
 let worker = null
@@ -68,7 +79,7 @@ export async function startSession({
   hub,
   prepare = async () => {},
   clientTools = {},
-  brain = request => hub('POST', '/brain', request),
+  brain = query.get('voice-echo') === '1' ? echoBrain : request => hub('POST', '/brain', request),
   onConnect = () => {},
   onDisconnect = () => {},
   onError = () => {},
@@ -169,27 +180,42 @@ export async function startSession({
   }
 
   // One turn with the brain: what to do (a tool) and what to say.
-  async function think(request) {
-    let reply
+  async function askBrain(request) {
     const started = performance.now()
     try {
-      reply = await brain({ ...request, context: [...context], turns: turns.slice(-12) })
+      const reply = await brain({ ...request, context: [...context], turns: turns.slice(-12) })
       timing('brain', Math.round(performance.now() - started))
+      return reply ?? { say: '', tool: null }
     } catch (error) {
-      reply = { say: /not found/i.test(String(error?.message)) ? NO_BRAIN : BRAIN_FAILED }
+      console.warn(`[luke-voice] brain failed: ${error?.message ?? error}`)
+      return { say: BRAIN_FAILED, tool: null }
     }
+  }
+
+  async function say(text) {
+    if (!text || isEnded) return
+    turns.push({ role: 'luke', text })
+    await speak(text)
+  }
+
+  // One turn with the brain: what to do (a tool) and what to say. A tool that failed, or one that
+  // only reads (activity), goes back to the brain once, so the user hears what it means.
+  async function think(request) {
+    const reply = await askBrain(request)
     if (isEnded) return
-    let said = reply?.say ?? ''
-    const tool = reply?.tool
-    if (tool && typeof clientTools[tool.name] === 'function') {
-      const result = await clientTools[tool.name](tool.args ?? {})
-      remember(`[tool ${tool.name}] ${result}`)
-      if (reply.sayOnFailure && !/^(Started|Sent|Stopped|Queued)/i.test(String(result))) said = reply.sayOnFailure
-    }
-    if (said) {
-      turns.push({ role: 'luke', text: said })
-      await speak(said)
-    }
+    const tool = reply.tool
+    if (!tool || typeof clientTools[tool.name] !== 'function') return say(reply.say)
+    const result = String(await clientTools[tool.name](tool.args ?? {}))
+    remember(`[tool ${tool.name}] ${result}`)
+    // The brain sometimes acts without a word; the user still needs to hear that it worked.
+    if (tool.name !== 'luke_session_activity' && TOOL_OK.test(result)) return say(reply.say || DONE_SAY[tool.name] || '')
+    const followUp = await askBrain({ kind: 'tool_result', text: `${tool.name}: ${result}` })
+    return say(followUp.say)
+  }
+
+  async function stopNow() {
+    const result = String(await clientTools.luke_stop_claude?.({}))
+    return say(TOOL_OK.test(result) ? STOPPED : NOT_STOPPED)
   }
 
   // Turns run one at a time, in order.
@@ -202,6 +228,7 @@ export async function startSession({
     if (!text || isEnded || /^\W*$/.test(text)) return
     turns.push({ role: 'user', text })
     onMessage({ source: 'user', message: text })
+    if (isStopOnly(text)) return stopNow()
     await think({ kind: 'user', text })
   }
 
@@ -243,6 +270,11 @@ export async function startSession({
 
   onConnect()
   return session
+}
+
+// ?voice-echo=1: repeats what it heard, to judge the transcription and the voice without the brain.
+async function echoBrain(request) {
+  return { say: request.kind === 'user' ? `Você disse: ${request.text}` : '', tool: null }
 }
 
 export function earlyDropMessage(reason) {

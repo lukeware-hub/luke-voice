@@ -16,6 +16,9 @@ const VERSION = JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'plugin.jso
 const MAX_BODY = 64 * 1024
 const MAX_ACTIVITY = 60
 const ACK_WAIT_MS = 15_000
+// A brain turn is one short Claude Haiku call (~2.5 s); a cold start can take longer.
+const BRAIN_WAIT_MS = 40_000
+const NO_SESSION_SAY = 'Nenhuma sessão do Claude está ligada. Ligue o luke-voice no Claude Code e me chame de novo.'
 const STALE_SESSION_MS = 90_000
 
 const STATIC = {
@@ -24,6 +27,7 @@ const STATIC = {
   '/engines/elevenlabs.js': ['engines/elevenlabs.js', 'text/javascript; charset=utf-8'],
   '/engines/local.js': ['engines/local.js', 'text/javascript; charset=utf-8'],
   '/engines/speech-text.js': ['engines/speech-text.js', 'text/javascript; charset=utf-8'],
+  '/engines/fast-path.js': ['engines/fast-path.js', 'text/javascript; charset=utf-8'],
   '/engines/vad.js': ['engines/vad.js', 'text/javascript; charset=utf-8'],
   '/engines/mic-worklet.js': ['engines/mic-worklet.js', 'text/javascript; charset=utf-8'],
   '/engines/voice-worker.js': ['engines/voice-worker.js', 'text/javascript; charset=utf-8'],
@@ -143,7 +147,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     for (const resolve of waiters) resolve()
   }
 
-  function enqueue(session, command) {
+  function enqueue(session, command, wait = ACK_WAIT_MS) {
     const id = newSecret().slice(0, 12)
     session.inbox.push({ id, ...command })
     wake(session)
@@ -151,7 +155,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       const timer = setTimeout(() => {
         acks.delete(id)
         resolve({ ok: false, message: `The ${session.name} session did not answer in time.` })
-      }, ACK_WAIT_MS)
+      }, wait)
       acks.set(id, result => {
         clearTimeout(timer)
         resolve(result)
@@ -272,6 +276,28 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       return [400, { ok: false, message: 'Unknown command.' }]
     },
     'GET /config': () => [200, { provider: voiceProvider() }],
+    // The local voice's brain: the focused session's mod asks Claude Haiku and answers { say, tool }.
+    'POST /brain': async (_none, body) => {
+      const session = target()
+      if (!session) return [200, { say: NO_SESSION_SAY, tool: null }]
+      const clip = (value, max) => String(value ?? '').slice(0, max)
+      const request = {
+        kind: ['user', 'notice', 'tool_result'].includes(body.kind) ? body.kind : 'user',
+        text: clip(body.text, 4000),
+        context: (Array.isArray(body.context) ? body.context : []).slice(-8).map(c => clip(c, 1500)),
+        turns: (Array.isArray(body.turns) ? body.turns : []).slice(-12).map(t => ({ role: t?.role === 'luke' ? 'luke' : 'user', text: clip(t?.text, 500) })),
+        sessions: roster(),
+        focused,
+      }
+      const result = await enqueue(session, { type: 'think', request }, BRAIN_WAIT_MS)
+      if (!result.ok) return [502, { error: result.message }]
+      try {
+        const reply = JSON.parse(result.message)
+        return [200, { say: String(reply.say ?? ''), tool: reply.tool ?? null }]
+      } catch {
+        return [502, { error: 'The brain answered something that is not JSON.' }]
+      }
+    },
     'GET /activity': (_none, _body, url) => {
       const name = url.searchParams.get('session')
       const session = target(name)

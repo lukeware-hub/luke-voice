@@ -27,6 +27,79 @@ type Command =
   | { id: string; type: 'send'; prompt: string; when: 'now' | 'after_current' }
   | { id: string; type: 'stop' }
   | { id: string; type: 'task'; task: string }
+  | { id: string; type: 'think'; request: BrainRequest }
+
+export type BrainRequest = {
+  kind: 'user' | 'notice' | 'tool_result'
+  text: string
+  context: string[]
+  turns: Array<{ role: 'user' | 'luke'; text: string }>
+  sessions: Array<{ name: string; isBusy: boolean }>
+  focused: string | null
+}
+
+export type BrainReply = { say: string; tool: { name: string; args: Record<string, unknown> } | null }
+
+// The brain model and effort, chosen by the project owner.
+export const BRAIN_MODEL = 'claude-haiku-5-5'
+export const BRAIN_EFFORT = 'max'
+const BRAIN_TOOLS = ['luke_run_task', 'luke_send_to_claude', 'luke_stop_claude', 'luke_session_activity']
+
+// The local voice's brain is one short Claude Haiku call per turn. No tools, MCP servers,
+// settings, skills or session history: the call sees only the brain prompt and this turn (~2k tokens).
+export function brainArgs(root: string): string[] {
+  return [
+    'claude', '-p',
+    '--model', BRAIN_MODEL,
+    '--effort', BRAIN_EFFORT,
+    '--output-format', 'json',
+    '--system-prompt-file', `${root}/agent/brain-prompt.md`,
+    '--tools', '',
+    '--strict-mcp-config',
+    '--disable-slash-commands',
+    '--setting-sources', '',
+    '--no-session-persistence',
+  ]
+}
+
+// What the brain reads for one turn. Context lines come quoted as untrusted from the window.
+export function brainInput(request: BrainRequest): string {
+  const sessions = request.sessions.length
+    ? request.sessions.map(s => `${s.name} (${s.isBusy ? 'ocupada' : 'livre'}${s.name === request.focused ? ', em foco' : ''})`).join(', ')
+    : 'nenhuma'
+  const turns = request.turns.length ? request.turns.map(t => `${t.role === 'luke' ? 'luke' : 'usuário'}: ${t.text}`).join('\n') : '(vazia)'
+  const now =
+    request.kind === 'notice' ? `aviso automático: ${request.text}` : request.kind === 'tool_result' ? `resultado da ferramenta: ${request.text}` : `usuário disse: ${request.text}`
+  return [`[sessões] ${sessions}`, '[contexto]', request.context.join('\n') || '(nada)', '[conversa]', turns, `[agora] ${now}`].join('\n')
+}
+
+// Reads `claude -p --output-format json`: the reply is JSON inside the result text, maybe in a code fence.
+export function parseBrain(stdout: string): BrainReply {
+  const envelope = JSON.parse(stdout.trim().split('\n').pop() || '{}') as { result?: string; is_error?: boolean }
+  if (envelope.is_error || typeof envelope.result !== 'string') throw new Error(`the brain failed: ${envelope.result ?? 'no result'}`)
+  const text = envelope.result.trim()
+  const json = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)
+  let reply: { say?: unknown; tool?: { name?: unknown; args?: unknown } | null }
+  try {
+    reply = JSON.parse(json)
+  } catch {
+    // Plain words instead of JSON: say them, run nothing.
+    return { say: text.slice(0, 500), tool: null }
+  }
+  const name = typeof reply.tool?.name === 'string' && BRAIN_TOOLS.includes(reply.tool.name) ? reply.tool.name : null
+  const args = reply.tool?.args && typeof reply.tool.args === 'object' ? (reply.tool.args as Record<string, unknown>) : {}
+  return { say: typeof reply.say === 'string' ? reply.say : '', tool: name ? { name, args } : null }
+}
+
+async function think($: EngineInterface, command: { id: string; request: BrainRequest }) {
+  try {
+    const out = await $.process.run(brainArgs($.plugin.root), { timeoutMs: 40_000, stdin: brainInput(command.request) })
+    if (out.exitCode !== 0 && !out.stdout.trim()) throw new Error(out.stderr.trim() || `claude exited with ${out.exitCode}`)
+    return ack($, command.id, true, JSON.stringify(parseBrain(out.stdout)))
+  } catch (error) {
+    return ack($, command.id, false, `The brain did not answer: ${error instanceof Error ? error.message : error}`)
+  }
+}
 
 type Activity = { kind: 'prompt' | 'tool' | 'failure' | 'done' | 'attention' | 'info' | 'task_done'; text: string }
 
@@ -249,6 +322,8 @@ async function ack($: EngineInterface, id: string, ok: boolean, message: string)
 
 async function onCommand($: EngineInterface, command: Command) {
   if (!(await read($, isOn))) return ack($, command.id, false, 'luke-voice is off in that session.')
+  // A brain turn takes seconds: run it beside the inbox, so a tool call right after is not held up.
+  if (command.type === 'think') return void think($, command)
   if (command.type === 'stop') {
     if (!isBusy || !turnId) return ack($, command.id, false, 'Claude is not working right now.')
     try {
