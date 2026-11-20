@@ -12,9 +12,14 @@ exit /b
 # Without questions: set LUKE_VOICE_PROVIDER=local|elevenlabs and LUKE_VOICE_NO_PROMPT=1.
 # The free voice is downloaded here: set LUKE_VOICE_PROFILE=gpu|light to force the natural voice on
 # the GPU or the light browser voice instead of detecting it.
+# set LUKE_VOICE_REF=<branch or tag> installs that version instead of main (to test a change).
+# One line, from PowerShell, with no download:
+#   powershell -c "irm https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/install-luke-voice-windows.cmd | iex"
 $ErrorActionPreference = 'Stop'
 $Plugin = 'luke-voice@luke-voice'
 $Repo = 'lukeware-hub/luke-voice'
+$Ref = "$env:LUKE_VOICE_REF".Trim()
+$Source = if ($Ref) { "$Repo#$Ref" } else { $Repo }
 
 function Say($text) { Write-Host $text }
 function Step($n, $text) { Write-Host ""; Write-Host "[$n/6] $text" -ForegroundColor Cyan }
@@ -51,7 +56,17 @@ if ($major -lt 20) { Fail "Node.js $major is too old." 'Install the LTS version 
 Ok "Node.js $major found."
 
 Step 3 'Installing the luke-voice mod'
-Run-Claude @('plugin', 'marketplace', 'add', $Repo) | Out-Null
+# Claude Code keeps one source per marketplace: switching between main and a branch replaces it.
+$added = & claude plugin marketplace add $Source 2>&1 | Out-String
+if ($LASTEXITCODE -ne 0 -or $added -match 'Failed to add') {
+  if ($added -match "source doesn't match") {
+    Say "      Switching the luke-voice source to $Source."
+    Run-Claude @('plugin', 'marketplace', 'remove', 'luke-voice') | Out-Null
+    Run-Claude @('plugin', 'marketplace', 'add', $Source) | Out-Null
+  } else {
+    Fail "the command 'claude plugin marketplace add $Source' failed." $added.Trim()
+  }
+}
 Run-Claude @('plugin', 'marketplace', 'update', 'luke-voice') | Out-Null
 Run-Claude @('plugin', 'install', $Plugin) | Out-Null
 Run-Claude @('plugin', 'update', $Plugin) | Out-Null
@@ -135,7 +150,7 @@ if ($provider -eq 'local') {
 
 Write-Host ""
 Write-Host "  ======================================" -ForegroundColor Green
-Write-Host "   Installation complete: luke-voice $($entry.version)" -ForegroundColor Green
+Write-Host "   Installation complete: luke-voice $($entry.version)$(if ($Ref) { " (from $Ref)" })" -ForegroundColor Green
 Write-Host "  ======================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "  Next:"

@@ -54,3 +54,7 @@ test('the native voice starts on one short clause, so the first audio comes soon
   // ...but never mid-phrase: without a comma close by, the sentence goes whole.
   assert.deepEqual(speechChunks('Você quer que eu verifique os testes de login no repositório api? Posso?', { isNative: true }), ['Você quer que eu verifique os testes de login no repositório api?', 'Posso?'])
 })
+
+test('a question is never cut early, so the voice sees its "?" and rises at the end', () => {
+  assert.deepEqual(speechChunks('Certo, quer que eu rode os testes de login no repositório api agora?', { isNative: true }), ['Certo, quer que eu rode os testes de login no repositório api agora?'])
+})

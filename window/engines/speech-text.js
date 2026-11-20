@@ -91,12 +91,13 @@ export function respell(text) {
 // Sentences; a sentence longer than `max` is cut at a comma or space. When the first sentence is
 // longer than `first`, it is cut at its first comma (if that comma is within twice `first`), so the
 // first audio starts sooner. Never mid-phrase for that early cut: the voice would pause where a
-// person would not, so without a comma close by the first sentence goes whole.
+// person would not, so without a comma close by the first sentence goes whole. A question is never
+// cut early: the voice rises at its end only when it sees the "?".
 export function chunks(text, max = MAX_CHUNK, first = max) {
   const sentences = String(text ?? '').match(/[^.!?…]+[.!?…]*\s*/g) ?? []
   const out = []
   for (let sentence of sentences.map(s => s.trim()).filter(Boolean)) {
-    if (out.length === 0 && first < max && sentence.length > first) {
+    if (out.length === 0 && first < max && sentence.length > first && !sentence.endsWith('?')) {
       const comma = sentence.indexOf(', ')
       if (comma >= 4 && comma <= first * 2) {
         out.push(sentence.slice(0, comma + 1))

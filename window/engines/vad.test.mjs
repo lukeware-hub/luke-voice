@@ -22,12 +22,20 @@ test('rms of a constant-level signal is that level', () => {
 
 test('speech after silence starts an utterance, and silence ends it with the audio and a preroll', () => {
   const vad = createVad()
-  const events = feed(vad, [...Array(20).fill(0).map(silence), ...Array(30).fill(0).map(() => tone(0.1)), ...Array(30).fill(0).map(silence)])
+  const events = feed(vad, [...Array(20).fill(0).map(silence), ...Array(30).fill(0).map(() => tone(0.1)), ...Array(45).fill(0).map(silence)])
   assert.deepEqual(events.map(e => e.type), ['start', 'end'])
   const audio = events[1].audio
   assert.ok(audio instanceof Float32Array)
-  // preroll (10 lead-in + 8 barge frames) + speech after start (27) + silence until end (25)
-  assert.equal(audio.length, (18 + 27 + 25) * FRAME)
+  // preroll (10 lead-in + 8 barge frames) + speech after start (27) + silence until end (40)
+  assert.equal(audio.length, (18 + 27 + 40) * FRAME)
+})
+
+test('a breath of about 1 s in the middle of a sentence does not end the turn', () => {
+  const vad = createVad()
+  const speech = () => Array(20).fill(0).map(() => tone(0.1))
+  const breath = Array(31).fill(0).map(silence) // ~1 s
+  const events = feed(vad, [...Array(20).fill(0).map(silence), ...speech(), ...breath, ...speech(), ...Array(45).fill(0).map(silence)])
+  assert.deepEqual(events.map(e => e.type), ['start', 'end'])
 })
 
 test('the room is not learned while Ceci speaks, so the user talking over her still barges in', () => {
@@ -44,7 +52,7 @@ test('the room is not learned while Ceci speaks, so the user talking over her st
 test('an interruption keeps the frames that set it off and a lead-in before them', () => {
   const vad = createVad()
   feed(vad, Array(30).fill(0).map(silence), { isSpeaking: true })
-  const events = feed(vad, [...Array(20).fill(0).map(() => tone(0.2)), ...Array(30).fill(0).map(silence)], { isSpeaking: true })
+  const events = feed(vad, [...Array(20).fill(0).map(() => tone(0.2)), ...Array(45).fill(0).map(silence)], { isSpeaking: true })
   assert.deepEqual(events.map(e => e.type), ['barge', 'end'])
   // 8 loud frames set it off; the 30 quiet frames before them fit in the 50 kept while Ceci speaks.
   const kept = events[1].audio
@@ -57,7 +65,7 @@ test('speech with quiet dips between syllables still barges in, and keeps its fi
   feed(vad, Array(20).fill(0).map(silence), { isSpeaking: true })
   // Two loud frames, one quiet dip, over and over: never 8 in a row.
   const syllables = Array.from({ length: 30 }, (_, i) => (i % 3 === 2 ? silence() : tone(0.2)))
-  const events = feed(vad, [...syllables, ...Array(30).fill(0).map(silence)], { isSpeaking: true })
+  const events = feed(vad, [...syllables, ...Array(45).fill(0).map(silence)], { isSpeaking: true })
   assert.deepEqual(events.map(e => e.type), ['barge', 'end'])
   const kept = events[1].audio
   // The first syllable is in the audio: nothing before frame 20 was dropped.
@@ -66,7 +74,7 @@ test('speech with quiet dips between syllables still barges in, and keeps its fi
 
 test('a short blip is dropped instead of being transcribed', () => {
   const vad = createVad()
-  const events = feed(vad, [...Array(4).fill(0).map(() => tone(0.1)), ...Array(30).fill(0).map(silence)])
+  const events = feed(vad, [...Array(4).fill(0).map(() => tone(0.1)), ...Array(45).fill(0).map(silence)])
   assert.deepEqual(events.map(e => e.type), ['start', 'drop'])
 })
 
@@ -118,6 +126,6 @@ test('a candidate the turn model rejects waits for the long silence, and speech 
 })
 
 test('without a turn model there are no candidates, as before', () => {
-  const events = feed(createVad(), [...Array(20).fill(0).map(() => tone(0.1)), ...Array(30).fill(0).map(silence)])
+  const events = feed(createVad(), [...Array(20).fill(0).map(() => tone(0.1)), ...Array(45).fill(0).map(silence)])
   assert.deepEqual(events.map(e => e.type), ['start', 'end'])
 })

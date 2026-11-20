@@ -11,7 +11,7 @@ const DEFAULTS = {
   bargeRatio: 2.5, // while Ceci speaks, the bar is this many times higher
   startFrames: 3, // ~100 ms of speech starts an utterance
   bargeFrames: 8, // ~250 ms of loud speech interrupts Ceci
-  endFrames: 25, // ~800 ms of silence ends it
+  endFrames: 40, // ~1.3 s of silence ends it (breaths mid-sentence last up to ~1 s)
   // With a turn model (Smart Turn), ~400 ms of silence makes a candidate end: the model says
   // whether the user is done. If not, the silence must reach endFrames. 0 turns candidates off.
   candidateFrames: 0,

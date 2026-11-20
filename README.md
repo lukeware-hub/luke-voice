@@ -35,6 +35,8 @@ On the gpu profile, the hub downloads llama.cpp's official release build b12556 
 
 Each step says how to know it worked. Do them in order.
 
+**Or let Claude Code do it:** with steps 1 and 2 done, send Claude Code this message: *"Instale o luke-voice seguindo https://github.com/lukeware-hub/luke-voice/blob/main/INSTALL.md"*. [INSTALL.md](INSTALL.md) has a section for AI agents with the exact commands.
+
 ### 1. Have Claude Code working
 
 Install it from [claude.com/claude-code](https://claude.com/claude-code), open it, and sign in once.
@@ -51,7 +53,13 @@ The call window opens in Chrome, in a profile of its own, so your normal Chrome 
 
 ### 4. Run the installer
 
-- **Windows:** download [install-luke-voice-windows.cmd](https://github.com/lukeware-hub/luke-voice/releases/latest/download/install-luke-voice-windows.cmd) and double-click it. If Windows says "Windows protected your PC", click **More info** and then **Run anyway**.
+- **Windows:** open PowerShell and paste this line:
+
+  ```powershell
+  powershell -c "irm https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/install-luke-voice-windows.cmd | iex"
+  ```
+
+  Or download [install-luke-voice-windows.cmd](https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/install-luke-voice-windows.cmd) and double-click it. If Windows says "Windows protected your PC", click **More info** and then **Run anyway**.
 - **macOS / Linux:** paste this in the Terminal:
 
   ```bash
@@ -69,7 +77,7 @@ The installer has 6 steps. The last one, **Downloading Ceci's voice (up to 3 GB,
 
 **Done when:** it ends with the green message **Installation complete**. If it stops, read the **What to do** line, fix that one thing and run it again.
 
-To install without questions, set `LUKE_VOICE_PROVIDER=local` (or `elevenlabs`) and `LUKE_VOICE_NO_PROMPT=1` before you run it. Add `LUKE_VOICE_PROFILE=gpu` or `light` to force the profile.
+To install without questions, set `LUKE_VOICE_PROVIDER=local` (or `elevenlabs`) and `LUKE_VOICE_NO_PROMPT=1` before you run it. Add `LUKE_VOICE_PROFILE=gpu` or `light` to force the profile. `LUKE_VOICE_REF=<branch or tag>` installs that version instead of `main`, to test a change.
 
 ### 5. Restart Claude Code, then turn it on
 
@@ -118,7 +126,7 @@ Some things need no model call at all:
 
 ### Knowing when you finished talking
 
-Silero VAD (MIT) drops sounds without speech. Pipecat Smart Turn v3.2 (BSD-2-Clause) decides when you finished talking, after a 400 ms pause (1.2 s of silence is the hard end). Before, it was a fixed 800 ms of silence.
+Silero VAD (MIT) drops sounds without speech. Pipecat Smart Turn v3.2 (BSD-2-Clause) decides when you finished talking: it is asked after a 0.7 s pause, and only a clear "done" ends your turn. 2 s of silence always ends it (1.3 s without the model). A breath in the middle of a sentence lasts up to about 1 s, so it does not cut you off. If you go on talking before Ceci starts answering, both parts are joined into one request.
 
 ### How fast it is
 

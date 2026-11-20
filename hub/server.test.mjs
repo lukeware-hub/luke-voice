@@ -93,7 +93,7 @@ test('every external script on the page carries an integrity hash, and the page 
     assert.match(tag, /\bintegrity="sha(256|384|512)-[A-Za-z0-9+/=]+"/)
     assert.match(tag, /\bcrossorigin="anonymous"/)
   }
-  for (const path of ['/app.js', '/guard.js', '/engines/elevenlabs.js', '/engines/local.js', '/engines/speech-text.js', '/engines/fast-path.js', '/engines/vad.js', '/engines/piper-ids.js', '/engines/mic-worklet.js', '/engines/voice-worker.js']) {
+  for (const path of ['/app.js', '/guard.js', '/engines/elevenlabs.js', '/engines/local.js', '/engines/speech-text.js', '/engines/fast-path.js', '/engines/turn-join.js', '/engines/vad.js', '/engines/piper-ids.js', '/engines/mic-worklet.js', '/engines/voice-worker.js']) {
     const res = await call('GET', path)
     assert.equal(res.status, 200)
     assert.doesNotMatch(res.body, /\bfrom\s*['"]https?:|import\s*\(\s*['"]https?:/)

@@ -4,6 +4,7 @@
 // It gives the window the same session the ElevenLabs engine does.
 import { isConfirm, isDeny, isStopOnly } from '/engines/fast-path.js'
 import { speechChunks } from '/engines/speech-text.js'
+import { createTurnJoiner } from '/engines/turn-join.js'
 import { FRAME, RATE, createVad, rms } from '/engines/vad.js'
 
 export const name = 'local'
@@ -26,11 +27,12 @@ const DENIED = 'Tá bom, deixei pra lá.'
 // Ceci heard. Synthesized when the call starts, so they play with no wait.
 const ACKS = ['Certo.', 'Deixa eu ver.', 'Hum, tá bom.']
 const ACK_AFTER_MS = 600
-// With the end-of-turn model: a 400 ms pause asks it whether the user is done; if it says no,
-// 1.2 s of silence still ends the turn. Without it, 800 ms of silence, as before.
-const TURN_CANDIDATE_FRAMES = 12
-const TURN_END_FRAMES = 38
-const TURN_DONE = 0.5
+// With the end-of-turn model: a ~700 ms pause asks it whether the user is done, and only a clear
+// "done" (0.7) ends the turn; otherwise ~2 s of silence still ends it. Without the model, ~1.3 s
+// (vad.js). People breathe for 0.4-1 s mid-sentence, so shorter pauses cut them off.
+const TURN_CANDIDATE_FRAMES = 22
+const TURN_END_FRAMES = 62
+const TURN_DONE = 0.7
 // A "posso?" waits this long for its "sim".
 const PENDING_TTL_MS = 90_000
 // Tool answers that mean it worked; anything else goes back to the brain to explain.
@@ -256,6 +258,11 @@ export async function startSession({
   let busy = Promise.resolve()
   // The action Ceci asked "posso?" about: a plain yes runs it with no brain call.
   let pendingAction = null
+  // Speech that resumes right after a turn closed is joined with it (turn-join.js). `turnNow` is
+  // the user turn the running job answers, or null for jobs that are not a user turn.
+  const joiner = createTurnJoiner()
+  let turnNow = null
+  const isStale = () => turnNow !== null && !joiner.isCurrent(turnNow)
   const ackAudio = new Map()
   let nextAck = 0
 
@@ -433,7 +440,7 @@ export async function startSession({
 
   // "Certo." while the brain thinks. Not over Ceci's own voice, and never added to the conversation.
   function sayAck() {
-    if (isEnded || mode === 'speaking' || ackAudio.size === 0) return
+    if (isEnded || isStale() || mode === 'speaking' || ackAudio.size === 0) return
     const text = ACKS[nextAck++ % ACKS.length]
     const made = ackAudio.get(text)
     if (!made) return
@@ -460,7 +467,8 @@ export async function startSession({
   }
 
   async function say(text) {
-    if (!text || isEnded) return
+    if (!text || isEnded || isStale()) return
+    if (turnNow !== null) joiner.commit(turnNow)
     turns.push({ role: 'luke', text })
     await speak(text)
   }
@@ -468,7 +476,9 @@ export async function startSession({
   // Runs a tool and says how it went. A tool that failed, or one that only reads (activity), goes
   // back to the brain once, so the user hears what it means.
   async function runTool(tool, said) {
+    if (isStale()) return
     if (typeof clientTools[tool.name] !== 'function') return say(said)
+    if (turnNow !== null) joiner.commit(turnNow)
     const result = String(await clientTools[tool.name](tool.args ?? {}))
     remember(`[tool ${tool.name}] ${result}`)
     // The brain sometimes acts without a word; the user still needs to hear that it worked.
@@ -483,7 +493,7 @@ export async function startSession({
     const ack = request.kind === 'user' ? setTimeout(sayAck, ACK_AFTER_MS) : null
     const reply = await askBrain(request)
     clearTimeout(ack)
-    if (isEnded) return
+    if (isEnded || isStale()) return
     if (request.kind === 'user') pendingAction = reply.pending ? { tool: reply.pending, at: Date.now() } : null
     if (!reply.tool) return say(reply.say)
     return runTool(reply.tool, reply.say)
@@ -494,15 +504,33 @@ export async function startSession({
     return say(TOOL_OK.test(result) ? STOPPED : NOT_STOPPED)
   }
 
-  // Turns run one at a time, in order.
-  const queue = job => (busy = busy.then(job).catch(error => onError(String(error?.message ?? error))))
+  // Turns run one at a time, in order. `turn` marks a user turn, so its steps can be dropped when
+  // the user goes on talking (see turn-join.js); other jobs (notices) are never dropped.
+  const queue = (job, turn = null) =>
+    (busy = busy
+      .then(() => {
+        turnNow = turn
+        return job()
+      })
+      .catch(error => onError(String(error?.message ?? error))))
+
+  // A turn ended (or a carried part came back): transcribe and answer it.
+  function onTurnEnd(ended) {
+    if (!ended) return
+    if (ended.isJoined) console.info('[luke-voice] resumed: joined with the previous part')
+    queue(() => onUtterance(ended.audio), ended.turn)
+  }
 
   async function onUtterance(audio) {
     const seconds = (audio.length / RATE).toFixed(1)
     const { text, ms, noSpeech } = await transcribe(audio)
-    if (noSpeech) return timing('dropped', ms, `${seconds} s of sound with no speech in it`)
+    if (noSpeech) {
+      timing('dropped', ms, `${seconds} s of sound with no speech in it`)
+      // A part carried for joining comes back when what followed was no speech.
+      return onTurnEnd(joiner.dropped())
+    }
     timing('transcribe', ms, `for ${seconds} s of speech`)
-    if (!text || isEnded || /^\W*$/.test(text)) return
+    if (!text || isEnded || isStale() || /^\W*$/.test(text)) return
     turns.push({ role: 'user', text })
     onMessage({ source: 'user', message: text })
     // Any words answer the last "posso?": a plain yes runs it, a plain no drops it, anything else
@@ -521,6 +549,7 @@ export async function startSession({
     if (isNative && router) {
       const lastSaid = turns.findLast(t => t.role === 'luke')?.text ?? ''
       const routed = await router({ text, lastSaid }).catch(() => null)
+      if (isStale()) return
       if (routed?.say) {
         timing('router', routed.ms ?? 0, routed.intent)
         return say(routed.say)
@@ -540,7 +569,10 @@ export async function startSession({
       console.info('[luke-voice] barge-in: the user spoke over Ceci')
       cancelSpeech()
     }
-    if (event.type === 'end') queue(() => onUtterance(event.audio))
+    // The user goes on talking before Ceci answered: the last turn waits to be joined.
+    if ((event.type === 'start' || event.type === 'barge') && joiner.resumed()) cancelSpeech()
+    if (event.type === 'end') onTurnEnd(joiner.ended(event.audio))
+    if (event.type === 'drop') onTurnEnd(joiner.dropped())
     // A short pause: the turn model says whether the user is done, so Ceci need not wait 800 ms.
     if (event.type === 'candidate') {
       ask('endpoint', { audio: event.audio }, [event.audio.buffer])
@@ -548,7 +580,8 @@ export async function startSession({
           timing('end of turn', ms, `p=${done.toFixed(2)}`)
           if (done < TURN_DONE || isEnded) return
           const end = vad.endNow(event.id)
-          if (end?.type === 'end') queue(() => onUtterance(end.audio))
+          if (end?.type === 'end') onTurnEnd(joiner.ended(end.audio))
+          if (end?.type === 'drop') onTurnEnd(joiner.dropped())
         })
         .catch(() => {})
     }

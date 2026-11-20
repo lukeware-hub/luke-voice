@@ -6,10 +6,13 @@
 # Without questions: LUKE_VOICE_PROVIDER=local|elevenlabs (and LUKE_VOICE_NO_PROMPT=1).
 # The free voice is downloaded here: LUKE_VOICE_PROFILE=gpu|light forces the natural voice on the
 # GPU or the light browser voice instead of detecting it.
+# LUKE_VOICE_REF=<branch or tag> installs that version instead of main (to test a change).
 set -uo pipefail
 
 PLUGIN='luke-voice@luke-voice'
 REPO='lukeware-hub/luke-voice'
+REF="${LUKE_VOICE_REF:-}"
+SOURCE="$REPO${REF:+#$REF}"
 
 step() { printf '\n\033[36m[%s/6] %s\033[0m\n' "$1" "$2"; }
 ok() { printf '      \033[32mOK\033[0m  %s\n' "$1"; }
@@ -46,7 +49,17 @@ major=$(node -p "process.versions.node.split('.')[0]") || fail 'Node.js did not 
 ok "Node.js $major found."
 
 step 3 'Installing the luke-voice mod'
-run_claude plugin marketplace add "$REPO" >/dev/null
+# Claude Code keeps one source per marketplace: switching between main and a branch replaces it.
+out=$(claude plugin marketplace add "$SOURCE" 2>&1)
+if [ $? -ne 0 ] || printf '%s' "$out" | grep -q 'Failed to add'; then
+  if printf '%s' "$out" | grep -q "source doesn't match"; then
+    echo "      Switching the luke-voice source to $SOURCE."
+    run_claude plugin marketplace remove luke-voice >/dev/null
+    run_claude plugin marketplace add "$SOURCE" >/dev/null
+  else
+    fail "the command 'claude plugin marketplace add $SOURCE' failed." "$out"
+  fi
+fi
 run_claude plugin marketplace update luke-voice >/dev/null
 run_claude plugin install "$PLUGIN" >/dev/null
 run_claude plugin update "$PLUGIN" >/dev/null
@@ -131,7 +144,7 @@ else
 fi
 
 printf '\n  \033[32m======================================\033[0m\n'
-printf '  \033[32m Installation complete: luke-voice %s\033[0m\n' "$version"
+printf '  \033[32m Installation complete: luke-voice %s%s\033[0m\n' "$version" "${REF:+ (from $REF)}"
 printf '  \033[32m======================================\033[0m\n\n'
 echo '  Next:'
 echo '   1. Close Claude Code and open it again.'

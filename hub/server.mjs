@@ -37,6 +37,7 @@ const STATIC = {
   '/engines/local.js': ['engines/local.js', 'text/javascript; charset=utf-8'],
   '/engines/speech-text.js': ['engines/speech-text.js', 'text/javascript; charset=utf-8'],
   '/engines/fast-path.js': ['engines/fast-path.js', 'text/javascript; charset=utf-8'],
+  '/engines/turn-join.js': ['engines/turn-join.js', 'text/javascript; charset=utf-8'],
   '/engines/vad.js': ['engines/vad.js', 'text/javascript; charset=utf-8'],
   '/engines/piper-ids.js': ['engines/piper-ids.js', 'text/javascript; charset=utf-8'],
   '/engines/mic-worklet.js': ['engines/mic-worklet.js', 'text/javascript; charset=utf-8'],
