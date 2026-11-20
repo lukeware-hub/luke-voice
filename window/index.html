@@ -6,6 +6,7 @@
     <meta name="color-scheme" content="dark" />
     <meta name="theme-color" content="#0f1115" />
     <title>Ceci</title>
+    <link rel="icon" href="data:," />
     <link rel="preload" href="/fonts/schibsted-grotesk-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="/style.css" />
   </head>
@@ -146,7 +147,7 @@
             <h2 class="view-title">Configurações</h2>
             <p class="view-sub">Como o luke-voice está funcionando agora.</p>
             <dl id="facts" class="facts"></dl>
-            <p class="note">A voz gratuita roda neste computador. A voz ElevenLabs é opcional: troque com <code>/luke-voice voz</code>. A chave da ElevenLabs só é usada se você escolher essa voz; ela é configurada no Claude Code, com <code>/plugin configure luke-voice@luke-voice</code>, e nunca chega a esta janela.</p>
+            <p class="note">A voz gratuita roda neste computador e é baixada na instalação: a voz natural com placa de vídeo de 6 GB ou mais, a voz leve sem ela. A voz ElevenLabs é opcional: troque com <code>/luke-voice voz</code>. A chave da ElevenLabs só é usada se você escolher essa voz; ela é configurada no Claude Code, com <code>/plugin configure luke-voice@luke-voice</code>, e nunca chega a esta janela.</p>
           </section>
 
           <section class="view" id="view-help" data-name="help" aria-label="Ajuda" hidden>
@@ -164,6 +165,7 @@
                   <li><code>/luke-voice call</code> abre a janela e liga</li>
                   <li><code>/luke-voice end</code> encerra a chamada</li>
                   <li><code>/luke-voice status</code> mostra o que falta</li>
+                  <li><code>/luke-voice setup</code> baixa e testa a voz gratuita agora</li>
                 </ul>
               </article>
             </div>

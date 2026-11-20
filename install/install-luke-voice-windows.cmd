@@ -10,12 +10,14 @@ exit /b
 # luke-voice installer for Windows. It installs the luke-voice mod into Claude Code, lets you pick
 # Ceci's voice (free local, or ElevenLabs with your key), and checks that everything is in place.
 # Without questions: set LUKE_VOICE_PROVIDER=local|elevenlabs and LUKE_VOICE_NO_PROMPT=1.
+# The free voice is downloaded here: set LUKE_VOICE_PROFILE=gpu|light to force the natural voice on
+# the GPU or the light browser voice instead of detecting it.
 $ErrorActionPreference = 'Stop'
 $Plugin = 'luke-voice@luke-voice'
 $Repo = 'lukeware-hub/luke-voice'
 
 function Say($text) { Write-Host $text }
-function Step($n, $text) { Write-Host ""; Write-Host "[$n/5] $text" -ForegroundColor Cyan }
+function Step($n, $text) { Write-Host ""; Write-Host "[$n/6] $text" -ForegroundColor Cyan }
 function Ok($text) { Write-Host "      OK  $text" -ForegroundColor Green }
 function Fail($text, $help) {
   Write-Host ""
@@ -32,7 +34,7 @@ function Run-Claude([string[]]$CliArgs) {
 
 Write-Host ""
 Write-Host "  luke-voice installer" -ForegroundColor White
-Write-Host "  Ceci, a voice assistant for Claude Code. This takes about one minute."
+Write-Host "  Ceci, a voice assistant for Claude Code. This takes a few minutes."
 
 Step 1 'Checking that Claude Code is installed'
 if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
@@ -111,6 +113,26 @@ if (-not $entry.enabled) {
 }
 Ok "luke-voice $($entry.version) is installed and enabled."
 
+$voiceReady = $false
+if ($provider -eq 'local') {
+  Step 6 "Downloading Ceci's voice (up to 3 GB, only once)"
+  $setup = if ($entry.installPath) { Join-Path $entry.installPath 'hub\setup.mjs' } else { '' }
+  if ($setup -and (Test-Path $setup)) {
+    & node $setup
+    if ($LASTEXITCODE -eq 0) {
+      $voiceReady = $true
+      Ok "Ceci's voice is ready."
+    } else {
+      Write-Host '      The voice is not ready yet. The first call finishes it, or type /luke-voice setup in Claude Code.' -ForegroundColor Yellow
+    }
+  } else {
+    Say '      This version downloads the voice on the first call.'
+  }
+} else {
+  Step 6 "Ceci's voice"
+  Ok 'ElevenLabs needs no download.'
+}
+
 Write-Host ""
 Write-Host "  ======================================" -ForegroundColor Green
 Write-Host "   Installation complete: luke-voice $($entry.version)" -ForegroundColor Green
@@ -121,9 +143,9 @@ Write-Host "   1. Close Claude Code and open it again."
 Write-Host "   2. Above the prompt, click the button 'luke-voice: off' to turn it on."
 Write-Host "   3. Type /luke-voice call to start talking with Ceci."
 Write-Host "   To switch the voice later: /luke-voice voz local or /luke-voice voz elevenlabs."
-if ($provider -eq 'local') {
+if ($provider -eq 'local' -and -not $voiceReady) {
   Write-Host ""
-  Write-Host "  The first call downloads the free voice (270 to 430 MB), only once."
+  Write-Host "  The first call finishes downloading the free voice, only once."
 } elseif (-not $hasKey) {
   Write-Host ""
   Write-Host "  The ElevenLabs voice needs a key. Open this installer again to add it, or use the free voice." -ForegroundColor Yellow

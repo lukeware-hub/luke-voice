@@ -4,12 +4,13 @@
 // official release builds (Vulkan on Windows and Linux, Metal on macOS), pinned by sha256; the
 // models are in hub/models.mjs. No Python, no PyTorch.
 import { execFile, spawn as nodeSpawn } from 'node:child_process'
-import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { createWriteStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { join } from 'node:path'
 
 import { MODELS, ensureFile, ensureModel, modelsDir } from './models.mjs'
 import { stateDir } from './paths.mjs'
+import { routerBody } from './router.mjs'
 
 export const LLAMA_BUILD = 'b12556'
 const RELEASE = `https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_BUILD}`
@@ -137,11 +138,30 @@ export function readProfile(dir = engineDir()) {
   }
 }
 
-const NATIVE_MODELS = Object.keys(MODELS).filter(path => MODELS[path].group === 'native')
-export const nativeBytes = () => NATIVE_MODELS.reduce((n, p) => n + MODELS[p].size, 0)
+// The model groups each profile downloads at install time. The light profile's Kokoro is fp32 for
+// a browser with WebGPU (a machine with a GPU), fp16 for the CPU; the other one, if ever needed,
+// is downloaded on first use.
+export function profileGroups(profile, devices = []) {
+  if (profile === 'gpu') return ['turn', 'native']
+  return ['turn', 'light', devices.length ? 'light-webgpu' : 'light-cpu']
+}
 
-// Everything the gpu profile needs, downloaded and checked: the build, the profile decision, the
-// models. onProgress(loaded, total, label) reports bytes over all files. Returns the profile.
+const groupPaths = groups => Object.keys(MODELS).filter(path => groups.includes(MODELS[path].group))
+export const groupBytes = groups => groupPaths(groups).reduce((n, p) => n + MODELS[p].size, 0)
+export const nativeBytes = () => groupBytes(['native'])
+
+// Whether every model file of a saved profile is on disk (by size; the hash was checked on download).
+export function profileReady(profile, { models = modelsDir() } = {}) {
+  if (profile?.profile === 'gpu' && !(profile.exe && existsSync(profile.exe))) return false
+  return groupPaths(profileGroups(profile?.profile, profile?.devices ?? [])).every(path => {
+    const file = join(models, ...path.split('/'))
+    return existsSync(file) && statSync(file).size === MODELS[path].size
+  })
+}
+
+// Everything a profile needs, downloaded and checked: the build and the profile decision, then the
+// models of that profile. onProgress(loaded, total, label) reports bytes over all model files.
+// Returns the profile.
 export async function prepareEngine({ dir = engineDir(), models = modelsDir(), request, onProgress = () => {}, run = runFile, override = process.env.LUKE_VOICE_PROFILE ?? '' } = {}) {
   const key = platformKey()
   let exe = null
@@ -154,10 +174,10 @@ export async function prepareEngine({ dir = engineDir(), models = modelsDir(), r
   const profile = { ...choice, build: LLAMA_BUILD, exe, devices, at: new Date().toISOString() }
   mkdirSync(dir, { recursive: true })
   writeFileSync(profileFile(dir), JSON.stringify(profile, null, 2))
-  if (profile.profile !== 'gpu') return profile
-  const total = nativeBytes()
+  const groups = profileGroups(profile.profile, devices)
+  const total = groupBytes(groups)
   let done = 0
-  for (const path of NATIVE_MODELS) {
+  for (const path of groupPaths(groups)) {
     await ensureModel(path, { dir: models, request, onProgress: loaded => onProgress(done + loaded, total, 'modelos') })
     done += MODELS[path].size
   }
@@ -272,7 +292,8 @@ export function createEngine({ dir = engineDir(), models = modelsDir(), spawn = 
       }
       const router = this.url('router')
       if (router) {
-        const body = JSON.stringify({ messages: [{ role: 'user', content: 'oi' }], max_tokens: 1 })
+        // The router's whole prompt, so its long prefix is in the cache before the first utterance.
+        const body = JSON.stringify(routerBody('oi'))
         jobs.push(request(`${router}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body }).then(r => r.arrayBuffer()))
       }
       const started = Date.now()

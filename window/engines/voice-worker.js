@@ -1,17 +1,18 @@
 // The local voice, off the page's main thread: Whisper turns speech into text, and Kokoro
 // (with pt-BR phonemes from espeak-ng) turns text into speech. Piper is the light fallback voice:
 // it speaks when Kokoro cannot load, or when this computer is too slow for Kokoro.
-// All code comes from /vendor/, which the hub verified by hash; the model weights come from
-// Hugging Face and the browser caches them.
+// All code comes from /vendor/ and every model file from /models/: the hub downloaded them (at
+// install time, or on first use), checked them by sha256 and serves them from disk.
 import { AutoTokenizer, StyleTextToSpeech2Model, Tensor, WhisperFeatureExtractor, env, pipeline } from '/vendor/transformers/transformers.min.js'
 import { getPhonemes, initialize, setVoice } from '/vendor/espeak/dist/espeak.mjs'
 import { phonemeIds } from '/engines/piper-ids.js'
 
 const KOKORO = 'onnx-community/Kokoro-82M-v1.0-ONNX'
-const WHISPER = { base: 'onnx-community/whisper-base', small: 'onnx-community/whisper-small' }
-const VOICES = `https://huggingface.co/${KOKORO}/resolve/main/voices`
-// Pinned to a revision of rhasspy/piper-voices, so the voice never changes under us.
-const PIPER = 'https://huggingface.co/rhasspy/piper-voices/resolve/42301ec547bc2939386cf0ae9f9050ca05b1d3af/pt/pt_BR/faber/medium/pt_BR-faber-medium'
+const WHISPER = 'onnx-community/whisper-base'
+// The hub's copies of the pinned Hugging Face files (hub/models.mjs, group light).
+const MODELS = `${self.location.origin}/models/light/`
+const VOICES = `${MODELS}${KOKORO}/voices`
+const PIPER = `${MODELS}rhasspy/piper-voices/pt/pt_BR/faber/medium/pt_BR-faber-medium`
 const STYLE = 256
 const KOKORO_RATE = 24_000
 // Kokoro slower than real time on this computer means gaps while Ceci speaks: use Piper instead.
@@ -23,6 +24,11 @@ const MIN_SPEECH_FRAMES = 6
 const RTF_PROBE = 'Tudo certo, já estou pronta para ajudar você agora.'
 
 env.allowLocalModels = false
+// transformers.js asks the hub, as {host}{model}/{file}, for the files a model needs.
+env.remoteHost = MODELS
+env.remotePathTemplate = '{model}/'
+// The hub already keeps them on disk: no second copy in the browser.
+env.useBrowserCache = false
 env.backends.onnx.wasm.wasmPaths = '/vendor/transformers/'
 // Threads speed up the CPU path ~25% from 4 to 8; leave one core for the rest of the machine.
 env.backends.onnx.wasm.numThreads = self.crossOriginIsolated ? Math.max(1, Math.min(8, (navigator.hardwareConcurrency || 2) - 1)) : 1
@@ -60,28 +66,18 @@ async function hasWebGpu() {
   }
 }
 
-// A file from Hugging Face, kept in the browser's Cache Storage after the first download.
-async function cachedBytes(url, label) {
-  let cache = null
-  try {
-    cache = await caches.open('luke-voice-voices')
-    const hit = await cache.match(url)
-    if (hit) return hit.arrayBuffer()
-  } catch {
-    cache = null
-  }
+// A model file from the hub.
+async function modelBytes(url, label) {
   const res = await fetch(url)
-  if (!res.ok) throw new Error(`${label} did not download (${res.status}).`)
-  const bytes = await res.arrayBuffer()
-  await cache?.put(url, new Response(bytes.slice(0)))
-  return bytes
+  if (!res.ok) throw new Error(`${label} did not load (${res.status}).`)
+  return res.arrayBuffer()
 }
 
 async function loadKokoro({ device, dtype, voice }) {
   const [model, tokenizer, voiceBytes] = await Promise.all([
     StyleTextToSpeech2Model.from_pretrained(KOKORO, { dtype, device, progress_callback: progress }),
     AutoTokenizer.from_pretrained(KOKORO, { progress_callback: progress }),
-    cachedBytes(`${VOICES}/${voice}.bin`, `Voice ${voice}`),
+    modelBytes(`${VOICES}/${voice}.bin`, `Voice ${voice}`),
   ])
   kokoro = { model, tokenizer, voice: new Float32Array(voiceBytes) }
 }
@@ -161,14 +157,14 @@ async function loadPiper() {
   if (piper) return
   const ort = await loadOrt()
   const [model, config] = await Promise.all([
-    cachedBytes(`${PIPER}.onnx`, 'The Piper voice'),
-    cachedBytes(`${PIPER}.onnx.json`, 'The Piper voice settings').then(bytes => JSON.parse(new TextDecoder().decode(bytes))),
+    modelBytes(`${PIPER}.onnx`, 'The Piper voice'),
+    modelBytes(`${PIPER}.onnx.json`, 'The Piper voice settings').then(bytes => JSON.parse(new TextDecoder().decode(bytes))),
   ])
   const session = await ort.InferenceSession.create(new Uint8Array(model), { executionProviders: ['wasm'] })
   piper = { ort, session, config }
 }
 
-async function load({ voice = 'pf_dora', language = 'pt-br', device: forced, dtype, threads, stt: sttSize, sttDtype, sttDevice: sttDeviceChoice, tts: ttsChoice, native = false } = {}) {
+async function load({ voice = 'pf_dora', language = 'pt-br', device: forced, dtype, threads, sttDtype, sttDevice: sttDeviceChoice, tts: ttsChoice, native = false } = {}) {
   if (threads) env.backends.onnx.wasm.numThreads = threads
   // The native engine speaks and listens in the hub: here only the end-of-turn and speech checks.
   if (native) {
@@ -184,15 +180,14 @@ async function load({ voice = 'pf_dora', language = 'pt-br', device: forced, dty
   // Kokoro: fp32 on WebGPU (fp16 there gives NaN audio); fp16 on the CPU, as fast as fp32 at half the download.
   const kokoroType = dtype ?? (gpu ? 'fp32' : 'fp16')
   // Whisper base q8 on the CPU everywhere: 77 MB instead of 291 MB for fp32 on WebGPU, ~1.4 s
-  // per 4 s of speech. On WebGPU only fp32 works (q8 and fp16 give nonsense there), and Whisper
-  // small is ~1 GB in fp32 or ~5 s per 4 s on the CPU, so base stays.
+  // per 4 s of speech. On WebGPU only fp32 works (q8 and fp16 give nonsense there).
   const sttDevice = sttDeviceChoice ?? 'wasm'
   const whisperType = sttDtype
     ? { encoder_model: sttDtype, decoder_model_merged: sttDtype }
     : sttDevice === 'webgpu'
       ? { encoder_model: 'fp32', decoder_model_merged: 'fp32' }
       : { encoder_model: 'q8', decoder_model_merged: 'q8' }
-  sttName = `whisper-${WHISPER[sttSize] ? sttSize : 'base'}`
+  sttName = 'whisper-base'
   const loadVoice = async () => {
     if (ttsChoice === 'piper') {
       engine = 'piper'
@@ -209,7 +204,7 @@ async function load({ voice = 'pf_dora', language = 'pt-br', device: forced, dty
     }
   }
   const [recognizer] = await Promise.all([
-    pipeline('automatic-speech-recognition', WHISPER[sttSize] ?? WHISPER.base, { dtype: whisperType, device: sttDevice, progress_callback: progress }),
+    pipeline('automatic-speech-recognition', WHISPER, { dtype: whisperType, device: sttDevice, progress_callback: progress }),
     loadVoice(),
     initialize('/vendor/espeak/dist').then(() => setVoice(language)),
     // The turn models are a bonus: without them the level detector ends turns as before.

@@ -76,7 +76,7 @@ function ask(type, data = {}, transfer = []) {
 const query = new URLSearchParams(location.search)
 const isDebug = query.get('voice-debug') === '1'
 const overrides = Object.fromEntries(
-  [['device', query.get('voice-device')], ['dtype', query.get('voice-dtype')], ['threads', Number(query.get('voice-threads')) || null], ['stt', query.get('voice-stt')], ['sttDtype', query.get('voice-stt-dtype')], ['tts', query.get('voice-tts')], ['sttDevice', query.get('voice-stt-device')]].filter(([, v]) => v),
+  [['device', query.get('voice-device')], ['dtype', query.get('voice-dtype')], ['threads', Number(query.get('voice-threads')) || null], ['sttDtype', query.get('voice-stt-dtype')], ['tts', query.get('voice-tts')], ['sttDevice', query.get('voice-stt-device')]].filter(([, v]) => v),
 )
 // The worker loads either the whole browser voice, or (with the native engine) only the end-of-turn
 // models. A worker loaded one way is replaced when the next call needs the other.
@@ -185,12 +185,17 @@ listeners.add(data => {
 
 const percent = ({ loaded, total }) => Math.min(99, Math.round((loaded / total) * 100))
 
+// How long a call waits for the native engine the hub is starting, before using the light voice.
+const NATIVE_WAIT_MS = 90_000
+
 export async function startSession({
   hub,
   native: forceNative = query.get('voice-native'),
   prepare = async () => {},
   clientTools = {},
   brain = query.get('voice-echo') === '1' ? echoBrain : request => hub('POST', '/brain', request),
+  // The instant layer of the hybrid brain (native engine only): small talk answered on this machine.
+  router = query.get('voice-echo') === '1' ? null : request => hub('POST', '/route', request),
   onConnect = () => {},
   onDisconnect = () => {},
   onError = () => {},
@@ -205,7 +210,15 @@ export async function startSession({
   listeners.add(showProgress)
   // The native engine (gpu profile) speaks and listens when both its servers are up; otherwise this
   // call uses the browser voice, and says so while the native one is still downloading.
-  const config = await hub('GET', '/config').catch(() => ({}))
+  let config = await hub('GET', '/config').catch(() => ({}))
+  // The hub is still starting the native engine (it loads in ~20 s after the hub starts): wait for
+  // it, rather than spend the whole call on the light voice. A download takes minutes: no wait then.
+  const waitUntil = Date.now() + NATIVE_WAIT_MS
+  while (forceNative !== '0' && config.engine === 'starting' && !config.download?.total && Date.now() < waitUntil) {
+    onStatus('Aquecendo a voz natural da Ceci…')
+    await new Promise(resolve => setTimeout(resolve, 1000))
+    config = await hub('GET', '/config').catch(() => ({}))
+  }
   const isNative = forceNative === '0' ? false : Boolean(config.native?.tts && config.native?.asr)
   if (!isNative && config.download?.total) onStatus(`Preparando a voz natural: ${percent(config.download)}%. Por enquanto, a voz leve.`)
   try {
@@ -504,6 +517,14 @@ export async function startSession({
     if (action && isConfirm(text)) {
       timing('fast path', 0, `yes to "posso?": ${action.tool.name}`)
       return runTool(action.tool, '')
+    }
+    if (isNative && router) {
+      const lastSaid = turns.findLast(t => t.role === 'luke')?.text ?? ''
+      const routed = await router({ text, lastSaid }).catch(() => null)
+      if (routed?.say) {
+        timing('router', routed.ms ?? 0, routed.intent)
+        return say(routed.say)
+      }
     }
     await think({ kind: 'user', text })
   }

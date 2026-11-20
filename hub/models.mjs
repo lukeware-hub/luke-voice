@@ -35,6 +35,113 @@ export const MODELS = {
     group: 'turn',
   },
 
+  // The light profile (no GPU with 6 GB): the browser voice, served by the hub so the call never
+  // waits on Hugging Face. Kokoro 82M (Apache-2.0): fp16 on the CPU (light-cpu), fp32 on WebGPU (light-webgpu).
+  'light/onnx-community/Kokoro-82M-v1.0-ONNX/config.json': {
+    url: 'https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/1939ad2a8e416c0acfeecc08a694d14ef25f2231/config.json',
+    sha256: 'df34b4f930b23447cd4dc410fabfb42eb3f24e803e6c3f97d618fb359380a36f',
+    size: 44,
+    group: 'light',
+  },
+  'light/onnx-community/Kokoro-82M-v1.0-ONNX/tokenizer.json': {
+    url: 'https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/1939ad2a8e416c0acfeecc08a694d14ef25f2231/tokenizer.json',
+    sha256: '77a02c8e164413299b4b4c403b14f8e0e1c1b727db4d46a09d6327b861060a34',
+    size: 3497,
+    group: 'light',
+  },
+  'light/onnx-community/Kokoro-82M-v1.0-ONNX/tokenizer_config.json': {
+    url: 'https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/1939ad2a8e416c0acfeecc08a694d14ef25f2231/tokenizer_config.json',
+    sha256: 'be1cb066d6ef6b074b3f15e6a6dd21ac88ff3cdaedf325f0aaed686c70f75d20',
+    size: 113,
+    group: 'light',
+  },
+  'light/onnx-community/Kokoro-82M-v1.0-ONNX/onnx/model_fp16.onnx': {
+    url: 'https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/1939ad2a8e416c0acfeecc08a694d14ef25f2231/onnx/model_fp16.onnx',
+    sha256: 'ba4527a874b42b21e35f468c10d326fdff3c7fc8cac1f85e9eb6c0dfc35c334a',
+    size: 163234740,
+    group: 'light-cpu',
+  },
+  'light/onnx-community/Kokoro-82M-v1.0-ONNX/onnx/model.onnx': {
+    url: 'https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/1939ad2a8e416c0acfeecc08a694d14ef25f2231/onnx/model.onnx',
+    sha256: '8fbea51ea711f2af382e88c833d9e288c6dc82ce5e98421ea61c058ce21a34cb',
+    size: 325532232,
+    group: 'light-webgpu',
+  },
+  'light/onnx-community/Kokoro-82M-v1.0-ONNX/voices/pf_dora.bin': {
+    url: 'https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/1939ad2a8e416c0acfeecc08a694d14ef25f2231/voices/pf_dora.bin',
+    sha256: '3da7b5b2d91847ebf5646f57631af6ececae3c29a89cd300f06edf9aa6cfe9ee',
+    size: 522240,
+    group: 'light',
+  },
+  // Whisper base (MIT): q8 on the CPU; fp32 only when WebGPU is asked for (light-extra, on demand).
+  'light/onnx-community/whisper-base/config.json': {
+    url: 'https://huggingface.co/onnx-community/whisper-base/resolve/27a07b4b52b3a4c5886134bb4320e93e1a4bbc7c/config.json',
+    sha256: 'f4d0608f7d918166da7edb3e188de5ef1bfe70d9802e785d271fd88111e9cf4b',
+    size: 2243,
+    group: 'light',
+  },
+  'light/onnx-community/whisper-base/generation_config.json': {
+    url: 'https://huggingface.co/onnx-community/whisper-base/resolve/27a07b4b52b3a4c5886134bb4320e93e1a4bbc7c/generation_config.json',
+    sha256: '61070cf8de25b1e9256e8e102ded49d8d24a8369ed36ef84fdf21549e68125a0',
+    size: 3832,
+    group: 'light',
+  },
+  'light/onnx-community/whisper-base/preprocessor_config.json': {
+    url: 'https://huggingface.co/onnx-community/whisper-base/resolve/27a07b4b52b3a4c5886134bb4320e93e1a4bbc7c/preprocessor_config.json',
+    sha256: 'a6a76d28c93edb273669eb9e0b0636a2bddbb1272c3261e47b7ca6dfdbac1b8d',
+    size: 339,
+    group: 'light',
+  },
+  'light/onnx-community/whisper-base/tokenizer.json': {
+    url: 'https://huggingface.co/onnx-community/whisper-base/resolve/27a07b4b52b3a4c5886134bb4320e93e1a4bbc7c/tokenizer.json',
+    sha256: '27fc476bfe7f17299480be2273fc0608e4d5a99aba2ab5dec5374b4482d1a566',
+    size: 2480466,
+    group: 'light',
+  },
+  'light/onnx-community/whisper-base/tokenizer_config.json': {
+    url: 'https://huggingface.co/onnx-community/whisper-base/resolve/27a07b4b52b3a4c5886134bb4320e93e1a4bbc7c/tokenizer_config.json',
+    sha256: '2e036e4dbacfdeb7242c7d4ec4149f4a16e86026048f94d1637e3a8ee9c6a573',
+    size: 282682,
+    group: 'light',
+  },
+  'light/onnx-community/whisper-base/onnx/encoder_model_quantized.onnx': {
+    url: 'https://huggingface.co/onnx-community/whisper-base/resolve/27a07b4b52b3a4c5886134bb4320e93e1a4bbc7c/onnx/encoder_model_quantized.onnx',
+    sha256: '5862993336bf33acd23736071aae2b32261d3b1b2f37780194460d4ef974dd46',
+    size: 23201314,
+    group: 'light',
+  },
+  'light/onnx-community/whisper-base/onnx/decoder_model_merged_quantized.onnx': {
+    url: 'https://huggingface.co/onnx-community/whisper-base/resolve/27a07b4b52b3a4c5886134bb4320e93e1a4bbc7c/onnx/decoder_model_merged_quantized.onnx',
+    sha256: 'fa3ef9902734ce5ae6f9ef2bdb2ba9a6c4b5785b09f4f420ce036573dc9d090b',
+    size: 53693315,
+    group: 'light',
+  },
+  'light/onnx-community/whisper-base/onnx/encoder_model.onnx': {
+    url: 'https://huggingface.co/onnx-community/whisper-base/resolve/27a07b4b52b3a4c5886134bb4320e93e1a4bbc7c/onnx/encoder_model.onnx',
+    sha256: 'a9f3b752833b49e880dec91ee5b6d936112be7c3ea07c221024ba493439f46fe',
+    size: 82468078,
+    group: 'light-extra',
+  },
+  'light/onnx-community/whisper-base/onnx/decoder_model_merged.onnx': {
+    url: 'https://huggingface.co/onnx-community/whisper-base/resolve/27a07b4b52b3a4c5886134bb4320e93e1a4bbc7c/onnx/decoder_model_merged.onnx',
+    sha256: '514903744bb1b45803ec571af99b31110491c6f77b0a154825866995fb124b73',
+    size: 208521528,
+    group: 'light-extra',
+  },
+  // Piper pt_BR faber (MIT voice data): the fallback when Kokoro is too slow on this computer.
+  'light/rhasspy/piper-voices/pt/pt_BR/faber/medium/pt_BR-faber-medium.onnx': {
+    url: 'https://huggingface.co/rhasspy/piper-voices/resolve/42301ec547bc2939386cf0ae9f9050ca05b1d3af/pt/pt_BR/faber/medium/pt_BR-faber-medium.onnx',
+    sha256: '75e913eb463db0b6ac7ddf68d3e4c9ac19ace36dc3b710a81039b448352b8ffc',
+    size: 63221984,
+    group: 'light',
+  },
+  'light/rhasspy/piper-voices/pt/pt_BR/faber/medium/pt_BR-faber-medium.onnx.json': {
+    url: 'https://huggingface.co/rhasspy/piper-voices/resolve/42301ec547bc2939386cf0ae9f9050ca05b1d3af/pt/pt_BR/faber/medium/pt_BR-faber-medium.onnx.json',
+    sha256: '6b6801319e5a70aa4d75c63343515f55d1cd671ecd1ac511586bc16216812261',
+    size: 6257,
+    group: 'light',
+  },
+
   // The native engine (gpu profile), all run by llama.cpp's llama-server (hub/engine.mjs).
   // Qwen3-TTS 0.6B Base (Apache-2.0): Ceci's voice, cloned from agent/ceci-voice.wav, streamed.
   'native/qwen3-tts-0.6b-base-q8_0.gguf': {

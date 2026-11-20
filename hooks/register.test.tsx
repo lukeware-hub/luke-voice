@@ -13,6 +13,8 @@ type Call = { method: string; path: string; port: string; body: Record<string, u
 let brainStdout = ''
 // What $.model.complete answers in the brain tests.
 let brainComplete: Record<string, unknown> = { isAnswered: true, text: '{"say":"","tool":null}' }
+// What hub/setup.mjs prints in the /luke-voice setup tests.
+let setupStdout = ''
 // LUKE_VOICE_PORT as the engine reports it; unset in every test but the port one.
 let envPort: string | undefined
 
@@ -37,7 +39,7 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
   on('model.complete', (_, e) => (completes.push(e), { value: brainComplete }))
   on('process.run', (_, e) => (
     launches.push(e),
-    { value: { exitCode: 0, stdout: e.argv[0] === 'claude' ? brainStdout : '{"ok":true,"serviceToken":"svc"}\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    { value: { exitCode: 0, stdout: e.argv[0] === 'claude' ? brainStdout : String(e.argv[1]).endsWith('setup.mjs') ? setupStdout : '{"ok":true,"serviceToken":"svc"}\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   ))
   on('ui.status', (_, e) => (statuses.push(e.text), { value: undefined }))
   on('ui.toast', () => ({ value: undefined }))
@@ -53,6 +55,7 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
     let body: unknown = { ok: true }
     if (url.pathname === '/subscribe') body = { token: 'session-1', name: 'api', hasKey: true }
     if (url.pathname === '/health' && health) body = health
+    if (url.pathname === '/setup') body = { started: true }
     if (url.pathname === '/inbox') {
       const answer = inbox[polls++]
       ;({ status, body } = answer ? await answer() : after)
@@ -605,4 +608,41 @@ test('LUKE_VOICE_PORT moves the hub address the mod calls', async ($, on) => {
   envPort = undefined
 
   expect(calls.find(c => c.path === '/subscribe')?.port).toBe('4861')
+})
+
+test('in help, the free voice shows its profile: natural on the GPU, light, or downloading', async ($, on) => {
+  engine(on, [], undefined, undefined, { app: 'luke-voice', version: '0.9.0', provider: 'local', hasKey: false, profile: 'gpu', native: { tts: true, asr: true, router: true }, download: null })
+  on('fs.read', () => ({ value: '{"version":"0.9.0"}' }))
+  const help = (await $.command.run(run('help'))).text
+  expect(help).toContain('✓ Perfil: voz natural na placa de vídeo (tts, asr, router rodando)')
+  expect(help).toContain('/luke-voice setup')
+})
+
+test('/luke-voice setup with luke-voice on asks the hub to prepare the voice in the background', async ($, on) => {
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => (release = resolve))
+  // The inbox stays open, so the session keeps its token.
+  const { calls } = engine(on, [async () => (await held, { status: 410, body: {} })])
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/inbox'))
+  const text = (await $.command.run(run('setup'))).text
+  await $.command.run(run('off'))
+  release()
+  expect(calls.some(c => c.path === '/setup' && c.method === 'POST')).toBe(true)
+  expect(text).toContain('Acompanhe com /luke-voice status')
+})
+
+test('/luke-voice setup with luke-voice off runs the setup here and says how it went', async ($, on) => {
+  const { launches } = engine(on)
+  setupStdout = 'Voice models: 100%\n{"ok":true,"profile":"gpu","reason":"RTX 3060 Ti, 8238 MiB","heard":"Oi, eu sou a Ceci.","problems":[]}\n'
+  const text = (await $.command.run(run('setup'))).text
+  expect(text).toContain('Voz natural pronta, na placa de vídeo (RTX 3060 Ti, 8238 MiB)')
+  expect(text).toContain('a Ceci disse: "Oi, eu sou a Ceci."')
+  const argv = (launches.at(-1) as { argv: string[] }).argv
+  expect(String(argv[1]).endsWith('hub/setup.mjs')).toBe(true)
+  expect(argv.slice(2)).toEqual(['--json'])
+  setupStdout = '{"ok":true,"profile":"light","reason":"no GPU found","problems":[]}\n'
+  expect((await $.command.run(run('setup'))).text).toContain('Voz leve pronta, no navegador (no GPU found)')
+  setupStdout = '{"ok":false,"error":"Download failed (404)"}\n'
+  expect((await $.command.run(run('setup'))).text).toContain('Não consegui preparar a voz: Download failed (404)')
 })

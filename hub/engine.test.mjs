@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { test } from 'node:test'
 
-import { BINARIES, MIN_VRAM_MIB, SERVICES, createEngine, ensureBinaries, parseDevices, pickProfile, platformKey } from './engine.mjs'
+import { BINARIES, MIN_VRAM_MIB, SERVICES, createEngine, ensureBinaries, groupBytes, parseDevices, pickProfile, platformKey, profileGroups } from './engine.mjs'
 import { MODELS } from './models.mjs'
 
 const fresh = () => mkdtempSync(join(tmpdir(), 'luke-engine-'))
@@ -32,6 +32,21 @@ test('every native service names models that exist in the manifest, and the gpu 
   bytes += Object.values(MODELS).filter(m => m.group === 'turn').reduce((n, m) => n + m.size, 0)
   bytes += Math.max(...Object.values(BINARIES).map(b => b.size))
   assert.ok(bytes < 3e9, `${(bytes / 1e9).toFixed(2)} GB`)
+})
+
+test('each profile downloads its own groups at install time, within budget', () => {
+  assert.deepEqual(profileGroups('gpu', [{ name: 'Vulkan0' }]), ['turn', 'native'])
+  assert.deepEqual(profileGroups('light', []), ['turn', 'light', 'light-cpu'])
+  assert.deepEqual(profileGroups('light', [{ name: 'Vulkan0' }]), ['turn', 'light', 'light-webgpu'])
+  const build = Math.max(...Object.values(BINARIES).map(b => b.size))
+  assert.ok(groupBytes(profileGroups('gpu')) + build < 3e9)
+  // The light profile on the CPU: about a third of a gigabyte; with WebGPU, Kokoro is fp32.
+  assert.ok(groupBytes(profileGroups('light', [])) < 350e6, String(groupBytes(profileGroups('light', []))))
+  assert.ok(groupBytes(profileGroups('light', [{}])) + build < 550e6)
+  // Every group named by a profile exists.
+  for (const group of new Set([...profileGroups('gpu'), ...profileGroups('light', []), ...profileGroups('light', [{}])])) {
+    assert.ok(Object.values(MODELS).some(m => m.group === group), group)
+  }
 })
 
 test('devices are read from llama-server --list-devices, Vulkan and Metal', () => {

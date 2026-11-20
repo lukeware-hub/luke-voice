@@ -441,6 +441,70 @@ test('speech goes to the native engine: /stt sends the WAV with the glossary, /t
   }
 })
 
+test('small talk is routed on the native router; with no router, everything goes to the brain', async () => {
+  const fake = createHttpServer(async (req, res) => {
+    const chunks = []
+    for await (const c of req) chunks.push(c)
+    const { messages } = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+    const intent = messages.at(-1).content === 'valeu!' ? 'thanks' : 'claude'
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ intent }) } }] }))
+  })
+  await new Promise(resolve => fake.listen(0, '127.0.0.1', resolve))
+  const base = `http://127.0.0.1:${fake.address().port}`
+  const engine = { url: name => (name === 'router' ? base : null), status: () => ({ router: true }) }
+  const hub4 = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {}, engine })
+  await new Promise(resolve => hub4.listen(0, '127.0.0.1', resolve))
+  const routeAt = (p, text) =>
+    new Promise((resolve, reject) => {
+      const req = request({ host: '127.0.0.1', port: p, method: 'POST', path: '/route', headers: { host: `127.0.0.1:${p}`, 'x-luke-key': WINDOW, 'content-type': 'application/json' } }, res => {
+        let out = ''
+        res.on('data', c => (out += c))
+        res.on('end', () => resolve(JSON.parse(out)))
+      })
+      req.on('error', reject)
+      req.end(JSON.stringify({ text }))
+    })
+  try {
+    const thanks = await routeAt(hub4.address().port, 'valeu!')
+    assert.equal(thanks.intent, 'thanks')
+    assert.ok(thanks.say)
+    assert.deepEqual([(await routeAt(hub4.address().port, 'roda os testes')).intent], ['claude'])
+    // The default hub has no engine: the brain decides.
+    assert.equal((await routeAt(port, 'valeu!')).intent, 'claude')
+  } finally {
+    hub4.closeAllConnections()
+    hub4.close()
+    fake.close()
+  }
+})
+
+test('/setup runs the hub setup for a subscribed session only', async () => {
+  let asked = 0
+  const hub5 = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {}, onSetup: () => (asked++, { started: true }) })
+  await new Promise(resolve => hub5.listen(0, '127.0.0.1', resolve))
+  const p = hub5.address().port
+  const post = (path, body, auth) =>
+    new Promise((resolve, reject) => {
+      const req = request({ host: '127.0.0.1', port: p, method: 'POST', path, headers: { host: `127.0.0.1:${p}`, 'content-type': 'application/json', authorization: `Bearer ${auth}` } }, res => {
+        let out = ''
+        res.on('data', c => (out += c))
+        res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(out) }))
+      })
+      req.on('error', reject)
+      req.end(JSON.stringify(body))
+    })
+  try {
+    assert.equal((await post('/setup', {}, WINDOW)).status, 401)
+    const { token } = (await post('/subscribe', { cwd: '/repos/api' }, SERVICE)).body
+    assert.deepEqual(await post('/setup', {}, token), { status: 200, body: { started: true } })
+    assert.equal(asked, 1)
+  } finally {
+    hub5.closeAllConnections()
+    hub5.close()
+  }
+})
+
 test('with no native engine, /stt and /tts answer 503 so the window keeps its own voice', async () => {
   const hub3 = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {} })
   await new Promise(resolve => hub3.listen(0, '127.0.0.1', resolve))

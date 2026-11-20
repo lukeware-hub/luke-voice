@@ -567,11 +567,62 @@ async function statusText($: EngineInterface) {
     `luke-voice: on (${l.state}${l.name ? `, session "${l.name}"` : ''})`,
     health?.ok ? `hub: up, version ${h.version}, ${h.sessions} session(s), call ${h.call}, window ${h.isWindowOpen ? 'open' : 'closed'}` : 'hub: down',
     health?.ok ? `voz: ${voiceName(String(h.provider ?? 'elevenlabs'))}` : null,
+    health?.ok && h.provider === 'local' ? `perfil: ${profileText(h)}` : null,
     health?.ok && (h.provider ?? 'elevenlabs') === 'elevenlabs' && !h.hasKey ? 'missing: ElevenLabs API key' : null,
     queued.length ? `queued prompts: ${queued.length}` : null,
   ]
     .filter(Boolean)
     .join('\n')
+}
+
+// The free voice's profile as the hub reports it: natural on the GPU, light in the browser, or
+// still downloading.
+type EngineHealth = { profile?: string | null; native?: Record<string, boolean>; download?: { loaded?: number; total?: number; error?: string } | null }
+function profileText(h: EngineHealth) {
+  const d = h.download
+  if (d?.error) return `erro ao preparar a voz natural (${short(d.error, 80)}). Tente /luke-voice setup`
+  if (d?.total) return `baixando a voz natural, ${Math.min(99, Math.round(((d.loaded ?? 0) / d.total) * 100))}%`
+  if (h.profile === 'gpu') {
+    const up = Object.entries(h.native ?? {}).filter(([, isUp]) => isUp).map(([name]) => name)
+    return `voz natural na placa de vídeo${up.length ? ` (${up.join(', ')} rodando)` : ' (sobe na próxima chamada)'}`
+  }
+  if (h.profile === 'light') return 'voz leve no navegador (sem placa de vídeo com 6 GB)'
+  return 'ainda não preparado: /luke-voice setup baixa a voz agora'
+}
+
+// /luke-voice setup: downloads and checks the free voice now (as the installer does), instead of
+// on the first call. With luke-voice on, the hub does it in the background (up to 3 GB with a GPU)
+// and /luke-voice status shows the progress; with it off, hub/setup.mjs runs here, for at most ten
+// minutes, and a cut download resumes on the next run.
+async function setupCommand($: EngineInterface) {
+  if (token) {
+    const res = await hubFetch($, 'POST', '/setup', {}).catch(() => null)
+    const answer = (res?.json ?? {}) as { started?: boolean; reason?: string }
+    if (res?.ok && answer.started) return 'Preparando a voz da Ceci no hub: ele baixa o que falta e escolhe o perfil. Acompanhe com /luke-voice status.'
+    if (res?.ok && answer.reason === 'running') return 'A voz já está sendo preparada. Acompanhe com /luke-voice status.'
+  }
+  let out: { stdout: string; stderr: string } | null = null
+  try {
+    out = await $.process.run(['node', `${$.plugin.root}/hub/setup.mjs`, '--json'], { timeoutMs: 10 * 60_000 })
+  } catch {
+    return 'O download ainda não terminou. Rode /luke-voice setup de novo: ele continua de onde parou.'
+  }
+  let result: { ok?: boolean; profile?: string; reason?: string; heard?: string; problems?: string[]; error?: string } = {}
+  try {
+    result = JSON.parse(out.stdout.trim().split('\n').pop() || '{}')
+  } catch {
+    result = { ok: false, error: out.stderr.trim() || 'setup did not answer' }
+  }
+  if (result.error) return `Não consegui preparar a voz: ${short(result.error, 200)}. Veja a internet e tente de novo.`
+  if (result.profile === 'gpu' && result.ok) {
+    return [
+      `Voz natural pronta, na placa de vídeo (${result.reason}).`,
+      result.heard ? `No teste, a Ceci disse: "${result.heard}".` : 'Ela já estava rodando no hub.',
+      'Na próxima chamada, é ela que fala.',
+    ].join('\n')
+  }
+  if (result.profile === 'gpu') return `A voz natural baixou, mas o teste falhou: ${(result.problems ?? []).join('; ')}. Por enquanto as chamadas usam a voz leve.`
+  return `Voz leve pronta, no navegador (${result.reason || 'sem placa de vídeo com 6 GB'}). Nada mais para baixar.`
 }
 
 // The installed plugin's version, to tell when the running hub is an older one.
@@ -588,12 +639,12 @@ async function pluginVersion($: EngineInterface) {
 async function helpText($: EngineInterface) {
   const on = await read($, isOn)
   const health = await hubFetch($, 'GET', '/health', undefined, null).catch(() => null)
-  const h = (health?.ok && health.json.app === 'luke-voice' ? health.json : null) as {
+  const h = (health?.ok && health.json.app === 'luke-voice' ? health.json : null) as ({
     version?: string
     hasKey?: boolean
     keyStatus?: string
     provider?: string
-  } | null
+  } & EngineHealth) | null
   const version = await pluginVersion($)
   const mark = (ok: boolean) => (ok ? '✓' : '✗')
   // A hub older than 0.8.0 does not report a voice: it only has ElevenLabs.
@@ -603,6 +654,7 @@ async function helpText($: EngineInterface) {
     `${mark(on)} luke-voice ligado${on ? '' : ': clique no botão "✦ luke-voice: off" acima do prompt, ou digite /luke-voice'}`,
     `${mark(Boolean(h))} Servidor local (hub)${h ? ` rodando, versão ${h.version}` : ': não está rodando. Ele sobe sozinho quando você liga o luke-voice'}`,
     h ? `✓ Voz: ${voiceName(provider)}. Para trocar: /luke-voice voz` : null,
+    h && provider === 'local' ? `${mark(Boolean(h.profile) && !h.download?.error)} Perfil: ${profileText(h)}` : null,
     // Only the ElevenLabs voice needs a key.
     h && isEleven
       ? h.keyStatus === 'rejected'
@@ -628,7 +680,8 @@ async function helpText($: EngineInterface) {
     '     O /reload-plugins não basta para trocar de versão.',
     '',
     'As vozes (troque com /luke-voice voz):',
-    '  - Gratuita (padrão): roda no seu computador. A primeira chamada baixa de 270 a 430 MB (mais com placa de vídeo), uma vez só.',
+    '  - Gratuita (padrão): roda no seu computador e é baixada na instalação, uma vez só.',
+    '    Com placa de vídeo de 6 GB ou mais: a voz natural da Ceci (2,8 GB). Sem ela: a voz leve, no navegador (cerca de 320 MB).',
     '    O áudio não sai do seu computador; só o texto do que você falou vai para o Claude (Claude Haiku 5.5, da sua conta).',
     '  - ElevenLabs (opcional, paga por uso): crie uma conta em elevenlabs.io e copie uma chave em elevenlabs.io/app/settings/api-keys.',
     '    Salve a chave com: /plugin configure luke-voice@luke-voice e escolha /luke-voice voz elevenlabs.',
@@ -647,6 +700,7 @@ async function helpText($: EngineInterface) {
     '  /luke-voice end      encerra a chamada',
     '  /luke-voice window   traz a janela para a frente',
     '  /luke-voice voz      mostra ou troca a voz (local ou elevenlabs)',
+    '  /luke-voice setup    baixa e testa a voz gratuita agora (se a instalação não baixou)',
     '  /luke-voice status   mostra o estado técnico',
     '  /luke-voice help     mostra esta ajuda',
     '',
@@ -658,7 +712,7 @@ async function helpText($: EngineInterface) {
     '',
     'Se algo não funcionar:',
     '  - Não ouço nada: veja se o som do computador está ligado e se a janela mostra "Em chamada".',
-    '  - Voz gratuita demora para falar: o primeiro download leva alguns minutos; depois, sem placa de vídeo, cada resposta leva 1 a 2 segundos a mais.',
+    '  - Voz gratuita demora para falar: veja o Perfil acima. Se ainda está baixando, espere ou rode /luke-voice setup. Sem placa de vídeo, cada resposta leva 1 a 2 segundos a mais.',
     '  - "No ElevenLabs API key" ou "Chave faltando": salve a chave (veja "As vozes") e reinicie o Claude Code, ou volte para a voz gratuita com /luke-voice voz local.',
     '  - "Hub offline" na janela: ligue o luke-voice no Claude Code; a janela volta sozinha.',
     '  - ElevenLabs: a chamada não conecta mais: os minutos grátis do mês podem ter acabado. Veja em elevenlabs.io.',
@@ -680,7 +734,7 @@ export const register: Register = (on, options) => {
     // The hub's port follows LUKE_VOICE_PORT, like the hub (hub/paths.mjs).
     const port = Number(await $.env.get('LUKE_VOICE_PORT'))
     if (Number.isInteger(port) && port > 0 && port < 65536) HUB = `http://127.0.0.1:${port}`
-    await $.command.register({ name: NAME, description: 'Ceci, voice assistant: on/off, call, end, window, voz, status, help' })
+    await $.command.register({ name: NAME, description: 'Ceci, voice assistant: on/off, call, end, window, voz, setup, status, help' })
     // Redraw the pane while a task runs, so its elapsed time moves.
     $.clock.every(15_000, () => {
       void read($, running)
@@ -711,6 +765,8 @@ export const register: Register = (on, options) => {
         return { text: 'Call ended.' }
       case 'status':
         return { text: await statusText($) }
+      case 'setup':
+        return { text: await setupCommand($) }
       case 'help':
       case 'ajuda':
         return { text: await helpText($) }

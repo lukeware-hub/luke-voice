@@ -9,8 +9,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { conversationToken, credits, ensureAgent, outOfCreditsMessage } from './agent.mjs'
 import { PORT, stateDir, stateFile } from './paths.mjs'
-import { VOICE_SETTINGS, createEngine, maxFrames, prepareEngine, readProfile } from './engine.mjs'
+import { VOICE_SETTINGS, createEngine, maxFrames, prepareEngine, profileReady, readProfile } from './engine.mjs'
 import { ensureModel } from './models.mjs'
+import { route as routeUtterance } from './router.mjs'
 import { contentType, vendorFile } from './vendor.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -22,6 +23,8 @@ const MAX_AUDIO = 4 * 1024 * 1024
 const ASR_GLOSSARY = 'Conversa em português do Brasil com a Ceci, uma assistente de programação. Termos comuns: API, commit, branch, main, deploy, build, bug, pull request, GitHub, Claude, Ceci, lint, TypeScript, token, login, checkout, README.'
 const MAX_ACTIVITY = 60
 const ACK_WAIT_MS = 15_000
+// The router answers in ~0.3 s; past this, the utterance goes to the brain instead.
+const ROUTER_WAIT_MS = 1500
 // A brain turn is one short Claude Haiku call (~2.5 s); a cold start can take longer.
 const BRAIN_WAIT_MS = 40_000
 const NO_SESSION_SAY = 'Nenhuma sessão do Claude está ligada. Ligue o luke-voice no Claude Code e me chame de novo.'
@@ -109,7 +112,7 @@ export function openWindow(url) {
   spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: cmd === 'cmd' }).unref()
 }
 
-export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, engine = null, profile = () => null, voiceRef = null, onLocalVoice = () => {}, log = () => {}, onShutdown = () => process.exit(0) }) {
+export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, engine = null, profile = () => null, voiceRef = null, onLocalVoice = () => {}, onSetup = () => ({ started: false }), engineState = () => 'off', log = () => {}, onShutdown = () => process.exit(0) }) {
   const sessions = new Map() // token -> session
   const replaced = new Set() // tokens a newer subscription of the same Claude session took over
   const streams = new Set() // window SSE responses
@@ -190,6 +193,9 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
 
   // Routes for a subscribed session's mod, by its session token.
   const sessionRoutes = {
+    // /luke-voice setup: prepare the free voice again (download what is missing, pick the profile)
+    // in the background; /luke-voice status shows the progress.
+    'POST /setup': () => [200, onSetup()],
     'POST /events': (session, body) => {
       const events = Array.isArray(body.events) ? body.events.slice(0, 50) : []
       for (const event of events) {
@@ -297,7 +303,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       const provider = voiceProvider()
       // The free voice is about to be used: get the native engine ready (once; it is a no-op after).
       if (provider === 'local') onLocalVoice()
-      return [200, { provider, profile: profile()?.profile ?? null, native: engine ? engine.status() : {}, download: engineDownload }]
+      return [200, { provider, profile: profile()?.profile ?? null, engine: engineState(), native: engine ? engine.status() : {}, download: engineDownload }]
     },
     // The native engine: the profile chosen for this machine, which servers are up, the download.
     'GET /engine': () => [200, { profile: profile(), native: engine ? engine.status() : {}, download: engineDownload }],
@@ -322,6 +328,21 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       } catch {
         return [502, { error: 'The brain answered something that is not JSON.' }]
       }
+    },
+    // The instant layer of the hybrid brain (gpu profile): small talk answered on this machine in
+    // ~0.3 s, with words written in hub/router.mjs. { intent: 'claude', say: null } sends the
+    // utterance to the brain, as when the router is not running.
+    'POST /route': async (_none, body) => {
+      const url = engine?.url('router')
+      if (!url) return [200, { intent: 'claude', say: null }]
+      const ask = async chat => {
+        const answer = await fetch(`${url}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(chat), signal: AbortSignal.timeout(ROUTER_WAIT_MS) })
+        if (!answer.ok) throw new Error(`router ${answer.status}`)
+        return answer.json()
+      }
+      const started = Date.now()
+      const result = await routeUtterance(String(body.text ?? '').slice(0, 500), { ask, lastSaid: String(body.lastSaid ?? '').slice(-500) })
+      return [200, { ...result, ms: Date.now() - started }]
     },
     'GET /activity': (_none, _body, url) => {
       const name = url.searchParams.get('session')
@@ -443,7 +464,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       const bearer = (req.headers.authorization ?? '').replace(/^Bearer /, '')
 
       if (route === 'GET /health') {
-        return send(res, 200, { app: 'luke-voice', version: VERSION, sessions: sessions.size, isWindowOpen: streams.size > 0, call, hasKey: Boolean(key), provider: voiceProvider(), keyStatus: !key ? 'missing' : isKeyRejected ? 'rejected' : 'set', keyId: keyId(key) })
+        return send(res, 200, { app: 'luke-voice', version: VERSION, sessions: sessions.size, isWindowOpen: streams.size > 0, call, hasKey: Boolean(key), provider: voiceProvider(), keyStatus: !key ? 'missing' : isKeyRejected ? 'rejected' : 'set', keyId: keyId(key), profile: profile()?.profile ?? null, native: engine ? engine.status() : {}, download: engineDownload })
       }
 
       if (route === 'POST /subscribe') {
@@ -574,6 +595,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
   server.on('close', () => clearInterval(sweep))
   server.idleFor = () => Date.now() - lastBusy
   server.setEngineDownload = setEngineDownload
+  server.voiceProvider = voiceProvider
   return server
 }
 
@@ -590,27 +612,51 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     engine,
     profile: () => readProfile(),
     voiceRef: join(ROOT, 'agent', 'ceci-voice.wav'),
-    onLocalVoice: () => {
-      if (process.env.LUKE_VOICE_ENGINE === 'off') return
-      engineStart ??= startEngine().catch(error => {
-        log(`native engine: ${error.message}`)
-        hub.setEngineDownload({ error: String(error.message) })
-        engineStart = null
-      })
+    onLocalVoice: () => startOnce(),
+    engineState: () => state,
+    onSetup: () => {
+      if (process.env.LUKE_VOICE_ENGINE === 'off') return { started: false, reason: 'off' }
+      if (isSetupRunning) return { started: false, reason: 'running' }
+      isSetupRunning = true
+      // Setup again over a running engine: stop it, so the profile and models are read anew.
+      engine.stop()
+      engineStart = run({ isForced: true }).finally(() => (isSetupRunning = false))
+      return { started: true }
     },
     log,
   })
   let engineStart = null
+  let isSetupRunning = false
+  // What the window waits for: 'off' (not started), 'starting', 'ready', 'light' (no native engine
+  // on this machine) or 'failed'.
+  let state = 'off'
+  const run = options =>
+    startEngine(options).catch(error => {
+      log(`native engine: ${error.message}`)
+      hub.setEngineDownload({ error: String(error.message) })
+      state = 'failed'
+      engineStart = null
+    })
+  // The free voice is used: start the native engine once (a no-op after).
+  const startOnce = () => {
+    if (process.env.LUKE_VOICE_ENGINE === 'off') return
+    engineStart ??= run()
+  }
   // The native engine: started when setup chose the gpu profile; prepared here (in the background,
   // with progress for the window) when setup never ran, as after a marketplace update.
-  const startEngine = async () => {
+  const startEngine = async ({ isForced = false } = {}) => {
+    state = 'starting'
     let chosen = readProfile()
-    if (!chosen) {
+    // Never prepared, a file of its profile is missing (a new model in an update), or asked for.
+    if (isForced || !chosen || !profileReady(chosen)) {
       hub.setEngineDownload({ loaded: 0, total: 0, label: 'preparando' })
       chosen = await prepareEngine({ onProgress: (loaded, total, label) => hub.setEngineDownload({ loaded, total, label }) })
       hub.setEngineDownload(null)
     }
-    if (chosen.profile !== 'gpu') return
+    if (chosen.profile !== 'gpu') {
+      state = 'light'
+      return
+    }
     await engine.start(undefined, { exe: chosen.exe })
     const voice = join(ROOT, 'agent', 'ceci-voice.wav')
     const transcript = voice.replace(/\.wav$/, '.txt')
@@ -618,6 +664,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
       speakerRefB64: existsSync(voice) ? readFileSync(voice).toString('base64') : '',
       speakerRefText: existsSync(transcript) ? readFileSync(transcript, 'utf8').trim() : '',
     })
+    const up = engine.status()
+    state = up.tts && up.asr ? 'ready' : 'failed'
   }
   process.on('exit', () => engine.stop())
   // Two launchers can race to start a hub; the one that finds the port taken leaves quietly.
@@ -628,7 +676,11 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     }
     throw error
   })
-  hub.listen(PORT, '127.0.0.1', () => console.log(`luke-voice hub on 127.0.0.1:${PORT}`))
+  hub.listen(PORT, '127.0.0.1', () => {
+    console.log(`luke-voice hub on 127.0.0.1:${PORT}`)
+    // The free voice is the choice: warm the native engine up now, so the first call has it.
+    if (hub.voiceProvider() === 'local') startOnce()
+  })
   setInterval(() => {
     if (hub.idleFor() > 10 * 60_000) process.exit(0)
   }, 60_000).unref()

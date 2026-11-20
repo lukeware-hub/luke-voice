@@ -292,11 +292,36 @@ function voiceFacts(health) {
     ]
   }
   const info = engine?.name === 'local' ? engine.getVoiceInfo?.() : null
-  const runsOn = info ? (info.device === 'webgpu' ? 'placa de vídeo (WebGPU)' : `processador (${info.threads} threads)`) : 'carrega na primeira chamada'
-  const model = info ? (info.tts === 'piper' ? 'Piper (voz leve, para computadores mais lentos)' : 'Kokoro') : null
+  const native = health.native ?? {}
+  const isNative = info ? info.tts === 'native' : Boolean(native.tts && native.asr)
+  const download = health.download
+  const profile = download?.error
+    ? [`Erro ao preparar: ${download.error}. Rode /luke-voice setup`, 'bad']
+    : download?.total
+      ? [`Baixando a voz natural: ${Math.min(99, Math.round((download.loaded / download.total) * 100))}%`, '']
+      : health.profile === 'gpu'
+        ? ['Voz natural, na placa de vídeo', 'ok']
+        : health.profile === 'light'
+          ? ['Voz leve, no navegador (sem placa de vídeo com 6 GB)', 'ok']
+          : ['Ainda não preparado: rode /luke-voice setup', '']
+  const model = isNative
+    ? 'Qwen3-TTS (voz), Qwen3-ASR (ouvido), Qwen3.5 (respostas rápidas)'
+    : info
+      ? info.tts === 'piper'
+        ? 'Piper (voz leve, para computadores mais lentos)'
+        : 'Kokoro (voz), Whisper (ouvido)'
+      : null
+  const runsOn = isNative
+    ? `placa de vídeo, pelo llama.cpp (${['tts', 'asr', 'router'].filter(name => native[name]).length} de 3 servidores rodando)`
+    : info
+      ? info.device === 'webgpu'
+        ? 'placa de vídeo (WebGPU)'
+        : `processador (${info.threads} threads)`
+      : 'carrega na primeira chamada'
   return [
     ['Voz', 'Ceci, gratuita, no seu computador', 'ok'],
-    ...(model ? [['Modelo de voz', model, '']] : []),
+    ['Perfil', ...profile],
+    ...(model ? [['Modelos', model, '']] : []),
     ['Roda em', runsOn, ''],
   ]
 }

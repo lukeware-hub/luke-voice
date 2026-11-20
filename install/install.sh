@@ -4,12 +4,14 @@
 # It installs the luke-voice mod into Claude Code, lets you pick Ceci's voice (the free local
 # voice, or ElevenLabs with your key), and checks that everything is in place.
 # Without questions: LUKE_VOICE_PROVIDER=local|elevenlabs (and LUKE_VOICE_NO_PROMPT=1).
+# The free voice is downloaded here: LUKE_VOICE_PROFILE=gpu|light forces the natural voice on the
+# GPU or the light browser voice instead of detecting it.
 set -uo pipefail
 
 PLUGIN='luke-voice@luke-voice'
 REPO='lukeware-hub/luke-voice'
 
-step() { printf '\n\033[36m[%s/5] %s\033[0m\n' "$1" "$2"; }
+step() { printf '\n\033[36m[%s/6] %s\033[0m\n' "$1" "$2"; }
 ok() { printf '      \033[32mOK\033[0m  %s\n' "$1"; }
 # Errors go to stderr, so they show even when the step's output is hidden.
 fail() {
@@ -31,7 +33,7 @@ run_claude() {
 json() { node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const v=(new Function("j","return "+process.argv[1]))(JSON.parse(s));console.log(v??"")})' "$1"; }
 can_ask() { [ "${LUKE_VOICE_NO_PROMPT:-}" != "1" ] && [ -r /dev/tty ]; }
 
-printf '\n  luke-voice installer\n  Ceci, a voice assistant for Claude Code. This takes about one minute.\n'
+printf '\n  luke-voice installer\n  Ceci, a voice assistant for Claude Code. This takes a few minutes.\n'
 
 step 1 'Checking that Claude Code is installed'
 command -v claude >/dev/null 2>&1 || fail 'Claude Code was not found on this computer.' 'Install it from https://claude.com/claude-code and sign in once.'
@@ -109,6 +111,25 @@ enabled=$(printf '%s' "$list" | json "(Array.isArray(j)?j:[]).find(p=>p.id==='$P
 [ "$enabled" = "true" ] || run_claude plugin enable "$PLUGIN" >/dev/null
 ok "luke-voice $version is installed and enabled."
 
+voice_ready=false
+if [ "$provider" = 'local' ]; then
+  step 6 "Downloading Ceci's voice (up to 3 GB, only once)"
+  install_path=$(printf '%s' "$list" | json "(Array.isArray(j)?j:[]).find(p=>p.id==='$PLUGIN')?.installPath") || install_path=''
+  if [ -n "$install_path" ] && [ -f "$install_path/hub/setup.mjs" ]; then
+    if node "$install_path/hub/setup.mjs"; then
+      voice_ready=true
+      ok "Ceci's voice is ready."
+    else
+      printf '      \033[33mThe voice is not ready yet. The first call finishes it, or type /luke-voice setup in Claude Code.\033[0m\n'
+    fi
+  else
+    echo '      This version downloads the voice on the first call.'
+  fi
+else
+  step 6 "Ceci's voice"
+  ok 'ElevenLabs needs no download.'
+fi
+
 printf '\n  \033[32m======================================\033[0m\n'
 printf '  \033[32m Installation complete: luke-voice %s\033[0m\n' "$version"
 printf '  \033[32m======================================\033[0m\n\n'
@@ -117,8 +138,8 @@ echo '   1. Close Claude Code and open it again.'
 echo "   2. Above the prompt, click the button 'luke-voice: off' to turn it on."
 echo '   3. Type /luke-voice call to start talking with Ceci.'
 echo '   To switch the voice later: /luke-voice voz local or /luke-voice voz elevenlabs.'
-if [ "$provider" = 'local' ]; then
-  printf '\n  The first call downloads the free voice (270 to 430 MB), only once.\n'
+if [ "$provider" = 'local' ] && [ "$voice_ready" != 'true' ]; then
+  printf '\n  The first call finishes downloading the free voice, only once.\n'
 elif [ "$has_key" != "true" ]; then
   printf '\n  \033[33mThe ElevenLabs voice needs a key. Run the installer again to add it, or use the free voice.\033[0m\n'
 fi
