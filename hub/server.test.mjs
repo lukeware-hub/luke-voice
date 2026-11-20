@@ -93,7 +93,7 @@ test('every external script on the page carries an integrity hash, and the page 
     assert.match(tag, /\bintegrity="sha(256|384|512)-[A-Za-z0-9+/=]+"/)
     assert.match(tag, /\bcrossorigin="anonymous"/)
   }
-  for (const path of ['/app.js', '/guard.js', '/engines/elevenlabs.js']) {
+  for (const path of ['/app.js', '/guard.js', '/engines/elevenlabs.js', '/engines/local.js', '/engines/speech-text.js', '/engines/vad.js', '/engines/mic-worklet.js', '/engines/voice-worker.js']) {
     const res = await call('GET', path)
     assert.equal(res.status, 200)
     assert.doesNotMatch(res.body, /\bfrom\s*['"]https?:|import\s*\(\s*['"]https?:/)
@@ -207,6 +207,79 @@ test('a command with no session still goes to the focused one', async () => {
   await call('POST', '/ack', { auth: s1.token, body: { id: inbox.body.commands[0].id, ok: true, message: 'Stopped.' } })
   assert.equal((await sent).body.ok, true)
   await call('POST', '/unsubscribe', { auth: s1.token })
+})
+
+test('the window gets the free local voice without a key, and ElevenLabs once a key is set', async () => {
+  const fresh = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {} })
+  await new Promise(resolve => fresh.listen(0, '127.0.0.1', resolve))
+  const get = (path, headers = {}) =>
+    new Promise((resolve, reject) => {
+      const p = fresh.address().port
+      const req = request({ host: '127.0.0.1', port: p, path, method: path === '/subscribe' ? 'POST' : 'GET', headers: { host: `127.0.0.1:${p}`, 'content-type': 'application/json', ...headers } }, res => {
+        let text = ''
+        res.on('data', chunk => (text += chunk))
+        res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(text) }))
+      })
+      req.on('error', reject)
+      req.end(path === '/subscribe' ? JSON.stringify({ cwd: '/repos/p', apiKey: 'k-p' }) : undefined)
+    })
+  try {
+    assert.equal((await get('/config')).status, 401)
+    assert.equal((await get('/config', { 'x-luke-key': WINDOW })).body.provider, 'local')
+    await get('/subscribe', { authorization: `Bearer ${SERVICE}` })
+    assert.equal((await get('/config', { 'x-luke-key': WINDOW })).body.provider, 'elevenlabs')
+  } finally {
+    fresh.closeAllConnections()
+    fresh.close()
+  }
+})
+
+test('an explicit provider wins over the key', async () => {
+  const pinned = createHub({ serviceToken: SERVICE, windowKey: WINDOW, apiKey: 'k', provider: 'local', open: () => {} })
+  await new Promise(resolve => pinned.listen(0, '127.0.0.1', resolve))
+  const p = pinned.address().port
+  const body = await new Promise((resolve, reject) => {
+    const req = request({ host: '127.0.0.1', port: p, path: '/health', headers: { host: `127.0.0.1:${p}` } }, res => {
+      let text = ''
+      res.on('data', chunk => (text += chunk))
+      res.on('end', () => resolve(JSON.parse(text)))
+    })
+    req.on('error', reject)
+    req.end()
+  })
+  pinned.closeAllConnections()
+  pinned.close()
+  assert.equal(body.provider, 'local')
+})
+
+test('vendored files are served from the hub, unknown ones are 404, and the page is cross-origin isolated', async () => {
+  const served = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {}, vendor: async path => (path === 'espeak/dist/version.mjs' ? Buffer.from('export const V = 1') : null) })
+  await new Promise(resolve => served.listen(0, '127.0.0.1', resolve))
+  const p = served.address().port
+  const fetchRaw = path =>
+    new Promise((resolve, reject) => {
+      const req = request({ host: '127.0.0.1', port: p, path, headers: { host: `127.0.0.1:${p}` } }, res => {
+        let text = ''
+        res.on('data', chunk => (text += chunk))
+        res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, text }))
+      })
+      req.on('error', reject)
+      req.end()
+    })
+  try {
+    const file = await fetchRaw('/vendor/espeak/dist/version.mjs')
+    assert.equal(file.status, 200)
+    assert.equal(file.text, 'export const V = 1')
+    assert.equal(file.headers['content-type'], 'text/javascript; charset=utf-8')
+    assert.equal((await fetchRaw('/vendor/../../hub.json')).status, 404)
+    const page = await fetchRaw(`/?k=${WINDOW}`)
+    assert.equal(page.headers['cross-origin-opener-policy'], 'same-origin')
+    assert.equal(page.headers['cross-origin-embedder-policy'], 'credentialless')
+    assert.equal((await fetchRaw('/engines/voice-worker.js')).headers['cross-origin-embedder-policy'], 'credentialless')
+  } finally {
+    served.closeAllConnections()
+    served.close()
+  }
 })
 
 test('loadSecrets keeps the window key across hub restarts', () => {

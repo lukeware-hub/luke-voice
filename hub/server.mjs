@@ -9,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { conversationToken, credits, ensureAgent, outOfCreditsMessage } from './agent.mjs'
 import { PORT, stateDir, stateFile } from './paths.mjs'
+import { contentType, vendorFile } from './vendor.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const VERSION = JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'plugin.json'), 'utf8')).version
@@ -21,10 +22,24 @@ const STATIC = {
   '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
   '/guard.js': ['guard.js', 'text/javascript; charset=utf-8'],
   '/engines/elevenlabs.js': ['engines/elevenlabs.js', 'text/javascript; charset=utf-8'],
+  '/engines/local.js': ['engines/local.js', 'text/javascript; charset=utf-8'],
+  '/engines/speech-text.js': ['engines/speech-text.js', 'text/javascript; charset=utf-8'],
+  '/engines/vad.js': ['engines/vad.js', 'text/javascript; charset=utf-8'],
+  '/engines/mic-worklet.js': ['engines/mic-worklet.js', 'text/javascript; charset=utf-8'],
+  '/engines/voice-worker.js': ['engines/voice-worker.js', 'text/javascript; charset=utf-8'],
   '/style.css': ['style.css', 'text/css; charset=utf-8'],
   '/fonts/schibsted-grotesk-latin-wght-normal.woff2': ['fonts/schibsted-grotesk-latin-wght-normal.woff2', 'font/woff2'],
   '/fonts/schibsted-grotesk-latin-ext-wght-normal.woff2': ['fonts/schibsted-grotesk-latin-ext-wght-normal.woff2', 'font/woff2'],
 }
+
+// Cross-origin isolation gives the local voice SharedArrayBuffer, so its WASM runs on several threads.
+// credentialless still lets the page load the pinned CDN script and the Hugging Face model files.
+const ISOLATION = {
+  'cross-origin-opener-policy': 'same-origin',
+  'cross-origin-embedder-policy': 'credentialless',
+  'cross-origin-resource-policy': 'same-origin',
+}
+const PROVIDERS = ['local', 'elevenlabs']
 
 const newSecret = () => randomBytes(24).toString('base64url')
 // A short, one-way tag of the key so health can show which key is in use without exposing it.
@@ -83,7 +98,7 @@ export function openWindow(url) {
   spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: cmd === 'cmd' }).unref()
 }
 
-export function createHub({ serviceToken, windowKey, apiKey = '', root = ROOT, open = openWindow, log = () => {}, onShutdown = () => process.exit(0) }) {
+export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, log = () => {}, onShutdown = () => process.exit(0) }) {
   const sessions = new Map() // token -> session
   const replaced = new Set() // tokens a newer subscription of the same Claude session took over
   const streams = new Set() // window SSE responses
@@ -94,6 +109,9 @@ export function createHub({ serviceToken, windowKey, apiKey = '', root = ROOT, o
   let agentId = null
   let isKeyRejected = false // ElevenLabs answered 401 to the current key
   let lastBusy = Date.now()
+
+  // The voice the window uses: the one asked for, else ElevenLabs while a key is set, else the free local voice.
+  const voiceProvider = () => (PROVIDERS.includes(provider) ? provider : key ? 'elevenlabs' : 'local')
 
   const byName = name => [...sessions.values()].find(s => s.name === name)
   // A named session must exist: falling back to another one would run the work in the wrong place.
@@ -253,6 +271,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', root = ROOT, o
       if (body.type === 'stop') return [200, await enqueue(session, { type: 'stop' })]
       return [400, { ok: false, message: 'Unknown command.' }]
     },
+    'GET /config': () => [200, { provider: voiceProvider() }],
     'GET /activity': (_none, _body, url) => {
       const name = url.searchParams.get('session')
       const session = target(name)
@@ -300,7 +319,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', root = ROOT, o
       const bearer = (req.headers.authorization ?? '').replace(/^Bearer /, '')
 
       if (route === 'GET /health') {
-        return send(res, 200, { app: 'luke-voice', version: VERSION, sessions: sessions.size, isWindowOpen: streams.size > 0, call, hasKey: Boolean(key), keyStatus: !key ? 'missing' : isKeyRejected ? 'rejected' : 'set', keyId: keyId(key) })
+        return send(res, 200, { app: 'luke-voice', version: VERSION, sessions: sessions.size, isWindowOpen: streams.size > 0, call, hasKey: Boolean(key), provider: voiceProvider(), keyStatus: !key ? 'missing' : isKeyRejected ? 'rejected' : 'set', keyId: keyId(key) })
       }
 
       if (route === 'POST /subscribe') {
@@ -349,14 +368,23 @@ export function createHub({ serviceToken, windowKey, apiKey = '', root = ROOT, o
       if (route === 'GET /') {
         if (!sameSecret(url.searchParams.get('k'), windowKey)) return send(res, 403, { error: 'key' })
         const page = readFileSync(join(root, 'window', 'index.html'))
-        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...ISOLATION })
         return res.end(page)
       }
 
       if (req.method === 'GET' && STATIC[url.pathname]) {
         const [file, type] = STATIC[url.pathname]
         const content = readFileSync(join(root, 'window', file))
-        res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store' })
+        res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store', ...ISOLATION })
+        return res.end(content)
+      }
+
+      if (req.method === 'GET' && url.pathname.startsWith('/vendor/')) {
+        const path = url.pathname.slice('/vendor/'.length)
+        const content = await vendor(path)
+        if (!content) return send(res, 404, { error: 'not found' })
+        // Pinned by hash: the bytes for a path never change, so the browser may keep them.
+        res.writeHead(200, { 'content-type': contentType(path), 'cache-control': 'public, max-age=31536000, immutable', ...ISOLATION })
         return res.end(content)
       }
 
@@ -406,7 +434,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', root = ROOT, o
 // Run directly: listen on the fixed port and exit after ten idle minutes.
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const { serviceToken, windowKey } = loadSecrets()
-  const hub = createHub({ serviceToken, windowKey, apiKey: process.env.ELEVENLABS_API_KEY ?? '', log: line => console.log(line) })
+  const hub = createHub({ serviceToken, windowKey, apiKey: process.env.ELEVENLABS_API_KEY ?? '', provider: process.env.LUKE_VOICE_PROVIDER ?? '', log: line => console.log(line) })
   // Two launchers can race to start a hub; the one that finds the port taken leaves quietly.
   hub.on('error', error => {
     if (error.code === 'EADDRINUSE') {

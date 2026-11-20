@@ -1,6 +1,5 @@
 // The call window: one voice call for every subscribed Claude session.
 // The voice itself comes from an engine (engines/*.js); this page drives its session the same way for each.
-import * as engine from '/engines/elevenlabs.js'
 import {
   NOTICE,
   QUIET_NOTICE,
@@ -383,14 +382,27 @@ async function microphone() {
   for (const track of stream.getTracks()) track.stop()
 }
 
+// The voice engine the hub picked: the free local voice, or ElevenLabs. Loaded once per page.
+let engine = null
+async function voiceEngine() {
+  if (engine) return engine
+  const { provider } = await hub('GET', '/config')
+  engine = provider === 'elevenlabs' ? await import('/engines/elevenlabs.js') : await import('/engines/local.js')
+  return engine
+}
+
 async function startCall() {
   if (conversation || callState === 'connecting') return
   setCall('connecting')
   try {
-    conversation = await engine.startSession({
+    const voice = await voiceEngine()
+    conversation = await voice.startSession({
       hub,
       prepare: microphone,
       clientTools,
+      onStatus: text => {
+        if (callState === 'connecting') setCaption(text)
+      },
       onConnect: async () => {
         connectedAt = Date.now()
         window.focus()
@@ -404,7 +416,7 @@ async function startCall() {
         // A call the agent drops in its first seconds never really started: say so, with the reason.
         if (!wasEnded && Date.now() - connectedAt < EARLY_DROP_MS) {
           const reason = details?.message || details?.reason || ''
-          setCall('error', engine.earlyDropMessage(reason))
+          setCall('error', engine?.earlyDropMessage(reason) ?? reason)
           return
         }
         setCall('idle', 'Chamada encerrada. Toque em Chamar para falar de novo.')
