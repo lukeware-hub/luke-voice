@@ -11,7 +11,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 test('a hub the launcher starts gets the API key and the voice sent on stdin', async () => {
   const home = mkdtempSync(join(tmpdir(), 'luke-voice-launch-'))
   const port = String(48_000 + Math.floor(Math.random() * 1000))
-  const env = { ...process.env, LUKE_VOICE_HOME: home, LUKE_VOICE_PORT: port, ELEVENLABS_API_KEY: '', LUKE_VOICE_PROVIDER: '' }
+  const env = { ...process.env, LUKE_VOICE_HOME: home, LUKE_VOICE_PORT: port, ELEVENLABS_API_KEY: '', LUKE_VOICE_PROVIDER: '', LUKE_VOICE_ENGINE: 'off' }
   const run = spawnSync(process.execPath, [join(here, 'launch.mjs')], { env, input: JSON.stringify({ apiKey: 'test-key', provider: 'local' }), encoding: 'utf8', timeout: 20_000 })
   assert.match(run.stdout, /"ok":true/)
   try {

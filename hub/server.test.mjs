@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { request } from 'node:http'
+import { createServer as createHttpServer, request } from 'node:http'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -371,6 +371,96 @@ test('with no Claude session, the brain says how to connect one instead of faili
   lonely.close()
   assert.equal(body.tool, null)
   assert.match(body.say, /Ligue o luke-voice/)
+})
+
+test('speech goes to the native engine: /stt sends the WAV with the glossary, /tts streams the cloned voice back', async () => {
+  // A stand-in for the two llama-servers.
+  const seen = {}
+  const fake = createHttpServer(async (req, res) => {
+    const chunks = []
+    for await (const c of req) chunks.push(c)
+    const body = Buffer.concat(chunks)
+    if (req.url === '/v1/audio/transcriptions') {
+      seen.stt = body.toString('latin1')
+      res.writeHead(200, { 'content-type': 'application/json' })
+      return res.end(JSON.stringify({ text: 'language Portuguese<asr_text>verifica os testes da api' }))
+    }
+    if (req.url === '/tts') {
+      seen.tts = JSON.parse(body.toString('utf8'))
+      res.writeHead(200, { 'content-type': 'audio/wav' })
+      res.write(Buffer.from('RIFF....WAVE'))
+      return res.end(Buffer.from([1, 2, 3, 4]))
+    }
+    res.writeHead(404)
+    res.end()
+  })
+  await new Promise(resolve => fake.listen(0, '127.0.0.1', resolve))
+  const base = `http://127.0.0.1:${fake.address().port}`
+  const voiceRef = join(mkdtempSync(join(tmpdir(), 'luke-voice-ref-')), 'ceci.wav')
+  writeFileSync(voiceRef, 'CECIVOICE')
+  writeFileSync(voiceRef.replace(/[.]wav$/, '.txt'), 'Oi, eu sou a Ceci.')
+  const engine = { url: () => base, status: () => ({ tts: true, asr: true, router: false }) }
+  const hub2 = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {}, engine, voiceRef, profile: () => ({ profile: 'gpu' }) })
+  await new Promise(resolve => hub2.listen(0, '127.0.0.1', resolve))
+  const p = hub2.address().port
+  const post = (path, body, type, key = WINDOW) =>
+    new Promise((resolve, reject) => {
+      const req = request({ host: '127.0.0.1', port: p, method: 'POST', path, headers: { host: `127.0.0.1:${p}`, 'content-type': type, 'x-luke-key': key } }, res => {
+        const parts = []
+        res.on('data', c => parts.push(c))
+        res.on('end', () => resolve({ status: res.statusCode, type: res.headers['content-type'], body: Buffer.concat(parts) }))
+      })
+      req.on('error', reject)
+      req.end(body)
+    })
+  try {
+    assert.equal((await post('/stt', Buffer.from('RIFFWAV'), 'audio/wav', 'wrong')).status, 401)
+    const stt = await post('/stt', Buffer.from('RIFFWAV'), 'audio/wav')
+    assert.equal(stt.status, 200)
+    assert.equal(JSON.parse(stt.body).text, 'verifica os testes da api')
+    assert.match(seen.stt, /RIFFWAV/)
+    assert.match(seen.stt, /name="language"\r\n\r\npt/)
+    assert.match(seen.stt, /commit, branch/)
+    const tts = await post('/tts', JSON.stringify({ text: 'Comecei, te aviso quando terminar.' }), 'application/json')
+    assert.equal(tts.status, 200)
+    assert.equal(tts.type, 'audio/wav')
+    assert.equal(tts.body.length, 16)
+    assert.equal(seen.tts.input, 'Comecei, te aviso quando terminar.')
+    assert.equal(seen.tts.lang, 'pt')
+    assert.equal(seen.tts.stream, true)
+    assert.equal(Buffer.from(seen.tts.speaker_ref_b64, 'base64').toString(), 'CECIVOICE')
+    // Cloned with the reference transcript (Brazilian accent), Ceci's sampling, and a cap against loops.
+    assert.equal(seen.tts.speaker_ref_text, 'Oi, eu sou a Ceci.')
+    assert.deepEqual([seen.tts.temperature, seen.tts.top_p, seen.tts.seed], [0.75, 0.9, 7])
+    assert.equal(seen.tts.n_predict, Math.ceil('Comecei, te aviso quando terminar.'.length * 1.5) + 25)
+    assert.equal((await post('/tts', JSON.stringify({ text: '  ' }), 'application/json')).status, 400)
+  } finally {
+    hub2.closeAllConnections()
+    hub2.close()
+    fake.close()
+  }
+})
+
+test('with no native engine, /stt and /tts answer 503 so the window keeps its own voice', async () => {
+  const hub3 = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {} })
+  await new Promise(resolve => hub3.listen(0, '127.0.0.1', resolve))
+  const p = hub3.address().port
+  const status = path =>
+    new Promise((resolve, reject) => {
+      const req = request({ host: '127.0.0.1', port: p, method: 'POST', path, headers: { host: `127.0.0.1:${p}`, 'x-luke-key': WINDOW, 'content-type': 'application/json' } }, res => {
+        res.resume()
+        res.on('end', () => resolve(res.statusCode))
+      })
+      req.on('error', reject)
+      req.end('{"text":"oi"}')
+    })
+  try {
+    assert.equal(await status('/stt'), 503)
+    assert.equal(await status('/tts'), 503)
+  } finally {
+    hub3.closeAllConnections()
+    hub3.close()
+  }
 })
 
 test('loadSecrets keeps the window key across hub restarts', () => {

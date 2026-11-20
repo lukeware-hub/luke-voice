@@ -168,8 +168,16 @@ async function loadPiper() {
   piper = { ort, session, config }
 }
 
-async function load({ voice = 'pf_dora', language = 'pt-br', device: forced, dtype, threads, stt: sttSize, sttDtype, sttDevice: sttDeviceChoice, tts: ttsChoice } = {}) {
+async function load({ voice = 'pf_dora', language = 'pt-br', device: forced, dtype, threads, stt: sttSize, sttDtype, sttDevice: sttDeviceChoice, tts: ttsChoice, native = false } = {}) {
   if (threads) env.backends.onnx.wasm.numThreads = threads
+  // The native engine speaks and listens in the hub: here only the end-of-turn and speech checks.
+  if (native) {
+    post('status', { stage: 'loading', device: 'native' })
+    await loadTurn().catch(error => console.warn(`[luke-voice] end-of-turn models did not load: ${error?.message ?? error}`))
+    engine = 'native'
+    sttName = 'native'
+    return post('ready', { device: 'native', threads: env.backends.onnx.wasm.numThreads, warmMs: 0, tts: 'native', stt: 'native', turn: Boolean(turn) })
+  }
   const gpu = forced ? forced === 'webgpu' : await hasWebGpu()
   const device = gpu ? 'webgpu' : 'wasm'
   post('status', { stage: 'loading', device })
@@ -310,6 +318,12 @@ self.onmessage = async ({ data }) => {
       }
       const text = await transcribe(data.audio, data.language)
       return post('text', { id, text, ms: Math.round(performance.now() - started) })
+    }
+    // For the native engine: how many frames Silero hears as speech, before the audio leaves the page.
+    if (type === 'check') {
+      const started = performance.now()
+      const frames = turn ? await speechFrames(data.audio) : MIN_SPEECH_FRAMES
+      return post('check', { id, frames, isSpeech: frames >= MIN_SPEECH_FRAMES, ms: Math.round(performance.now() - started) })
     }
     if (type === 'endpoint') {
       const started = performance.now()

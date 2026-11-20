@@ -9,12 +9,17 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { conversationToken, credits, ensureAgent, outOfCreditsMessage } from './agent.mjs'
 import { PORT, stateDir, stateFile } from './paths.mjs'
+import { VOICE_SETTINGS, createEngine, maxFrames, prepareEngine, readProfile } from './engine.mjs'
 import { ensureModel } from './models.mjs'
 import { contentType, vendorFile } from './vendor.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const VERSION = JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'plugin.json'), 'utf8')).version
 const MAX_BODY = 64 * 1024
+// One utterance as 16 kHz PCM16 WAV: 30 s is under 1 MB.
+const MAX_AUDIO = 4 * 1024 * 1024
+// What Qwen3-ASR is told, so English tech words and session names come out right.
+const ASR_GLOSSARY = 'Conversa em português do Brasil com a Ceci, uma assistente de programação. Termos comuns: API, commit, branch, main, deploy, build, bug, pull request, GitHub, Claude, Ceci, lint, TypeScript, token, login, checkout, README.'
 const MAX_ACTIVITY = 60
 const ACK_WAIT_MS = 15_000
 // A brain turn is one short Claude Haiku call (~2.5 s); a cold start can take longer.
@@ -104,7 +109,7 @@ export function openWindow(url) {
   spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: cmd === 'cmd' }).unref()
 }
 
-export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, log = () => {}, onShutdown = () => process.exit(0) }) {
+export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, engine = null, profile = () => null, voiceRef = null, onLocalVoice = () => {}, log = () => {}, onShutdown = () => process.exit(0) }) {
   const sessions = new Map() // token -> session
   const replaced = new Set() // tokens a newer subscription of the same Claude session took over
   const streams = new Set() // window SSE responses
@@ -119,6 +124,8 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
   // The voice the window uses: the one chosen in Claude Code (config or /luke-voice voz), else
   // LUKE_VOICE_PROVIDER, else ElevenLabs while a key is set, else the free local voice.
   let chosen = ''
+  // Set by the hub's main block while it prepares the native engine: { loaded, total, label, error }.
+  let engineDownload = null
   const voiceProvider = () => (PROVIDERS.includes(chosen) ? chosen : PROVIDERS.includes(provider) ? provider : key ? 'elevenlabs' : 'local')
 
   const byName = name => [...sessions.values()].find(s => s.name === name)
@@ -286,7 +293,14 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       if (body.type === 'stop') return [200, await enqueue(session, { type: 'stop' })]
       return [400, { ok: false, message: 'Unknown command.' }]
     },
-    'GET /config': () => [200, { provider: voiceProvider() }],
+    'GET /config': () => {
+      const provider = voiceProvider()
+      // The free voice is about to be used: get the native engine ready (once; it is a no-op after).
+      if (provider === 'local') onLocalVoice()
+      return [200, { provider, profile: profile()?.profile ?? null, native: engine ? engine.status() : {}, download: engineDownload }]
+    },
+    // The native engine: the profile chosen for this machine, which servers are up, the download.
+    'GET /engine': () => [200, { profile: profile(), native: engine ? engine.status() : {}, download: engineDownload }],
     // The local voice's brain: the focused session's mod asks Claude Haiku and answers { say, tool }.
     'POST /brain': async (_none, body) => {
       const session = target()
@@ -326,6 +340,75 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     },
   }
 
+  async function readRaw(req, limit) {
+    let size = 0
+    const chunks = []
+    for await (const chunk of req) {
+      size += chunk.length
+      if (size > limit) throw Object.assign(new Error('body too large'), { status: 413 })
+      chunks.push(chunk)
+    }
+    return Buffer.concat(chunks)
+  }
+
+  // Speech to text on the native engine (Qwen3-ASR): a WAV in, { text } out.
+  async function nativeStt(req, res) {
+    const url = engine?.url('asr')
+    if (!url) return send(res, 503, { error: 'The native speech engine is not running.' })
+    const wav = await readRaw(req, MAX_AUDIO)
+    const names = [...sessions.values()].map(s => s.name).join(', ')
+    const form = new FormData()
+    form.append('file', new Blob([wav], { type: 'audio/wav' }), 'speech.wav')
+    form.append('model', 'qwen3-asr')
+    form.append('language', 'pt')
+    form.append('prompt', names ? `${ASR_GLOSSARY} Sessões: ${names}.` : ASR_GLOSSARY)
+    const started = Date.now()
+    const answer = await fetch(`${url}/v1/audio/transcriptions`, { method: 'POST', body: form })
+    if (!answer.ok) return send(res, 502, { error: `speech engine ${answer.status}` })
+    const { text = '' } = await answer.json()
+    // Qwen3-ASR starts its text with "language Portuguese<asr_text>".
+    return send(res, 200, { text: String(text).replace(/^[\s\S]*<asr_text>/, '').trim(), ms: Date.now() - started })
+  }
+
+  // Ceci's voice on the native engine (Qwen3-TTS), streamed as WAV while it is made.
+  let voiceRefB64 = null
+  let voiceRefText = null
+  async function nativeTts(req, res) {
+    const url = engine?.url('tts')
+    if (!url) return send(res, 503, { error: 'The native voice engine is not running.' })
+    const body = await readBody(req)
+    const text = String(body.text ?? '').slice(0, 2000).trim()
+    if (!text) return send(res, 400, { error: 'Nothing to say.' })
+    voiceRefB64 ??= voiceRef && existsSync(voiceRef) ? readFileSync(voiceRef).toString('base64') : ''
+    // The transcript of the reference: with it, llama.cpp clones Ceci from the reference codes (ICL).
+    voiceRefText ??= voiceRef && existsSync(voiceRef.replace(/\.wav$/, '.txt')) ? readFileSync(voiceRef.replace(/\.wav$/, '.txt'), 'utf8').trim() : ''
+    const stop = new AbortController()
+    req.on('close', () => stop.abort())
+    // /tts streams with stream:true (on /v1/audio/speech it would need stream_format).
+    const upstream = await fetch(`${url}/tts`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        input: text,
+        lang: 'pt',
+        stream: true,
+        response_format: 'wav',
+        ...VOICE_SETTINGS,
+        n_predict: maxFrames(text),
+        ...(voiceRefB64 ? { speaker_ref_b64: voiceRefB64, ...(voiceRefText ? { speaker_ref_text: voiceRefText } : {}) } : {}),
+      }),
+      signal: stop.signal,
+    }).catch(() => null)
+    if (!upstream?.ok || !upstream.body) return send(res, 502, { error: `voice engine ${upstream?.status ?? 'unreachable'}` })
+    res.writeHead(200, { 'content-type': 'audio/wav', 'cache-control': 'no-store' })
+    try {
+      for await (const chunk of upstream.body) res.write(chunk)
+    } catch {
+      // The window hung up (barge-in): the generation was aborted with it.
+    }
+    return res.end()
+  }
+
   async function readBody(req) {
     let size = 0
     const chunks = []
@@ -341,6 +424,10 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
   function send(res, status, body) {
     res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' })
     res.end(JSON.stringify(body))
+  }
+
+  const setEngineDownload = next => {
+    engineDownload = next
   }
 
   const server = createServer(async (req, res) => {
@@ -455,6 +542,11 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
         return
       }
 
+      if (route === 'POST /stt' || route === 'POST /tts') {
+        if (!sameSecret(req.headers['x-luke-key'], windowKey)) return send(res, 401, { error: 'key' })
+        return route === 'POST /stt' ? await nativeStt(req, res) : await nativeTts(req, res)
+      }
+
       if (windowRoutes[route]) {
         if (!sameSecret(req.headers['x-luke-key'], windowKey)) return send(res, 401, { error: 'key' })
         const body = req.method === 'POST' ? await readBody(req) : {}
@@ -481,13 +573,53 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
 
   server.on('close', () => clearInterval(sweep))
   server.idleFor = () => Date.now() - lastBusy
+  server.setEngineDownload = setEngineDownload
   return server
 }
 
 // Run directly: listen on the fixed port and exit after ten idle minutes.
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const { serviceToken, windowKey } = loadSecrets()
-  const hub = createHub({ serviceToken, windowKey, apiKey: process.env.ELEVENLABS_API_KEY ?? '', provider: process.env.LUKE_VOICE_PROVIDER ?? '', log: line => console.log(line) })
+  const log = line => console.log(line)
+  const engine = createEngine({ log })
+  const hub = createHub({
+    serviceToken,
+    windowKey,
+    apiKey: process.env.ELEVENLABS_API_KEY ?? '',
+    provider: process.env.LUKE_VOICE_PROVIDER ?? '',
+    engine,
+    profile: () => readProfile(),
+    voiceRef: join(ROOT, 'agent', 'ceci-voice.wav'),
+    onLocalVoice: () => {
+      if (process.env.LUKE_VOICE_ENGINE === 'off') return
+      engineStart ??= startEngine().catch(error => {
+        log(`native engine: ${error.message}`)
+        hub.setEngineDownload({ error: String(error.message) })
+        engineStart = null
+      })
+    },
+    log,
+  })
+  let engineStart = null
+  // The native engine: started when setup chose the gpu profile; prepared here (in the background,
+  // with progress for the window) when setup never ran, as after a marketplace update.
+  const startEngine = async () => {
+    let chosen = readProfile()
+    if (!chosen) {
+      hub.setEngineDownload({ loaded: 0, total: 0, label: 'preparando' })
+      chosen = await prepareEngine({ onProgress: (loaded, total, label) => hub.setEngineDownload({ loaded, total, label }) })
+      hub.setEngineDownload(null)
+    }
+    if (chosen.profile !== 'gpu') return
+    await engine.start(undefined, { exe: chosen.exe })
+    const voice = join(ROOT, 'agent', 'ceci-voice.wav')
+    const transcript = voice.replace(/\.wav$/, '.txt')
+    await engine.warm({
+      speakerRefB64: existsSync(voice) ? readFileSync(voice).toString('base64') : '',
+      speakerRefText: existsSync(transcript) ? readFileSync(transcript, 'utf8').trim() : '',
+    })
+  }
+  process.on('exit', () => engine.stop())
   // Two launchers can race to start a hub; the one that finds the port taken leaves quietly.
   hub.on('error', error => {
     if (error.code === 'EADDRINUSE') {

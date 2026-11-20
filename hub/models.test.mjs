@@ -31,7 +31,8 @@ function server(bytes) {
 
 test('every model is pinned to a Hugging Face revision with a sha256 and a size', () => {
   for (const [path, { url, sha256, size, group }] of Object.entries(MODELS)) {
-    assert.match(url, /^https:\/\/huggingface\.co\/[^/]+\/[^/]+\/resolve\/[0-9a-f]{40}\//, path)
+    // A pinned Hugging Face revision, or luke-voice's own model release.
+    assert.match(url, /^(https:\/\/huggingface\.co\/[^/]+\/[^/]+\/resolve\/[0-9a-f]{40}\/|https:\/\/github\.com\/lukeware-hub\/luke-voice\/releases\/download\/voice-models-v\d+\/)/, path)
     assert.match(sha256, /^[0-9a-f]{64}$/, path)
     assert.ok(Number.isInteger(size) && size > 0, path)
     assert.ok(group, path)

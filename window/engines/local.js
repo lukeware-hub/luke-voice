@@ -78,7 +78,97 @@ const isDebug = query.get('voice-debug') === '1'
 const overrides = Object.fromEntries(
   [['device', query.get('voice-device')], ['dtype', query.get('voice-dtype')], ['threads', Number(query.get('voice-threads')) || null], ['stt', query.get('voice-stt')], ['sttDtype', query.get('voice-stt-dtype')], ['tts', query.get('voice-tts')], ['sttDevice', query.get('voice-stt-device')]].filter(([, v]) => v),
 )
-const loadVoice = () => (workerLoad ??= ask('load', overrides).catch(error => ((workerLoad = null), Promise.reject(error))))
+// The worker loads either the whole browser voice, or (with the native engine) only the end-of-turn
+// models. A worker loaded one way is replaced when the next call needs the other.
+let workerKind = null
+const loadVoice = kind => {
+  if (workerLoad && workerKind !== kind) {
+    worker?.terminate()
+    worker = null
+    workerLoad = null
+  }
+  workerKind = kind
+  return (workerLoad ??= ask('load', kind === 'native' ? { ...overrides, native: true } : overrides).catch(error => ((workerLoad = null), Promise.reject(error))))
+}
+
+const KEY = query.get('k') ?? ''
+
+// 16 kHz mono PCM16 WAV, what the hub's /stt takes.
+function wavBytes(audio, rate = RATE) {
+  const buffer = new ArrayBuffer(44 + audio.length * 2)
+  const view = new DataView(buffer)
+  const text = (at, value) => [...value].forEach((c, i) => view.setUint8(at + i, c.charCodeAt(0)))
+  text(0, 'RIFF')
+  view.setUint32(4, 36 + audio.length * 2, true)
+  text(8, 'WAVEfmt ')
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, 1, true)
+  view.setUint32(24, rate, true)
+  view.setUint32(28, rate * 2, true)
+  view.setUint16(32, 2, true)
+  view.setUint16(34, 16, true)
+  text(36, 'data')
+  view.setUint32(40, audio.length * 2, true)
+  for (let i = 0; i < audio.length; i++) view.setInt16(44 + i * 2, Math.max(-1, Math.min(1, audio[i])) * 0x7fff, true)
+  return new Uint8Array(buffer)
+}
+
+// Where the samples start in a WAV stream, and at what rate; null until the header has arrived.
+export function wavHeader(bytes) {
+  if (bytes.length < 12) return null
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  let rate = 24_000
+  for (let at = 12; at + 8 <= bytes.length; ) {
+    const id = String.fromCharCode(bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3])
+    const size = view.getUint32(at + 4, true)
+    if (id === 'fmt ' && at + 16 <= bytes.length) rate = view.getUint32(at + 12, true)
+    if (id === 'data') return { rate, dataOffset: at + 8 }
+    at += 8 + size + (size % 2)
+  }
+  return null
+}
+
+const joinBytes = (a, b) => {
+  const out = new Uint8Array(a.length + b.length)
+  out.set(a)
+  out.set(b, a.length)
+  return out
+}
+
+const pcm16ToFloat = bytes => {
+  const samples = new Int16Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length))
+  const out = new Float32Array(samples.length)
+  for (let i = 0; i < samples.length; i++) out[i] = samples[i] / 32768
+  return out
+}
+
+// Reads a streamed WAV from the hub, handing over Float32 pieces as they arrive.
+async function readWavStream(response, onPiece, isCancelled) {
+  const reader = response.body.getReader()
+  let head = new Uint8Array(0)
+  let header = null
+  let carry = null
+  for (;;) {
+    const { done, value } = await reader.read().catch(() => ({ done: true }))
+    if (isCancelled()) {
+      reader.cancel().catch(() => {})
+      return null
+    }
+    if (done) return header?.rate ?? 24_000
+    let bytes = value
+    if (!header) {
+      head = joinBytes(head, bytes)
+      header = wavHeader(head)
+      if (!header) continue
+      bytes = head.subarray(header.dataOffset)
+    }
+    if (carry) bytes = joinBytes(carry, bytes)
+    carry = bytes.length % 2 ? bytes.slice(bytes.length - 1) : null
+    if (carry) bytes = bytes.subarray(0, bytes.length - 1)
+    if (bytes.length) onPiece(pcm16ToFloat(bytes), header.rate)
+  }
+}
 
 // One line per step in the console, to see where the time goes on a slow machine.
 const timing = (step, ms, extra = '') => console.info(`[luke-voice] ${step} ${ms} ms${extra ? ` ${extra}` : ''}`)
@@ -97,6 +187,7 @@ const percent = ({ loaded, total }) => Math.min(99, Math.round((loaded / total) 
 
 export async function startSession({
   hub,
+  native: forceNative = query.get('voice-native'),
   prepare = async () => {},
   clientTools = {},
   brain = query.get('voice-echo') === '1' ? echoBrain : request => hub('POST', '/brain', request),
@@ -112,12 +203,18 @@ export async function startSession({
     if (data.type === 'status') onStatus(data.stage === 'warming' ? 'Aquecendo a voz…' : 'Carregando a voz…')
   }
   listeners.add(showProgress)
+  // The native engine (gpu profile) speaks and listens when both its servers are up; otherwise this
+  // call uses the browser voice, and says so while the native one is still downloading.
+  const config = await hub('GET', '/config').catch(() => ({}))
+  const isNative = forceNative === '0' ? false : Boolean(config.native?.tts && config.native?.asr)
+  if (!isNative && config.download?.total) onStatus(`Preparando a voz natural: ${percent(config.download)}%. Por enquanto, a voz leve.`)
   try {
     await prepare()
-    await loadVoice()
+    await loadVoice(isNative ? 'native' : 'browser')
   } finally {
     listeners.delete(showProgress)
   }
+  if (voiceInfo) voiceInfo = { ...voiceInfo, tts: isNative ? 'native' : voiceInfo.tts, stt: isNative ? 'native' : voiceInfo.stt, device: isNative ? 'native' : voiceInfo.device }
 
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
@@ -149,9 +246,38 @@ export async function startSession({
   const ackAudio = new Map()
   let nextAck = 0
 
-  // The voice backend: today the in-page worker.
-  const synth = text => ask('speak', { text })
-  const transcribe = audio => ask('transcribe', { audio }, [audio.buffer])
+  // Aborts the native voice's stream when Ceci is cut off.
+  let nativeStop = null
+
+  // The native voice for one piece of text, whole (the acknowledgements).
+  async function nativeSynth(text) {
+    const started = performance.now()
+    const response = await fetch('/tts', { method: 'POST', headers: { 'content-type': 'application/json', 'x-luke-key': KEY }, body: JSON.stringify({ text }) })
+    if (!response.ok) return { audio: new Float32Array(0), sampleRate: 24_000, isBroken: true, ms: 0 }
+    const pieces = []
+    const sampleRate = await readWavStream(response, piece => pieces.push(piece), () => false)
+    const audio = new Float32Array(pieces.reduce((n, p) => n + p.length, 0))
+    let at = 0
+    for (const piece of pieces) {
+      audio.set(piece, at)
+      at += piece.length
+    }
+    return { audio, sampleRate, isBroken: audio.length === 0, ms: Math.round(performance.now() - started) }
+  }
+
+  // Speech to text on the native engine, after Silero (in the worker) confirms there is speech.
+  async function nativeTranscribe(audio) {
+    const check = await ask('check', { audio })
+    if (!check.isSpeech) return { text: '', noSpeech: true, ms: check.ms }
+    const response = await fetch('/stt', { method: 'POST', headers: { 'content-type': 'audio/wav', 'x-luke-key': KEY }, body: wavBytes(audio) })
+    if (!response.ok) throw new Error(`The native speech engine answered ${response.status}.`)
+    const out = await response.json()
+    return { text: String(out.text ?? ''), ms: (out.ms ?? 0) + check.ms }
+  }
+
+  // The voice backend: the native engine through the hub, or the in-page worker.
+  const synth = text => (isNative ? nativeSynth(text) : ask('speak', { text }))
+  const transcribe = audio => (isNative ? nativeTranscribe(audio) : ask('transcribe', { audio }, [audio.buffer]))
 
   const setMode = next => {
     if (next === mode) return
@@ -161,6 +287,8 @@ export async function startSession({
 
   function cancelSpeech() {
     speech++
+    nativeStop?.abort()
+    nativeStop = null
     for (const node of playing) {
       try {
         node.stop()
@@ -187,12 +315,76 @@ export async function startSession({
     setMode('speaking')
     node.onended = () => {
       playing.delete(node)
-      if (playing.size === 0 && mine === speech && isLast) setMode('listening')
+      if (playing.size === 0 && mine === speech && (isLast || node.isLast)) setMode('listening')
     }
+    return node
+  }
+
+  // The native voice streams each chunk: playback starts on the first ~80 ms, the rest follows
+  // in pieces of ~300 ms, back to back.
+  async function speakNative(text) {
+    const parts = speechChunks(text, { isNative: true })
+    if (parts.length === 0) return
+    const mine = ++speech
+    onMessage({ source: 'ai', message: text })
+    const stop = new AbortController()
+    nativeStop = stop
+    let lastNode = null
+    for (let i = 0; i < parts.length; i++) {
+      if (mine !== speech || isEnded) return
+      const started = performance.now()
+      const response = await fetch('/tts', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-luke-key': KEY },
+        body: JSON.stringify({ text: parts[i] }),
+        signal: stop.signal,
+      }).catch(() => null)
+      if (mine !== speech || isEnded) return
+      if (!response?.ok) {
+        console.warn(`[luke-voice] the native voice could not say: ${parts[i]}`)
+        continue
+      }
+      let pending = []
+      let pendingLength = 0
+      let isFirst = true
+      let rate = 24_000
+      const flush = () => {
+        if (!pendingLength) return
+        const audio = new Float32Array(pendingLength)
+        let at = 0
+        for (const piece of pending) {
+          audio.set(piece, at)
+          at += piece.length
+        }
+        pending = []
+        pendingLength = 0
+        lastNode = play(audio, rate, mine, false)
+      }
+      await readWavStream(
+        response,
+        (piece, sampleRate) => {
+          rate = sampleRate
+          pending.push(piece)
+          pendingLength += piece.length
+          if (isFirst && pendingLength >= rate * 0.08) {
+            if (i === 0) timing('speak', Math.round(performance.now() - started), 'to first audio (native)')
+            isFirst = false
+            flush()
+          } else if (pendingLength >= rate * 0.3) flush()
+        },
+        () => mine !== speech || isEnded,
+      )
+      flush()
+    }
+    if (mine !== speech || isEnded) return
+    // Back to listening when the last piece ends (or now, if nothing played).
+    if (lastNode && playing.has(lastNode)) lastNode.isLast = true
+    else if (playing.size === 0) setMode('listening')
   }
 
   // Speaks chunk by chunk: the next chunk is synthesized while the current one plays.
   async function speak(text) {
+    if (isNative) return speakNative(text)
     const parts = speechChunks(text)
     if (parts.length === 0) return
     const mine = ++speech
@@ -218,7 +410,7 @@ export async function startSession({
     for (const text of ACKS) {
       if (isEnded) return
       try {
-        const made = await synth(speechChunks(text)[0] ?? text)
+        const made = await synth(speechChunks(text, { isNative })[0] ?? text)
         if (!made.isBroken && made.audio.length) ackAudio.set(text, made)
       } catch {
         // No acknowledgement for that line; the turn still works.

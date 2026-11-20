@@ -12,6 +12,11 @@ import { stateDir } from './paths.mjs'
 const HF = 'https://huggingface.co'
 const SMART_TURN = `${HF}/pipecat-ai/smart-turn-v3/resolve/f766f81d3cfdf7737ac64aad813d91bbfd56bf93`
 const SILERO = `${HF}/onnx-community/silero-vad/resolve/e71cae966052b992a7eca6b17738916ce0eca4ec`
+const QWEN_TTS = `${HF}/mradermacher/Qwen3-TTS-12Hz-0.6B-Base-GGUF/resolve/0762b31e9cd99274d49dca4e895bd81863134f08`
+const QWEN_ASR = `${HF}/ggml-org/Qwen3-ASR-0.6B-GGUF/resolve/928ab958557df9aa2ef1c93e0e83c7ad0933fae2`
+// Files converted for luke-voice and published on its own GitHub release (see the release notes).
+const LUKE_MODELS = 'https://github.com/lukeware-hub/luke-voice/releases/download/voice-models-v1'
+const ROUTER = `${HF}/unsloth/Qwen3.5-0.8B-GGUF/resolve/6ab461498e2023f6e3c1baea90a8f0fe38ab64d0`
 
 // Served path (under /models/) -> source, sha256 and size. `group` says which feature needs it.
 export const MODELS = {
@@ -28,6 +33,44 @@ export const MODELS = {
     sha256: 'a4a068cd6cf1ea8355b84327595838ca748ec29a25bc91fc82e6c299ccdc5808',
     size: 2243022,
     group: 'turn',
+  },
+
+  // The native engine (gpu profile), all run by llama.cpp's llama-server (hub/engine.mjs).
+  // Qwen3-TTS 0.6B Base (Apache-2.0): Ceci's voice, cloned from agent/ceci-voice.wav, streamed.
+  'native/qwen3-tts-0.6b-base-q8_0.gguf': {
+    url: `${QWEN_TTS}/Qwen3-TTS-12Hz-0.6B-Base.Q8_0.gguf`,
+    sha256: '59b28b4ab6a1c4e24e6701fc871a427c1fb3e8333f0ed5cebec3bb67a699ae8e',
+    size: 646211264,
+    group: 'native',
+  },
+  // Its projector with the speech tokenizer's reference encoder (converted with llama.cpp b12556):
+  // cloning from the reference clip AND its transcript keeps Ceci's accent Brazilian; the public
+  // projector clones from the speaker embedding only, which pulled her toward European Portuguese.
+  'native/qwen3-tts-0.6b-base-mmproj-icl-q8_0.gguf': {
+    url: `${LUKE_MODELS}/qwen3-tts-0.6b-base-mmproj-icl-q8_0.gguf`,
+    sha256: 'a49882472bb035b349ade86821a4c7999852d8f6d51f2f2681b0ce653fa0baaf',
+    size: 587081344,
+    group: 'native',
+  },
+  // Qwen3-ASR 0.6B (Apache-2.0): what the user said, ~90 ms per sentence on a mid-range GPU.
+  'native/qwen3-asr-0.6b-q8_0.gguf': {
+    url: `${QWEN_ASR}/Qwen3-ASR-0.6B-Q8_0.gguf`,
+    sha256: 'bca259818b50ca7c4c05e9bdb35a5dc04fa039653a6d6f3f0f331f96f6aa1971',
+    size: 804749248,
+    group: 'native',
+  },
+  'native/qwen3-asr-0.6b-mmproj-q8_0.gguf': {
+    url: `${QWEN_ASR}/mmproj-Qwen3-ASR-0.6B-Q8_0.gguf`,
+    sha256: '41a342b5e4c514e968cb756de6cd1b7be39eff43c44c57a2ef5fc6522e36603d',
+    size: 214392480,
+    group: 'native',
+  },
+  // Qwen3.5 0.8B (Apache-2.0), on the CPU: the instant local router of the hybrid brain.
+  'native/qwen3.5-0.8b-q4_k_m.gguf': {
+    url: `${ROUTER}/Qwen3.5-0.8B-Q4_K_M.gguf`,
+    sha256: 'bd258782e35f7f458f8aced1adc053e6e92e89bc735ba3be89d38a06121dc517',
+    size: 532517120,
+    group: 'native',
   },
 }
 
@@ -77,11 +120,8 @@ async function download(entry, file, { request, onProgress }) {
   return file
 }
 
-// The local path of a verified model file, downloading it if needed. Null for an unknown path.
-export async function ensureModel(path, { dir = modelsDir(), request = fetch, onProgress } = {}) {
-  const entry = MODELS[path]
-  if (!entry) return null
-  const file = join(dir, ...path.split('/'))
+// A verified file at `file` for `entry` ({ url, sha256, size }), downloading it if needed.
+export async function ensureFile(entry, file, { request = fetch, onProgress } = {}) {
   if (verified.has(file) && sizeOf(file) === entry.size) return file
   if (sizeOf(file) === entry.size && (await sha256Of(file)) === entry.sha256) {
     verified.add(file)
@@ -92,6 +132,13 @@ export async function ensureModel(path, { dir = modelsDir(), request = fetch, on
     inFlight.set(file, download(entry, file, { request, onProgress }).finally(() => inFlight.delete(file)))
   }
   return inFlight.get(file)
+}
+
+// The local path of a verified model file, downloading it if needed. Null for an unknown path.
+export async function ensureModel(path, { dir = modelsDir(), request = fetch, onProgress } = {}) {
+  const entry = MODELS[path]
+  if (!entry) return null
+  return ensureFile(entry, join(dir, ...path.split('/')), { request, onProgress })
 }
 
 // What is on disk for a group of models (or all): how many files and bytes, of how many.
