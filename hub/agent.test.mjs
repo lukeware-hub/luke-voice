@@ -60,7 +60,7 @@ test('both voices are Ceci: same name, age and creator, told only when asked, an
     const text = await readFile(join(root, file), 'utf8')
     assert.match(text, /^Você é a Ceci, a assistente de voz que orquestra o Claude Code/, file)
     assert.match(text, /tem 23 anos/, file)
-    assert.match(text, /criada por Diego Morais, dono da Lukeware Inteligência Digital LTDA/, file)
+    assert.match(text, /criada por Diego Morais na Lukeware Inteligência Digital LTDA, a empresa da qual ele é dono. Lukeware é o nome da empresa, não o seu/, file)
     assert.match(text, /Só fale da sua idade ou de quem te criou quando o usuário perguntar/, file)
     assert.match(text, /Nunca invente/, file)
   }
