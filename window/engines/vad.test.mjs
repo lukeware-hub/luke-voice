@@ -91,3 +91,33 @@ test('a muted reset forgets a half-heard utterance', () => {
   vad.reset()
   assert.equal(vad.inSpeech, false)
 })
+
+test('with a turn model, a short pause makes one candidate, and endNow ends the utterance there', () => {
+  const vad = createVad({ candidateFrames: 12, endFrames: 38 })
+  const events = feed(vad, [...Array(20).fill(0).map(() => tone(0.1)), ...Array(12).fill(0).map(silence)])
+  assert.deepEqual(events.map(e => e.type), ['start', 'candidate'])
+  const candidate = events[1]
+  assert.ok(candidate.audio.length > 0)
+  const end = vad.endNow(candidate.id)
+  assert.equal(end.type, 'end')
+  assert.equal(vad.inSpeech, false)
+  // Only one candidate per pause, and nothing after the end.
+  assert.deepEqual(feed(vad, Array(10).fill(0).map(silence)), [])
+})
+
+test('a candidate the turn model rejects waits for the long silence, and speech in between makes the answer stale', () => {
+  const vad = createVad({ candidateFrames: 12, endFrames: 38 })
+  const first = feed(vad, [...Array(20).fill(0).map(() => tone(0.1)), ...Array(12).fill(0).map(silence)])
+  const stale = first.find(e => e.type === 'candidate')
+  // The user goes on talking: the old candidate can no longer end the utterance.
+  feed(vad, Array(10).fill(0).map(() => tone(0.1)))
+  assert.equal(vad.endNow(stale.id), null)
+  // No answer for the new pause: the long silence ends it.
+  const rest = feed(vad, Array(38).fill(0).map(silence))
+  assert.deepEqual(rest.map(e => e.type), ['candidate', 'end'])
+})
+
+test('without a turn model there are no candidates, as before', () => {
+  const events = feed(createVad(), [...Array(20).fill(0).map(() => tone(0.1)), ...Array(30).fill(0).map(silence)])
+  assert.deepEqual(events.map(e => e.type), ['start', 'end'])
+})

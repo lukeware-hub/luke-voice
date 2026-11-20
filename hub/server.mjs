@@ -2,13 +2,14 @@
 // It never calls Claude. It queues a command; the matching session's mod pulls it and runs it.
 import { spawn } from 'node:child_process'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { createReadStream, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { conversationToken, credits, ensureAgent, outOfCreditsMessage } from './agent.mjs'
 import { PORT, stateDir, stateFile } from './paths.mjs'
+import { ensureModel } from './models.mjs'
 import { contentType, vendorFile } from './vendor.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -103,7 +104,7 @@ export function openWindow(url) {
   spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: cmd === 'cmd' }).unref()
 }
 
-export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, log = () => {}, onShutdown = () => process.exit(0) }) {
+export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, log = () => {}, onShutdown = () => process.exit(0) }) {
   const sessions = new Map() // token -> session
   const replaced = new Set() // tokens a newer subscription of the same Claude session took over
   const streams = new Set() // window SSE responses
@@ -303,7 +304,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       if (!result.ok) return [502, { error: result.message }]
       try {
         const reply = JSON.parse(result.message)
-        return [200, { say: String(reply.say ?? ''), tool: reply.tool ?? null }]
+        return [200, { say: String(reply.say ?? ''), tool: reply.tool ?? null, pending: reply.pending ?? null }]
       } catch {
         return [502, { error: 'The brain answered something that is not JSON.' }]
       }
@@ -424,6 +425,20 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
         // Pinned by hash: the bytes for a path never change, so the browser may keep them.
         res.writeHead(200, { 'content-type': contentType(path), 'cache-control': 'public, max-age=31536000, immutable', ...ISOLATION })
         return res.end(content)
+      }
+
+      // Voice model files, verified by sha256 (hub/models.mjs); downloaded here if setup did not.
+      if (req.method === 'GET' && url.pathname.startsWith('/models/')) {
+        const path = url.pathname.slice('/models/'.length)
+        const file = await models(path)
+        if (!file) return send(res, 404, { error: 'not found' })
+        res.writeHead(200, {
+          'content-type': 'application/octet-stream',
+          'content-length': String(statSync(file).size),
+          'cache-control': 'public, max-age=31536000, immutable',
+          ...ISOLATION,
+        })
+        return createReadStream(file).pipe(res)
       }
 
       if (route === 'GET /stream') {

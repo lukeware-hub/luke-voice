@@ -12,6 +12,9 @@ const DEFAULTS = {
   startFrames: 3, // ~100 ms of speech starts an utterance
   bargeFrames: 8, // ~250 ms of loud speech interrupts Ceci
   endFrames: 25, // ~800 ms of silence ends it
+  // With a turn model (Smart Turn), ~400 ms of silence makes a candidate end: the model says
+  // whether the user is done. If not, the silence must reach endFrames. 0 turns candidates off.
+  candidateFrames: 0,
   prerollFrames: 10, // ~320 ms kept from before the start, so the first syllable is not cut
   // While Ceci speaks, ~1.6 s is kept: speech has quiet dips between syllables, so a barge-in
   // fires a moment after the user started, and the words before it must not be lost.
@@ -27,7 +30,9 @@ export function rms(frame) {
 }
 
 // push(frame, { isSpeaking }) returns null, or one event: { type: 'start' }, { type: 'barge' },
-// { type: 'end', audio: Float32Array } or { type: 'drop' } for a blip too short to transcribe.
+// { type: 'end', audio: Float32Array }, { type: 'drop' } for a blip too short to transcribe, or
+// { type: 'candidate', audio, id } once per pause of candidateFrames. The caller asks the turn model
+// and, if the user is done, calls endNow(id) to get the 'end' event without waiting longer.
 export function createVad(options = {}) {
   const o = { ...DEFAULTS, ...options }
   let floor = o.minLevel / o.ratio
@@ -37,6 +42,9 @@ export function createVad(options = {}) {
   let inSpeech = false
   let preroll = []
   let frames = []
+  // Bumped on every new pause and every resumed speech, so a late answer about an old pause is ignored.
+  let pause = 0
+  let asked = false
 
   function finish() {
     const enough = voiced >= o.minSpeechFrames
@@ -46,6 +54,8 @@ export function createVad(options = {}) {
     frames = []
     preroll = []
     loud = quiet = voiced = 0
+    asked = false
+    pause++
     return enough ? { type: 'end', audio } : { type: 'drop' }
   }
 
@@ -87,18 +97,35 @@ export function createVad(options = {}) {
       frames.push(frame)
       if (isLoud) {
         voiced++
+        if (quiet > 0) {
+          pause++
+          asked = false
+        }
         quiet = 0
       } else {
         quiet++
       }
       if (quiet >= o.endFrames || frames.length >= o.maxFrames) return finish()
+      if (o.candidateFrames && !asked && quiet >= o.candidateFrames && voiced >= o.minSpeechFrames) {
+        asked = true
+        const audio = new Float32Array(frames.length * FRAME)
+        frames.forEach((f, i) => audio.set(f, i * FRAME))
+        return { type: 'candidate', audio, id: pause }
+      }
       return null
+    },
+    // The turn model says the user is done with the pause `id`: end now, unless they spoke since.
+    endNow(id) {
+      if (!inSpeech || id !== pause) return null
+      return finish()
     },
     reset() {
       inSpeech = false
       frames = []
       preroll = []
       loud = quiet = voiced = 0
+      asked = false
+      pause++
     },
   }
 }

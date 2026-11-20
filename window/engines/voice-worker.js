@@ -3,7 +3,7 @@
 // it speaks when Kokoro cannot load, or when this computer is too slow for Kokoro.
 // All code comes from /vendor/, which the hub verified by hash; the model weights come from
 // Hugging Face and the browser caches them.
-import { AutoTokenizer, StyleTextToSpeech2Model, Tensor, env, pipeline } from '/vendor/transformers/transformers.min.js'
+import { AutoTokenizer, StyleTextToSpeech2Model, Tensor, WhisperFeatureExtractor, env, pipeline } from '/vendor/transformers/transformers.min.js'
 import { getPhonemes, initialize, setVoice } from '/vendor/espeak/dist/espeak.mjs'
 import { phonemeIds } from '/engines/piper-ids.js'
 
@@ -16,6 +16,10 @@ const STYLE = 256
 const KOKORO_RATE = 24_000
 // Kokoro slower than real time on this computer means gaps while Ceci speaks: use Piper instead.
 const MAX_KOKORO_RTF = 1
+// Smart Turn reads the last 8 s at 16 kHz.
+const TURN_SAMPLES = 128_000
+// At least ~200 ms that Silero hears as speech, or the utterance is noise.
+const MIN_SPEECH_FRAMES = 6
 const RTF_PROBE = 'Tudo certo, já estou pronta para ajudar você agora.'
 
 env.allowLocalModels = false
@@ -27,6 +31,7 @@ let engine = 'kokoro' // the voice that speaks: 'kokoro' or 'piper'
 let kokoro = null // { model, tokenizer, voice: Float32Array }
 let piper = null // { ort, session, config }
 let stt = null // the Whisper speech recognition pipeline
+let turn = null // { ort, smart, silero, features }: end-of-turn and speech checks; null if they did not load
 let sttName = ''
 let ready = null
 
@@ -81,12 +86,80 @@ async function loadKokoro({ device, dtype, voice }) {
   kokoro = { model, tokenizer, voice: new Float32Array(voiceBytes) }
 }
 
-// Piper runs on the CPU with its own copy of onnxruntime (the same version transformers.js uses).
-async function loadPiper() {
-  if (piper) return
+// Piper, Smart Turn and Silero run on the CPU with their own copy of onnxruntime (the same
+// version transformers.js uses, so the same .jsep.wasm).
+let ortModule = null
+async function loadOrt() {
+  if (ortModule) return ortModule
   const ort = await import('/vendor/onnxruntime/ort.webgpu.bundle.min.mjs')
   ort.env.wasm.wasmPaths = '/vendor/transformers/'
   ort.env.wasm.numThreads = env.backends.onnx.wasm.numThreads
+  ortModule = ort
+  return ort
+}
+
+// Smart Turn v3.2 (is the user done?) and Silero VAD (is it speech at all?), from the hub's /models/.
+async function loadTurn() {
+  const ort = await loadOrt()
+  const options = { executionProviders: ['wasm'] }
+  const [smart, silero] = await Promise.all([
+    ort.InferenceSession.create('/models/turn/smart-turn-v3.2-cpu.onnx', options),
+    ort.InferenceSession.create('/models/turn/silero-vad.onnx', options),
+  ])
+  // The Whisper front end Smart Turn was trained on: 8 s windows, 80 mel bins.
+  const features = new WhisperFeatureExtractor({
+    feature_size: 80,
+    sampling_rate: 16_000,
+    hop_length: 160,
+    chunk_length: 8,
+    n_fft: 400,
+    padding_value: 0,
+    n_samples: TURN_SAMPLES,
+    nb_max_frames: 800,
+  })
+  turn = { ort, smart, silero, features }
+}
+
+// Probability that the user finished their turn, from the last 8 s of the utterance, as Smart
+// Turn's reference code does: zero mean and unit variance, padded with silence at the end.
+async function endOfTurn(audio) {
+  const tail = audio.length > TURN_SAMPLES ? audio.subarray(audio.length - TURN_SAMPLES) : audio
+  let mean = 0
+  for (const v of tail) mean += v
+  mean /= tail.length || 1
+  let variance = 0
+  for (const v of tail) variance += (v - mean) ** 2
+  const std = Math.sqrt(variance / (tail.length || 1) + 1e-7)
+  const input = new Float32Array(TURN_SAMPLES)
+  for (let i = 0; i < tail.length; i++) input[i] = (tail[i] - mean) / std
+  const { input_features: x } = await turn.features(input)
+  const out = await turn.smart.run({ input_features: new turn.ort.Tensor('float32', x.data, x.dims) })
+  return out.logits.data[0]
+}
+
+// How many 32 ms frames of the utterance Silero hears as speech.
+async function speechFrames(audio) {
+  const { ort, silero } = turn
+  const sr = new ort.Tensor('int64', BigInt64Array.from([16_000n]), [])
+  let state = new ort.Tensor('float32', new Float32Array(2 * 128), [2, 1, 128])
+  let context = new Float32Array(64)
+  let count = 0
+  for (let i = 0; i + 512 <= audio.length; i += 512) {
+    const frame = audio.subarray(i, i + 512)
+    const input = new Float32Array(576)
+    input.set(context)
+    input.set(frame, 64)
+    const out = await silero.run({ input: new ort.Tensor('float32', input, [1, 576]), state, sr })
+    state = out.stateN
+    if (out.output.data[0] > 0.5) count++
+    context = frame.slice(448)
+  }
+  return count
+}
+
+async function loadPiper() {
+  if (piper) return
+  const ort = await loadOrt()
   const [model, config] = await Promise.all([
     cachedBytes(`${PIPER}.onnx`, 'The Piper voice'),
     cachedBytes(`${PIPER}.onnx.json`, 'The Piper voice settings').then(bytes => JSON.parse(new TextDecoder().decode(bytes))),
@@ -131,6 +204,8 @@ async function load({ voice = 'pf_dora', language = 'pt-br', device: forced, dty
     pipeline('automatic-speech-recognition', WHISPER[sttSize] ?? WHISPER.base, { dtype: whisperType, device: sttDevice, progress_callback: progress }),
     loadVoice(),
     initialize('/vendor/espeak/dist').then(() => setVoice(language)),
+    // The turn models are a bonus: without them the level detector ends turns as before.
+    loadTurn().catch(error => console.warn(`[luke-voice] end-of-turn models did not load: ${error?.message ?? error}`)),
   ])
   stt = recognizer
 
@@ -154,7 +229,7 @@ async function load({ voice = 'pf_dora', language = 'pt-br', device: forced, dty
       await speakChunk('Oi.')
     }
   }
-  post('ready', { device, threads: env.backends.onnx.wasm.numThreads, warmMs: Math.round(performance.now() - started), tts: engine, stt: sttName })
+  post('ready', { device, threads: env.backends.onnx.wasm.numThreads, warmMs: Math.round(performance.now() - started), tts: engine, stt: sttName, turn: Boolean(turn) })
 }
 
 const hasNaN = audio => {
@@ -228,8 +303,18 @@ self.onmessage = async ({ data }) => {
     }
     if (type === 'transcribe') {
       const started = performance.now()
+      // Noise with no speech in it (a fan, typing) never reaches Whisper, which would invent words.
+      if (turn) {
+        const frames = await speechFrames(data.audio)
+        if (frames < MIN_SPEECH_FRAMES) return post('text', { id, text: '', noSpeech: true, ms: Math.round(performance.now() - started) })
+      }
       const text = await transcribe(data.audio, data.language)
       return post('text', { id, text, ms: Math.round(performance.now() - started) })
+    }
+    if (type === 'endpoint') {
+      const started = performance.now()
+      const done = turn ? await endOfTurn(data.audio) : 1
+      return post('endpoint', { id, done, ms: Math.round(performance.now() - started) })
     }
     post('error', { id, message: `Unknown request: ${type}` })
   } catch (error) {

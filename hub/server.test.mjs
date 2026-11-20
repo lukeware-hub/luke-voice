@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { request } from 'node:http'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
@@ -288,7 +288,15 @@ test('an explicit provider wins over the key', async () => {
 })
 
 test('vendored files are served from the hub, unknown ones are 404, and the page is cross-origin isolated', async () => {
-  const served = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {}, vendor: async path => (path === 'espeak/dist/version.mjs' ? Buffer.from('export const V = 1') : null) })
+  const modelFile = join(mkdtempSync(join(tmpdir(), 'luke-model-')), 'm.onnx')
+  writeFileSync(modelFile, 'ONNXBYTES')
+  const served = createHub({
+    serviceToken: SERVICE,
+    windowKey: WINDOW,
+    open: () => {},
+    vendor: async path => (path === 'espeak/dist/version.mjs' ? Buffer.from('export const V = 1') : null),
+    models: async path => (path === 'turn/silero-vad.onnx' ? modelFile : null),
+  })
   await new Promise(resolve => served.listen(0, '127.0.0.1', resolve))
   const p = served.address().port
   const fetchRaw = path =>
@@ -307,6 +315,11 @@ test('vendored files are served from the hub, unknown ones are 404, and the page
     assert.equal(file.text, 'export const V = 1')
     assert.equal(file.headers['content-type'], 'text/javascript; charset=utf-8')
     assert.equal((await fetchRaw('/vendor/../../hub.json')).status, 404)
+    const model = await fetchRaw('/models/turn/silero-vad.onnx')
+    assert.equal(model.status, 200)
+    assert.equal(model.text, 'ONNXBYTES')
+    assert.equal(model.headers['content-length'], '9')
+    assert.equal((await fetchRaw('/models/nope.onnx')).status, 404)
     const page = await fetchRaw(`/?k=${WINDOW}`)
     assert.equal(page.headers['cross-origin-opener-policy'], 'same-origin')
     assert.equal(page.headers['cross-origin-embedder-policy'], 'credentialless')
@@ -327,8 +340,10 @@ test('the brain turn goes to the focused session as a think command, and its JSO
   assert.equal(command.request.text, 'oi')
   assert.equal(command.request.context.length, 8)
   assert.ok(command.request.sessions.some(s => s.name === s1.name))
-  await call('POST', '/ack', { auth: s1.token, body: { id: command.id, ok: true, message: '{"say":"Oi!","tool":null}' } })
-  assert.deepEqual((await asked).body, { say: 'Oi!', tool: null })
+  const pending = { name: 'luke_run_task', args: { task: 'rodar os testes' } }
+  await call('POST', '/ack', { auth: s1.token, body: { id: command.id, ok: true, message: JSON.stringify({ say: 'Posso?', tool: null, pending }) } })
+  // The pending action reaches the window, so a plain "sim" runs it with no second brain call.
+  assert.deepEqual((await asked).body, { say: 'Posso?', tool: null, pending })
 
   const failing = call('POST', '/brain', { key: WINDOW, body: { kind: 'user', text: 'oi' } })
   const next = (await call('GET', '/inbox?wait=2000', { auth: s1.token })).body.commands[0]

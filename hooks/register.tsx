@@ -39,15 +39,23 @@ export type BrainRequest = {
   focused: string | null
 }
 
-export type BrainReply = { say: string; tool: { name: string; args: Record<string, unknown> } | null }
+type BrainTool = { name: string; args: Record<string, unknown> }
 
-// The brain model and effort, chosen by the project owner.
+// say: what Ceci says now. tool: what runs now. pending: what runs if the user's next words are a
+// plain yes (Ceci asked "posso?"), so the confirmation needs no second model call.
+export type BrainReply = { say: string; tool: BrainTool | null; pending: BrainTool | null }
+
 export const BRAIN_MODEL = 'claude-haiku-5-5'
-export const BRAIN_EFFORT = 'max'
+// Low effort: at max, Haiku thought for 6–28 s per spoken turn, far too slow for a voice.
+export const BRAIN_EFFORT = 'low'
+const BRAIN_MAX_TOKENS = 400
+const BRAIN_TIMEOUT_MS = 15_000
 const BRAIN_TOOLS = ['luke_run_task', 'luke_send_to_claude', 'luke_stop_claude', 'luke_session_activity']
+// Tools that act on the computer: only these can wait for a "sim".
+const PENDABLE_TOOLS = ['luke_run_task', 'luke_send_to_claude']
 
-// The local voice's brain is one short Claude Haiku call per turn. No tools, MCP servers,
-// settings, skills or session history: the call sees only the brain prompt and this turn (~2k tokens).
+// The fallback brain, for an engine without $.model.complete: one short `claude -p` per turn.
+// No tools, MCP servers, settings, skills or session history.
 export function brainArgs(root: string): string[] {
   return [
     'claude', '-p',
@@ -74,29 +82,71 @@ export function brainInput(request: BrainRequest): string {
   return [`[sessões] ${sessions}`, '[contexto]', request.context.join('\n') || '(nada)', '[conversa]', turns, `[agora] ${now}`].join('\n')
 }
 
-// Reads `claude -p --output-format json`: the reply is JSON inside the result text, maybe in a code fence.
-export function parseBrain(stdout: string): BrainReply {
-  const envelope = JSON.parse(stdout.trim().split('\n').pop() || '{}') as { result?: string; is_error?: boolean }
-  if (envelope.is_error || typeof envelope.result !== 'string') throw new Error(`the brain failed: ${envelope.result ?? 'no result'}`)
-  const text = envelope.result.trim()
+// A tool from the brain's JSON, only if it is one of the known tools (and, for pending, one that acts).
+function toolOf(value: unknown, allowed: string[]): BrainTool | null {
+  const tool = value as { name?: unknown; args?: unknown } | null | undefined
+  if (typeof tool?.name !== 'string' || !allowed.includes(tool.name)) return null
+  const args = tool.args && typeof tool.args === 'object' ? (tool.args as Record<string, unknown>) : {}
+  return { name: tool.name, args }
+}
+
+// Reads the brain's reply text: JSON, maybe in a code fence, maybe with words around it.
+export function parseBrainText(raw: string): BrainReply {
+  const text = raw.trim()
   const json = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)
-  let reply: { say?: unknown; tool?: { name?: unknown; args?: unknown } | null }
+  let reply: { say?: unknown; tool?: unknown; pending?: unknown }
   try {
     reply = JSON.parse(json)
   } catch {
     // Plain words instead of JSON: say them, run nothing.
-    return { say: text.slice(0, 500), tool: null }
+    return { say: text.slice(0, 500), tool: null, pending: null }
   }
-  const name = typeof reply.tool?.name === 'string' && BRAIN_TOOLS.includes(reply.tool.name) ? reply.tool.name : null
-  const args = reply.tool?.args && typeof reply.tool.args === 'object' ? (reply.tool.args as Record<string, unknown>) : {}
-  return { say: typeof reply.say === 'string' ? reply.say : '', tool: name ? { name, args } : null }
+  const tool = toolOf(reply.tool, BRAIN_TOOLS)
+  // A pending action only makes sense when nothing runs now.
+  const pending = tool ? null : toolOf(reply.pending, PENDABLE_TOOLS)
+  return { say: typeof reply.say === 'string' ? reply.say : '', tool, pending }
+}
+
+// Reads `claude -p --output-format json` (the fallback brain).
+export function parseBrain(stdout: string): BrainReply {
+  const envelope = JSON.parse(stdout.trim().split('\n').pop() || '{}') as { result?: string; is_error?: boolean }
+  if (envelope.is_error || typeof envelope.result !== 'string') throw new Error(`the brain failed: ${envelope.result ?? 'no result'}`)
+  return parseBrainText(envelope.result)
+}
+
+// The brain prompt, read once per mod load.
+let brainPrompt: string | null = null
+
+// One brain turn. The engine's direct model call: no process to start, and the prompt is cached
+// between turns. An engine that cannot make the call (an older Claude Code) throws, and the
+// `claude -p` fallback answers instead.
+async function askBrain($: EngineInterface, request: BrainRequest): Promise<BrainReply> {
+  brainPrompt ??= await $.fs.read(`${$.plugin.root}/agent/brain-prompt.md`)
+  let reply: Awaited<ReturnType<EngineInterface['model']['complete']>> | null = null
+  try {
+    reply = await $.model.complete({
+      model: BRAIN_MODEL,
+      system: [{ text: brainPrompt, cache: true }],
+      prompt: brainInput(request),
+      effort: BRAIN_EFFORT,
+      maxTokens: BRAIN_MAX_TOKENS,
+      timeoutMs: BRAIN_TIMEOUT_MS,
+    })
+  } catch {
+    reply = null
+  }
+  if (reply) {
+    if (!reply.isAnswered) throw new Error(`the brain failed: ${reply.reason}`)
+    return parseBrainText(reply.text)
+  }
+  const out = await $.process.run(brainArgs($.plugin.root), { timeoutMs: 40_000, stdin: brainInput(request) })
+  if (out.exitCode !== 0 && !out.stdout.trim()) throw new Error(out.stderr.trim() || `claude exited with ${out.exitCode}`)
+  return parseBrain(out.stdout)
 }
 
 async function think($: EngineInterface, command: { id: string; request: BrainRequest }) {
   try {
-    const out = await $.process.run(brainArgs($.plugin.root), { timeoutMs: 40_000, stdin: brainInput(command.request) })
-    if (out.exitCode !== 0 && !out.stdout.trim()) throw new Error(out.stderr.trim() || `claude exited with ${out.exitCode}`)
-    return ack($, command.id, true, JSON.stringify(parseBrain(out.stdout)))
+    return ack($, command.id, true, JSON.stringify(await askBrain($, command.request)))
   } catch (error) {
     return ack($, command.id, false, `The brain did not answer: ${error instanceof Error ? error.message : error}`)
   }
@@ -477,13 +527,14 @@ async function show($: EngineInterface, options: Record<string, unknown>, withCa
 }
 
 // /luke-voice voz [local|elevenlabs]: shows the voice, or switches it for the next call.
-async function voiceCommand($: EngineInterface, arg: string) {
+async function voiceCommand($: EngineInterface, options: Record<string, unknown>, arg: string) {
   const word = arg.trim().toLowerCase()
   if (!word) {
     const health = await hubFetch($, 'GET', '/health', undefined, null).catch(() => null)
-    const current = health?.ok && health.json.app === 'luke-voice' ? String(health.json.provider ?? '') : voice
+    // The running hub says which voice it uses; with no hub yet, the choice saved in Claude Code.
+    const current = health?.ok && health.json.app === 'luke-voice' ? String(health.json.provider ?? '') : voice || chosenProvider(options)
     return [
-      `Voz atual: ${current ? voiceName(current) : 'ainda não definida (o luke-voice escolhe quando liga)'}.`,
+      `Voz atual: ${current ? voiceName(current) : 'automática (a gratuita, ou a ElevenLabs se houver chave salva)'}.`,
       'Para trocar: /luke-voice voz local (gratuita, no seu computador) ou /luke-voice voz elevenlabs.',
     ].join('\n')
   }
@@ -644,7 +695,7 @@ export const register: Register = (on, options) => {
   on('command.run', { command: NAME }, async ($, e) => {
     const arg = e.args.trim().toLowerCase()
     const voiceArg = arg.match(/^(voz|voice)(\s+(.*))?$/)
-    if (voiceArg) return { text: await voiceCommand($, voiceArg[3] ?? '') }
+    if (voiceArg) return { text: await voiceCommand($, opts, voiceArg[3] ?? '') }
     switch (arg) {
       case '':
         return { text: (await toggle($, opts)) ? 'luke-voice: on. Starting the call.' : 'luke-voice: off' }
