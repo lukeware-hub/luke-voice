@@ -281,6 +281,24 @@ function addLog(kind, title, { body, who } = {}) {
 
 /* ---------- Settings ---------- */
 
+// The voice rows: which voice, and what it needs or runs on.
+function voiceFacts(health) {
+  if (health.provider !== 'local') {
+    return [
+      ['Voz', 'ElevenLabs (Roberta)', ''],
+      health.keyStatus === 'rejected'
+        ? ['Chave da ElevenLabs', 'Recusada pela ElevenLabs', 'bad']
+        : ['Chave da ElevenLabs', health.hasKey ? 'Configurada' : 'Faltando', health.hasKey ? 'ok' : 'bad'],
+    ]
+  }
+  const info = engine?.name === 'local' ? engine.getVoiceInfo?.() : null
+  const runsOn = info ? (info.device === 'webgpu' ? 'placa de vídeo (WebGPU)' : `processador (${info.threads} threads)`) : 'carrega na primeira chamada'
+  return [
+    ['Voz', 'Ceci, gratuita, no seu computador', 'ok'],
+    ['Roda em', runsOn, ''],
+  ]
+}
+
 async function renderFacts() {
   const health = await fetch('/health')
     .then(r => r.json())
@@ -288,10 +306,7 @@ async function renderFacts() {
   const rows = health
     ? [
         ['Versão', health.version, ''],
-        health.keyStatus === 'rejected'
-          ? ['Chave da ElevenLabs', 'Recusada pela ElevenLabs', 'bad']
-          : ['Chave da ElevenLabs', health.hasKey ? 'Configurada' : 'Faltando', health.hasKey ? 'ok' : 'bad'],
-        ['Voz', 'Roberta, português do Brasil', ''],
+        ...voiceFacts(health),
         ['Sessões ligadas', String(health.sessions), ''],
         ['Chamada', STATES[health.call]?.pill ?? health.call, ''],
       ]
@@ -384,10 +399,10 @@ async function microphone() {
 
 // The voice engine the hub picked: the free local voice, or ElevenLabs. Loaded once per page.
 let engine = null
+// Asked on every call: /luke-voice voz can switch the voice while this window stays open.
 async function voiceEngine() {
-  if (engine) return engine
   const { provider } = await hub('GET', '/config')
-  engine = provider === 'elevenlabs' ? await import('/engines/elevenlabs.js') : await import('/engines/local.js')
+  if (engine?.name !== provider) engine = provider === 'elevenlabs' ? await import('/engines/elevenlabs.js') : await import('/engines/local.js')
   return engine
 }
 
@@ -538,7 +553,7 @@ async function closeWindow() {
   await endCall()
   window.close()
   // A tab the page did not open stays open: say how to close it.
-  setTimeout(() => setCaption('Chamada encerrada. Feche esta janela pela barra do Windows.'), 300)
+  setTimeout(() => setCaption('Chamada encerrada. Pode fechar esta janela pelo botão de fechar do sistema.'), 300)
 }
 
 /* ---------- Wiring ---------- */

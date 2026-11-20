@@ -69,8 +69,14 @@ const loadVoice = () => (workerLoad ??= ask('load', overrides).catch(error => ((
 // One line per step in the console, to see where the time goes on a slow machine.
 const timing = (step, ms, extra = '') => console.info(`[luke-voice] ${step} ${ms} ms${extra ? ` ${extra}` : ''}`)
 
+// What the loaded voice runs on, for the settings page; null until the first call loads it.
+let voiceInfo = null
+export const getVoiceInfo = () => voiceInfo
+
 listeners.add(data => {
-  if (data.type === 'ready') timing('voice ready', data.warmMs ?? 0, `(${data.device}, ${data.threads} threads, warm-up)`)
+  if (data.type !== 'ready') return
+  voiceInfo = { device: data.device, threads: data.threads }
+  timing('voice ready', data.warmMs ?? 0, `(${data.device}, ${data.threads} threads, warm-up)`)
 })
 
 const percent = ({ loaded, total }) => Math.min(99, Math.round((loaded / total) * 100))

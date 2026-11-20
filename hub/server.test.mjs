@@ -109,10 +109,11 @@ test('events are kept as activity the agent can read', async () => {
   await call('POST', '/unsubscribe', { auth: s.token })
 })
 
-test('a call token without an API key says how to add one', async () => {
+test('a call token without an API key says how to add one, or to use the free voice', async () => {
   const res = await call('POST', '/token', { key: WINDOW })
   assert.equal(res.status, 409)
-  assert.match(res.body.error, /ELEVENLABS_API_KEY/)
+  assert.match(res.body.error, /plugin configure luke-voice@luke-voice/)
+  assert.match(res.body.error, /luke-voice voz local/)
 })
 
 test('a reload of the same Claude session takes over its row: same name, old token answered 409', async () => {

@@ -249,7 +249,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
   // Routes for the call window, by the window key.
   const windowRoutes = {
     'POST /token': async () => {
-      if (!key) return [409, { error: 'No ElevenLabs API key. Set ELEVENLABS_API_KEY or run /plugin configure luke-voice@luke-voice.' }]
+      if (!key) return [409, { error: 'Falta a chave da ElevenLabs. Salve com /plugin configure luke-voice@luke-voice e reinicie o Claude Code, ou use a voz gratuita: /luke-voice voz local.' }]
       try {
         agentId ??= await ensureAgent(key, root, { log })
         // With no credits left, ElevenLabs accepts the call and drops it at once: say why instead.

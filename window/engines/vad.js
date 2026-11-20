@@ -1,6 +1,6 @@
 // A small voice activity detector on audio level: no model to download, a few lines of math per frame.
 // Frames are 512 samples at 16 kHz (32 ms). The noise floor follows the room while nobody speaks.
-// While Ceci talks, the bar to interrupt is higher, so its own voice leaking into the mic does not cut it off.
+// While Ceci talks, the bar to interrupt is higher, so her own voice leaking into the mic does not cut it off.
 
 export const FRAME = 512
 export const RATE = 16_000
