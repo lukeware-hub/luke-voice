@@ -7,8 +7,9 @@ pause
 exit /b
 #>
 
-# luke-voice installer for Windows. It installs the luke-voice mod into Claude Code,
-# asks for the ElevenLabs key (optional), and checks that everything is in place.
+# luke-voice installer for Windows. It installs the luke-voice mod into Claude Code, lets you pick
+# Ceci's voice (free local, or ElevenLabs with your key), and checks that everything is in place.
+# Without questions: set LUKE_VOICE_PROVIDER=local|elevenlabs and LUKE_VOICE_NO_PROMPT=1.
 $ErrorActionPreference = 'Stop'
 $Plugin = 'luke-voice@luke-voice'
 $Repo = 'lukeware-hub/luke-voice'
@@ -31,7 +32,7 @@ function Run-Claude([string[]]$CliArgs) {
 
 Write-Host ""
 Write-Host "  luke-voice installer" -ForegroundColor White
-Write-Host "  A voice coworker for Claude Code. This takes about one minute."
+Write-Host "  Ceci, a voice assistant for Claude Code. This takes about one minute."
 
 Step 1 'Checking that Claude Code is installed'
 if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
@@ -54,13 +55,29 @@ Run-Claude @('plugin', 'install', $Plugin) | Out-Null
 Run-Claude @('plugin', 'update', $Plugin) | Out-Null
 Ok 'luke-voice installed.'
 
-Step 4 'ElevenLabs key (the voice needs it)'
+Step 4 "Choosing Ceci's voice"
 $config = Run-Claude @('plugin', 'configure', $Plugin, '--json') | ConvertFrom-Json
 $hasKey = -not ($config.unconfigured -contains 'api_key')
+$current = [string]$config.inputs.voice_provider
+$canAsk = $env:LUKE_VOICE_NO_PROMPT -ne '1'
+$provider = [string]$env:LUKE_VOICE_PROVIDER
+if (-not $provider -and $canAsk) {
+  Say '      Which voice should Ceci use?'
+  Say '        Enter  Free voice, on your computer (recommended). No account, no key.'
+  Say '        e      ElevenLabs. Paid per use; needs an ElevenLabs key.'
+  $choice = (Read-Host '      Choice').Trim().ToLower()
+  $provider = if (@('e', 'eleven', 'elevenlabs') -contains $choice) { 'elevenlabs' } else { 'local' }
+}
+# No answer and no choice: keep the saved one; someone who already has a key stays on ElevenLabs.
+if (-not $provider) {
+  $provider = if ($current) { $current } elseif ($hasKey) { 'elevenlabs' } else { 'local' }
+}
+if (@('local', 'elevenlabs') -notcontains $provider) { Fail "LUKE_VOICE_PROVIDER must be local or elevenlabs, not '$provider'." }
+
 $key = ''
-if ($env:LUKE_VOICE_NO_PROMPT -ne '1') {
+if ($provider -eq 'elevenlabs' -and $canAsk) {
   if ($hasKey) {
-    Say '      A key is already saved. Press Enter to keep it, or paste a new key to replace it.'
+    Say '      An ElevenLabs key is already saved. Press Enter to keep it, or paste a new key to replace it.'
   } else {
     Say '      Get a key at https://elevenlabs.io/app/settings/api-keys (a free account works).'
     Say '      Paste it here and press Enter. It stays hidden. Press Enter alone to skip for now.'
@@ -68,17 +85,21 @@ if ($env:LUKE_VOICE_NO_PROMPT -ne '1') {
   $secure = Read-Host '      Key' -AsSecureString
   $key = [Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)).Trim()
 }
-if ($key) {
-  $json = @{ api_key = $key } | ConvertTo-Json -Compress
-  $out = $json | & claude plugin configure $Plugin --values-stdin 2>&1 | Out-String
-  $key = $null; $json = $null
-  if ($LASTEXITCODE -ne 0) { Fail 'the key could not be saved.' $out.Trim() }
-  $hasKey = $true
-  Ok 'Key saved in Claude Code secure storage.'
-} elseif ($hasKey) {
-  Ok 'Kept the saved key.'
+# The values go on stdin, never the command line. Options left out keep their saved values.
+$values = @{ voice_provider = $provider }
+if ($key) { $values.api_key = $key }
+$json = $values | ConvertTo-Json -Compress
+$out = $json | & claude plugin configure $Plugin --values-stdin 2>&1 | Out-String
+$saved = $LASTEXITCODE -eq 0
+$values = $null; $json = $null
+if (-not $saved) { Fail 'the settings could not be saved.' $out.Trim() }
+if ($key) { $hasKey = $true }
+$key = $null
+if ($provider -eq 'local') {
+  Ok 'Voice: free, on your computer.'
 } else {
-  Say '      Skipped. You can open this installer again later to add the key.'
+  Ok 'Voice: ElevenLabs.'
+  if ($hasKey) { Ok 'ElevenLabs key saved in Claude Code secure storage.' } else { Say '      No key yet. Open this installer again to add it.' }
 }
 
 Step 5 'Checking the installation'
@@ -98,8 +119,12 @@ Write-Host ""
 Write-Host "  Next:"
 Write-Host "   1. Close Claude Code and open it again."
 Write-Host "   2. Above the prompt, click the button 'luke-voice: off' to turn it on."
-Write-Host "   3. Type /luke-voice call to start talking."
-if (-not $hasKey) {
+Write-Host "   3. Type /luke-voice call to start talking with Ceci."
+Write-Host "   To switch the voice later: /luke-voice voz local or /luke-voice voz elevenlabs."
+if ($provider -eq 'local') {
   Write-Host ""
-  Write-Host "  The voice needs an ElevenLabs key. Open this installer again to add it." -ForegroundColor Yellow
+  Write-Host "  The first call downloads the free voice (about 280 MB), only once."
+} elseif (-not $hasKey) {
+  Write-Host ""
+  Write-Host "  The ElevenLabs voice needs a key. Open this installer again to add it, or use the free voice." -ForegroundColor Yellow
 }
