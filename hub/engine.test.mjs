@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { test } from 'node:test'
 
 import { BINARIES, MIN_VRAM_MIB, SERVICES, createEngine, ensureBinaries, groupBytes, parseDevices, pickProfile, platformKey, profileGroups } from './engine.mjs'
@@ -181,4 +182,34 @@ test('a server that crashes right before the engine is stopped is not started ag
   await sleepMs(1500)
   assert.equal(spawns, 1, 'a server was started after stop(), with nothing to stop it')
   assert.equal(engine.url('tts'), null)
+})
+
+test('when the hub is killed (no exit handlers run), its servers are stopped too', async () => {
+  const dir = fresh()
+  const models = ttsModels()
+  // A stand-in hub: starts a server through the engine, prints its pid, and stays up.
+  const hubFile = join(dir, 'fake-hub.mjs')
+  writeFileSync(
+    hubFile,
+    `import { createEngine } from ${JSON.stringify(pathToFileURL(join(import.meta.dirname, 'engine.mjs')).href)}
+const engine = createEngine({ dir: ${JSON.stringify(dir)}, models: ${JSON.stringify(models)}, command: [process.execPath, ${JSON.stringify(fakeServer(dir))}], readyTimeoutMs: 10_000 })
+await engine.start(['tts'])
+const service = engine.url('tts')
+console.log(JSON.stringify({ service }))
+setInterval(() => {}, 1000)`,
+  )
+  const hub = nodeSpawn(process.execPath, [hubFile], { stdio: ['ignore', 'pipe', 'inherit'] })
+  let out = ''
+  hub.stdout.on('data', chunk => (out += chunk))
+  for (let i = 0; i < 100 && !out.includes('service'); i++) await sleepMs(100)
+  const { service } = JSON.parse(out)
+  assert.match(service ?? '', /^http:/)
+  assert.equal((await fetch(`${service}/health`)).status, 200)
+  hub.kill('SIGKILL')
+  let isUp = true
+  for (let i = 0; i < 50 && isUp; i++) {
+    await sleepMs(100)
+    isUp = await fetch(`${service}/health`).then(() => true, () => false)
+  }
+  assert.equal(isUp, false, 'the server outlived the killed hub')
 })

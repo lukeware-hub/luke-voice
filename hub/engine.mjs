@@ -7,6 +7,7 @@ import { execFile, spawn as nodeSpawn } from 'node:child_process'
 import { createWriteStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { MODELS, ensureFile, ensureModel, modelsDir } from './models.mjs'
 import { stateDir } from './paths.mjs'
@@ -202,9 +203,32 @@ const freePort = () =>
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 // Runs the servers and keeps them up. `command` replaces llama-server in tests.
-export function createEngine({ dir = engineDir(), models = modelsDir(), spawn = nodeSpawn, request = fetch, log = () => {}, command = null, readyTimeoutMs = 90_000, latePollMs = 2000 } = {}) {
+// The guard process (hub/guard.mjs): stops the servers when the hub is killed. One per hub, started
+// with the first server. It must not keep the hub alive by itself, so its handles are unref'd.
+const GUARD = fileURLToPath(new URL('./guard.mjs', import.meta.url))
+function startGuard(log) {
+  try {
+    const child = nodeSpawn(process.execPath, [GUARD], { stdio: ['pipe', 'ignore', 'ignore'], windowsHide: true })
+    child.on('error', () => {})
+    child.stdin.on('error', () => {})
+    child.unref()
+    child.stdin.unref?.()
+    return {
+      add: pid => child.stdin.writable && child.stdin.write(`+${pid}
+`),
+      remove: pid => child.stdin.writable && child.stdin.write(`-${pid}
+`),
+    }
+  } catch (error) {
+    log(`engine guard: ${error.message}`)
+    return { add() {}, remove() {} }
+  }
+}
+
+export function createEngine({ dir = engineDir(), models = modelsDir(), spawn = nodeSpawn, request = fetch, log = () => {}, command = null, readyTimeoutMs = 90_000, latePollMs = 2000, guard = null } = {}) {
   const services = new Map() // name -> { port, child, isReady, restarts: number[], isStopping, firstWait }
   let isStopped = false
+  let guarded = guard
 
   // The service is still the one in the map, and nobody asked it to stop.
   const isCurrent = (name, service) => services.get(name) === service && !service.isStopping && !isStopped
@@ -244,6 +268,9 @@ export function createEngine({ dir = engineDir(), models = modelsDir(), spawn = 
     const child = spawn(base[0], args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
     child.stdout?.pipe(out)
     child.stderr?.pipe(out)
+    guarded ??= startGuard(log)
+    if (child.pid) guarded.add(child.pid)
+    child.on('exit', () => child.pid && guarded.remove(child.pid))
     const service = { port, child, isReady: false, restarts: previous?.restarts ?? [], isStopping: false, firstWait: null }
     services.set(name, service)
     child.on('exit', code => {
