@@ -13,6 +13,9 @@ const DEFAULTS = {
   bargeFrames: 8, // ~250 ms of loud speech interrupts Ceci
   endFrames: 25, // ~800 ms of silence ends it
   prerollFrames: 10, // ~320 ms kept from before the start, so the first syllable is not cut
+  // While Ceci speaks, ~1.6 s is kept: speech has quiet dips between syllables, so a barge-in
+  // fires a moment after the user started, and the words before it must not be lost.
+  bargePrerollFrames: 50,
   maxFrames: 940, // ~30 s at most per utterance
   minSpeechFrames: 8, // shorter blips (a cough, a click) are dropped
 }
@@ -55,15 +58,22 @@ export function createVad(options = {}) {
     },
     push(frame, { isSpeaking = false } = {}) {
       const level = rms(frame)
-      const bar = Math.max(o.minLevel, floor * o.ratio) * (isSpeaking ? o.bargeRatio : 1)
+      const normalBar = Math.max(o.minLevel, floor * o.ratio)
+      const bar = normalBar * (isSpeaking ? o.bargeRatio : 1)
       const isLoud = level >= bar
 
       if (!inSpeech) {
         preroll.push(frame)
-        if (preroll.length > o.prerollFrames) preroll.shift()
-        loud = isLoud ? loud + 1 : 0
-        // Learn the room only from quiet frames, slowly.
-        if (!isLoud) floor = floor * 0.95 + level * 0.05
+        // Room for the frames that set off the start plus a lead-in; more while Ceci speaks,
+        // so an interruption keeps its first words.
+        const keep = isSpeaking ? o.bargePrerollFrames : o.prerollFrames + o.bargeFrames
+        while (preroll.length > keep) preroll.shift()
+        // While Ceci speaks, a quiet dip between syllables only takes one back, instead of
+        // starting the count over.
+        loud = isLoud ? loud + 1 : isSpeaking ? Math.max(0, loud - 1) : 0
+        // Learn the room only from quiet frames, slowly, and never while Ceci speaks: then the
+        // mic also hears her and the user, and learning that as "room" would raise the bar.
+        if (!isSpeaking && level < normalBar) floor = floor * 0.95 + level * 0.05
         if (loud >= (isSpeaking ? o.bargeFrames : o.startFrames)) {
           inSpeech = true
           frames = [...preroll]

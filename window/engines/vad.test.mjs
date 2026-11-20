@@ -26,8 +26,42 @@ test('speech after silence starts an utterance, and silence ends it with the aud
   assert.deepEqual(events.map(e => e.type), ['start', 'end'])
   const audio = events[1].audio
   assert.ok(audio instanceof Float32Array)
-  // preroll (10) + speech after start (27) + silence until end (25)
-  assert.equal(audio.length, (10 + 27 + 25) * FRAME)
+  // preroll (10 lead-in + 8 barge frames) + speech after start (27) + silence until end (25)
+  assert.equal(audio.length, (18 + 27 + 25) * FRAME)
+})
+
+test('the room is not learned while Ceci speaks, so the user talking over her still barges in', () => {
+  const vad = createVad()
+  const floorBefore = vad.floor
+  // The user talks softly over Ceci: below the barge bar, so not an interruption yet.
+  feed(vad, Array(200).fill(0).map(() => tone(0.025)), { isSpeaking: true })
+  assert.equal(vad.floor, floorBefore)
+  // Then louder: it must still interrupt.
+  const events = feed(vad, Array(20).fill(0).map(() => tone(0.2)), { isSpeaking: true })
+  assert.equal(events[0]?.type, 'barge')
+})
+
+test('an interruption keeps the frames that set it off and a lead-in before them', () => {
+  const vad = createVad()
+  feed(vad, Array(30).fill(0).map(silence), { isSpeaking: true })
+  const events = feed(vad, [...Array(20).fill(0).map(() => tone(0.2)), ...Array(30).fill(0).map(silence)], { isSpeaking: true })
+  assert.deepEqual(events.map(e => e.type), ['barge', 'end'])
+  // 8 loud frames set it off; the 30 quiet frames before them fit in the 50 kept while Ceci speaks.
+  const kept = events[1].audio
+  const firstLoud = kept.findIndex(v => Math.abs(v) > 0.01)
+  assert.equal(Math.floor(firstLoud / FRAME), 30)
+})
+
+test('speech with quiet dips between syllables still barges in, and keeps its first words', () => {
+  const vad = createVad()
+  feed(vad, Array(20).fill(0).map(silence), { isSpeaking: true })
+  // Two loud frames, one quiet dip, over and over: never 8 in a row.
+  const syllables = Array.from({ length: 30 }, (_, i) => (i % 3 === 2 ? silence() : tone(0.2)))
+  const events = feed(vad, [...syllables, ...Array(30).fill(0).map(silence)], { isSpeaking: true })
+  assert.deepEqual(events.map(e => e.type), ['barge', 'end'])
+  const kept = events[1].audio
+  // The first syllable is in the audio: nothing before frame 20 was dropped.
+  assert.equal(Math.floor(kept.findIndex(v => Math.abs(v) > 0.01) / FRAME), 20)
 })
 
 test('a short blip is dropped instead of being transcribed', () => {

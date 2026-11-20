@@ -4,7 +4,7 @@
 // It gives the window the same session the ElevenLabs engine does.
 import { isStopOnly } from '/engines/fast-path.js'
 import { speechChunks } from '/engines/speech-text.js'
-import { FRAME, RATE, createVad } from '/engines/vad.js'
+import { FRAME, RATE, createVad, rms } from '/engines/vad.js'
 
 export const name = 'local'
 
@@ -62,6 +62,7 @@ function ask(type, data = {}, transfer = []) {
 
 // ?voice-device=wasm, ?voice-dtype= and ?voice-threads= override the defaults, to measure a machine.
 const query = new URLSearchParams(location.search)
+const isDebug = query.get('voice-debug') === '1'
 const overrides = Object.fromEntries(
   [['device', query.get('voice-device')], ['dtype', query.get('voice-dtype')], ['threads', Number(query.get('voice-threads')) || null], ['stt', query.get('voice-stt')], ['sttDtype', query.get('voice-stt-dtype')], ['tts', query.get('voice-tts')], ['sttDevice', query.get('voice-stt-device')]].filter(([, v]) => v),
 )
@@ -245,11 +246,17 @@ export async function startSession({
     await think({ kind: 'user', text })
   }
 
+  let frameCount = 0
   frames.port.onmessage = ({ data: frame }) => {
     if (isEnded || isMuted || frame.length !== FRAME) return
     const event = vad.push(frame, { isSpeaking: mode === 'speaking' })
+    // ?voice-debug=1: the mic level and the learned room level twice a second, to tune the detector.
+    if (isDebug && ++frameCount % 16 === 0) console.info(`[luke-voice] mic ${rms(frame).toFixed(4)} room ${vad.floor.toFixed(4)} ${mode}`)
     if (!event) return
-    if (event.type === 'barge') cancelSpeech()
+    if (event.type === 'barge') {
+      console.info('[luke-voice] barge-in: the user spoke over Ceci')
+      cancelSpeech()
+    }
     if (event.type === 'end') queue(() => onUtterance(event.audio))
   }
 
