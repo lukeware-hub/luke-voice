@@ -185,6 +185,16 @@ test('a changed key offered on subscribe replaces the one in use, and the same k
   for (const s of [first, second, third]) await call('POST', '/unsubscribe', { auth: s.token })
 })
 
+test('an older session cannot bring back a key the user already replaced', async () => {
+  const before = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/old-a', apiKey: 'key-old' } })).body
+  const changed = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/new', apiKey: 'key-new' } })).body
+  const idNew = (await call('GET', '/health')).body.keyId
+  // The session started before the change reconnects with the old key.
+  const stale = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/old-b', apiKey: 'key-old' } })).body
+  assert.equal((await call('GET', '/health')).body.keyId, idNew)
+  for (const s of [before, changed, stale]) await call('POST', '/unsubscribe', { auth: s.token })
+})
+
 test('a command or activity for an unknown session is refused, never sent to another session', async () => {
   const s1 = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/real' } })).body
   const out = await call('POST', '/command', { key: WINDOW, body: { type: 'task', session: 'ghost', task: 'apaga tudo' } })
@@ -290,18 +300,22 @@ test('an explicit provider wins over the key', async () => {
 test('vendored files are served from the hub, unknown ones are 404, and the page is cross-origin isolated', async () => {
   const modelFile = join(mkdtempSync(join(tmpdir(), 'luke-model-')), 'm.onnx')
   writeFileSync(modelFile, 'ONNXBYTES')
+  const asked = []
   const served = createHub({
     serviceToken: SERVICE,
     windowKey: WINDOW,
     open: () => {},
     vendor: async path => (path === 'espeak/dist/version.mjs' ? Buffer.from('export const V = 1') : null),
-    models: async path => (path === 'turn/silero-vad.onnx' ? modelFile : null),
+    models: async path => {
+      asked.push(path)
+      return path === 'turn/silero-vad.onnx' ? modelFile : null
+    },
   })
   await new Promise(resolve => served.listen(0, '127.0.0.1', resolve))
   const p = served.address().port
-  const fetchRaw = path =>
+  const fetchRaw = (path, headers = {}) =>
     new Promise((resolve, reject) => {
-      const req = request({ host: '127.0.0.1', port: p, path, headers: { host: `127.0.0.1:${p}` } }, res => {
+      const req = request({ host: '127.0.0.1', port: p, path, headers: { host: `127.0.0.1:${p}`, ...headers } }, res => {
         let text = ''
         res.on('data', chunk => (text += chunk))
         res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, text }))
@@ -320,6 +334,13 @@ test('vendored files are served from the hub, unknown ones are 404, and the page
     assert.equal(model.text, 'ONNXBYTES')
     assert.equal(model.headers['content-length'], '9')
     assert.equal((await fetchRaw('/models/nope.onnx')).status, 404)
+    // The window's own worker gets them; another web page (an <img> on some site) does not.
+    assert.equal((await fetchRaw('/models/turn/silero-vad.onnx', { 'sec-fetch-site': 'same-origin' })).status, 200)
+    assert.equal((await fetchRaw('/models/turn/silero-vad.onnx', { 'sec-fetch-site': 'cross-site' })).status, 403)
+    assert.equal((await fetchRaw('/vendor/espeak/dist/version.mjs', { 'sec-fetch-site': 'same-site' })).status, 403)
+    assert.equal(asked.includes('native/qwen3-asr-0.6b-q8_0.gguf'), false)
+    assert.equal((await fetchRaw('/models/native/qwen3-asr-0.6b-q8_0.gguf')).status, 404)
+    assert.equal(asked.includes('native/qwen3-asr-0.6b-q8_0.gguf'), false, 'the native models are never fetched for the window')
     const page = await fetchRaw(`/?k=${WINDOW}`)
     assert.equal(page.headers['cross-origin-opener-policy'], 'same-origin')
     assert.equal(page.headers['cross-origin-embedder-policy'], 'credentialless')
@@ -437,6 +458,50 @@ test('speech goes to the native engine: /stt sends the WAV with the glossary, /t
   } finally {
     hub2.closeAllConnections()
     hub2.close()
+    fake.close()
+  }
+})
+
+test('when the window hangs up mid-sentence (barge-in), the generation on the engine is stopped', async () => {
+  let isUpstreamClosed = false
+  let onUpstreamClosed
+  const upstreamClosed = new Promise(resolve => (onUpstreamClosed = resolve))
+  const fake = createHttpServer(async (req, res) => {
+    for await (const _ of req);
+    res.on('close', () => {
+      isUpstreamClosed = true
+      onUpstreamClosed()
+    })
+    res.writeHead(200, { 'content-type': 'audio/wav' })
+    // A long sentence: a frame every 50 ms, until the hub hangs up.
+    const timer = setInterval(() => res.write(Buffer.alloc(64)), 50)
+    res.on('close', () => clearInterval(timer))
+  })
+  await new Promise(resolve => fake.listen(0, '127.0.0.1', resolve))
+  const base = `http://127.0.0.1:${fake.address().port}`
+  const engine = { url: () => base, status: () => ({ tts: true, asr: true, router: false }) }
+  const hub2 = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {}, engine, profile: () => ({ profile: 'gpu' }) })
+  await new Promise(resolve => hub2.listen(0, '127.0.0.1', resolve))
+  const p = hub2.address().port
+  try {
+    await new Promise((resolve, reject) => {
+      const req = request({ host: '127.0.0.1', port: p, method: 'POST', path: '/tts', headers: { host: `127.0.0.1:${p}`, 'content-type': 'application/json', 'x-luke-key': WINDOW } }, res => {
+        // The first audio arrives, then the user talks over Ceci and the window aborts.
+        res.once('data', () => {
+          req.destroy()
+          resolve()
+        })
+      })
+      req.on('error', () => {})
+      req.end(JSON.stringify({ text: 'Uma frase longa que a Ceci ainda estava dizendo quando foi interrompida.' }))
+      setTimeout(() => reject(new Error('no audio')), 3000)
+    })
+    await Promise.race([upstreamClosed, new Promise(resolve => setTimeout(resolve, 2000))])
+    assert.equal(isUpstreamClosed, true, 'the engine kept generating after the window hung up')
+  } finally {
+    hub2.closeAllConnections()
+    hub2.close()
+    fake.closeAllConnections()
     fake.close()
   }
 })

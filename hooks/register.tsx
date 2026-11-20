@@ -50,6 +50,10 @@ export const BRAIN_MODEL = 'claude-haiku-5-5'
 export const BRAIN_EFFORT = 'low'
 const BRAIN_MAX_TOKENS = 400
 const BRAIN_TIMEOUT_MS = 15_000
+// The hub waits 40 s for a think reply (BRAIN_WAIT_MS in hub/server.mjs): the direct call and the
+// fallback together must fit in it, or the answer comes after the window gave up on it.
+const BRAIN_BUDGET_MS = 38_000
+const MIN_FALLBACK_MS = 8_000
 const BRAIN_TOOLS = ['luke_run_task', 'luke_send_to_claude', 'luke_stop_claude', 'luke_session_activity']
 // Tools that act on the computer: only these can wait for a "sim".
 const PENDABLE_TOOLS = ['luke_run_task', 'luke_send_to_claude']
@@ -119,10 +123,12 @@ let brainPrompt: string | null = null
 
 // One brain turn. The engine's direct model call: no process to start, and the prompt is cached
 // between turns. An engine that cannot make the call (an older Claude Code) throws, and the
-// `claude -p` fallback answers instead.
+// `claude -p` fallback answers instead, in the time left.
 async function askBrain($: EngineInterface, request: BrainRequest): Promise<BrainReply> {
   brainPrompt ??= await $.fs.read(`${$.plugin.root}/agent/brain-prompt.md`)
+  const startedAt = await $.clock.now()
   let reply: Awaited<ReturnType<EngineInterface['model']['complete']>> | null = null
+  let failure = ''
   try {
     reply = await $.model.complete({
       model: BRAIN_MODEL,
@@ -132,14 +138,18 @@ async function askBrain($: EngineInterface, request: BrainRequest): Promise<Brai
       maxTokens: BRAIN_MAX_TOKENS,
       timeoutMs: BRAIN_TIMEOUT_MS,
     })
-  } catch {
+  } catch (error) {
     reply = null
+    failure = error instanceof Error ? error.message : String(error)
   }
   if (reply) {
     if (!reply.isAnswered) throw new Error(`the brain failed: ${reply.reason}`)
     return parseBrainText(reply.text)
   }
-  const out = await $.process.run(brainArgs($.plugin.root), { timeoutMs: 40_000, stdin: brainInput(request) })
+  // A slow or failed direct call (a timeout, say) leaves too little time for a second, paid call.
+  const left = BRAIN_BUDGET_MS - ((await $.clock.now()) - startedAt)
+  if (left < MIN_FALLBACK_MS) throw new Error(`the brain did not answer in time: ${failure || 'no reply'}`)
+  const out = await $.process.run(brainArgs($.plugin.root), { timeoutMs: left, stdin: brainInput(request) })
   if (out.exitCode !== 0 && !out.stdout.trim()) throw new Error(out.stderr.trim() || `claude exited with ${out.exitCode}`)
   return parseBrain(out.stdout)
 }
@@ -314,8 +324,15 @@ const VOICE_WORDS: Record<string, VoiceProvider> = {
 }
 // The voice the hub uses, as it last answered; empty until the first subscribe.
 let voice: VoiceProvider | '' = ''
-// The voice chosen with /luke-voice voz, loaded from the store at session start.
+// The voice chosen with /luke-voice voz, from the store (shared by every Claude session).
 let storedVoice: VoiceProvider | '' = ''
+
+// Read again before each subscribe: another session may have changed the voice since this one
+// started, and an old choice sent on subscribe would undo it in the hub.
+async function loadStoredVoice($: EngineInterface) {
+  const saved = await $.store.get('voiceProvider')
+  storedVoice = typeof saved === 'string' && PROVIDERS.includes(saved as VoiceProvider) ? (saved as VoiceProvider) : ''
+}
 
 // The voice chosen with /luke-voice voz, else the one saved in the plugin config, else none
 // (the hub then picks: ElevenLabs while a key is set, else the free local voice).
@@ -335,6 +352,7 @@ async function apiKey($: EngineInterface, options: Record<string, unknown>) {
 // Starts the hub when it is down and subscribes this session to it.
 async function subscribeOnce($: EngineInterface, options: Record<string, unknown>): Promise<boolean> {
   try {
+    await loadStoredVoice($)
     // The key goes to the launcher on stdin, so a hub it starts has it from the first call.
     const launched = await $.process.run(['node', `${$.plugin.root}/hub/launch.mjs`], {
       timeoutMs: 20_000,
@@ -729,8 +747,7 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const saved = await $.store.get('isOn')
     if (typeof saved === 'boolean') await update($, isOn, () => saved)
-    const savedVoice = await $.store.get('voiceProvider')
-    storedVoice = typeof savedVoice === 'string' && PROVIDERS.includes(savedVoice as VoiceProvider) ? (savedVoice as VoiceProvider) : ''
+    await loadStoredVoice($)
     // The hub's port follows LUKE_VOICE_PORT, like the hub (hub/paths.mjs).
     const port = Number(await $.env.get('LUKE_VOICE_PORT'))
     if (Number.isInteger(port) && port > 0 && port < 65536) HUB = `http://127.0.0.1:${port}`

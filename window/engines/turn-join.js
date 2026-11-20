@@ -33,7 +33,8 @@ export function createTurnJoiner({ now = () => Date.now(), windowMs = JOIN_WINDO
       const joined = carry ? join(carry, audio) : audio
       carry = null
       turn++
-      last = { audio: joined, endedAt: now(), turn, isCommitted: false }
+      // Its own copy: the caller may hand the returned array to a worker (a transfer empties it).
+      last = { audio: joined.slice(), endedAt: now(), turn, isCommitted: false }
       return { audio: joined, turn, isJoined: joined !== audio }
     },
     // The next sound had no speech: the carried part, if any, comes back as its own turn.

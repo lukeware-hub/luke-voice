@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { spawn as nodeSpawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -123,4 +124,61 @@ test('the engine starts the servers whose models are on disk, reports them ready
     engine.stop()
   }
   assert.deepEqual(engine.status(), { tts: false, asr: false, router: false })
+})
+
+// A fake llama-server that starts listening after `wait` ms and, when `crash` is set, exits that
+// long after it is up.
+const fakeServer = (dir, { wait = 0, crash = 0 } = {}) => {
+  const file = join(dir, `fake-${wait}-${crash}.cjs`)
+  writeFileSync(
+    file,
+    `const port = Number(process.argv[process.argv.indexOf('--port') + 1])
+setTimeout(() => {
+  require('node:http').createServer((req, res) => { res.writeHead(req.url === '/health' ? 200 : 404); res.end('{}') }).listen(port, '127.0.0.1')
+  if (${crash}) setTimeout(() => process.exit(1), ${crash})
+}, ${wait})
+setInterval(() => {}, 1000)`,
+  )
+  return file
+}
+const ttsModels = () => {
+  const models = fresh()
+  for (const path of SERVICES.tts.models) {
+    mkdirSync(dirname(join(models, path)), { recursive: true })
+    writeFileSync(join(models, path), '')
+  }
+  return models
+}
+const sleepMs = ms => new Promise(resolve => setTimeout(resolve, ms))
+
+test('a server slower than the start timeout is used once it answers, and is never started twice', async () => {
+  const dir = fresh()
+  let spawns = 0
+  const spawn = (...args) => (spawns++, nodeSpawn(...args))
+  const engine = createEngine({ dir, models: ttsModels(), spawn, command: [process.execPath, fakeServer(dir, { wait: 1500 })], readyTimeoutMs: 300, latePollMs: 200 })
+  try {
+    assert.deepEqual(await engine.start(['tts']), { tts: false })
+    // The hub tries again on the next call: the running server is waited for, not doubled.
+    await engine.start(['tts'])
+    for (let i = 0; i < 50 && !engine.url('tts'); i++) await sleepMs(100)
+    assert.match(engine.url('tts') ?? '', /^http:\/\/127\.0\.0\.1:\d+$/, 'the late server was never used')
+    assert.equal(spawns, 1)
+  } finally {
+    engine.stop()
+  }
+})
+
+test('a server that crashes right before the engine is stopped is not started again', async () => {
+  const dir = fresh()
+  let spawns = 0
+  const spawn = (...args) => (spawns++, nodeSpawn(...args))
+  const engine = createEngine({ dir, models: ttsModels(), spawn, command: [process.execPath, fakeServer(dir, { crash: 1200 })], readyTimeoutMs: 10_000 })
+  assert.deepEqual(await engine.start(['tts']), { tts: true })
+  // It crashes, a restart is due in 1 s, and setup stops the engine meanwhile.
+  for (let i = 0; i < 80 && engine.url('tts'); i++) await sleepMs(50)
+  assert.equal(engine.url('tts'), null, 'the fake server did not crash')
+  engine.stop()
+  await sleepMs(1500)
+  assert.equal(spawns, 1, 'a server was started after stop(), with nothing to stop it')
+  assert.equal(engine.url('tts'), null)
 })

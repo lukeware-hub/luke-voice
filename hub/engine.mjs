@@ -202,12 +202,16 @@ const freePort = () =>
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 // Runs the servers and keeps them up. `command` replaces llama-server in tests.
-export function createEngine({ dir = engineDir(), models = modelsDir(), spawn = nodeSpawn, request = fetch, log = () => {}, command = null, readyTimeoutMs = 90_000 } = {}) {
-  const services = new Map() // name -> { port, child, isReady, restarts: number[], isStopping }
+export function createEngine({ dir = engineDir(), models = modelsDir(), spawn = nodeSpawn, request = fetch, log = () => {}, command = null, readyTimeoutMs = 90_000, latePollMs = 2000 } = {}) {
+  const services = new Map() // name -> { port, child, isReady, restarts: number[], isStopping, firstWait }
   let isStopped = false
 
-  async function waitReady(name, port) {
-    const until = Date.now() + readyTimeoutMs
+  // The service is still the one in the map, and nobody asked it to stop.
+  const isCurrent = (name, service) => services.get(name) === service && !service.isStopping && !isStopped
+  const isRunning = child => child.exitCode === null && child.signalCode === null
+
+  async function waitReady(name, port, timeoutMs = readyTimeoutMs) {
+    const until = Date.now() + timeoutMs
     while (Date.now() < until) {
       const service = services.get(name)
       if (!service || service.isStopping) return false
@@ -230,10 +234,17 @@ export function createEngine({ dir = engineDir(), models = modelsDir(), spawn = 
     const args = [...base.slice(1), ...spec.args(files), '--host', '127.0.0.1', '--port', String(port)]
     mkdirSync(dir, { recursive: true })
     const out = createWriteStream(join(dir, `${name}.log`), { flags: 'a' })
+    // Never two servers for one service: one left over (a start that timed out) is stopped first,
+    // or it would keep its GPU memory with nothing tracking it.
+    const previous = services.get(name)
+    if (previous) {
+      previous.isStopping = true
+      previous.child.kill()
+    }
     const child = spawn(base[0], args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
     child.stdout?.pipe(out)
     child.stderr?.pipe(out)
-    const service = { port, child, isReady: false, restarts: services.get(name)?.restarts ?? [], isStopping: false }
+    const service = { port, child, isReady: false, restarts: previous?.restarts ?? [], isStopping: false, firstWait: null }
     services.set(name, service)
     child.on('exit', code => {
       service.isReady = false
@@ -242,11 +253,31 @@ export function createEngine({ dir = engineDir(), models = modelsDir(), spawn = 
       const now = Date.now()
       service.restarts = [...service.restarts.filter(t => now - t < 300_000), now]
       log(`engine ${name} exited (${code}); ${service.restarts.length < 5 ? 'restarting' : 'giving up'}`)
-      if (service.restarts.length < 5) setTimeout(() => void startOne(name, exe).catch(() => {}), 1000)
+      if (service.restarts.length < 5) {
+        setTimeout(() => {
+          // Stopped (setup, hub exit) or replaced during the wait: no new server.
+          if (isCurrent(name, service)) void startOne(name, exe).catch(() => {})
+        }, 1000)
+      }
     })
-    service.isReady = await waitReady(name, port)
+    service.firstWait = waitReady(name, port)
+    service.isReady = await service.firstWait
     log(`engine ${name} ${service.isReady ? `ready on ${port}` : 'did not become ready'}`)
+    if (!service.isReady) void waitLate(name, service)
     return service.isReady
+  }
+
+  // A server slower than the timeout (a cold disk, a first shader compile) is still running: keep
+  // checking, and use it once it answers, instead of marking it down for the life of the hub.
+  async function waitLate(name, service) {
+    while (isCurrent(name, service) && isRunning(service.child)) {
+      if (await waitReady(name, service.port, latePollMs)) {
+        if (!isCurrent(name, service)) return
+        service.isReady = true
+        log(`engine ${name} ready on ${service.port} (late)`)
+        return
+      }
+    }
   }
 
   return {
@@ -256,7 +287,10 @@ export function createEngine({ dir = engineDir(), models = modelsDir(), spawn = 
       const result = {}
       await Promise.all(
         names.map(async name => {
-          if (services.get(name)?.isReady) return (result[name] = true)
+          const current = services.get(name)
+          if (current?.isReady) return (result[name] = true)
+          // Already starting, or late but running: wait for it, do not start a second one.
+          if (current && !current.isStopping && isRunning(current.child) && current.firstWait) return (result[name] = await current.firstWait)
           const ready = SERVICES[name].models.every(path => existsSync(join(models, ...path.split('/'))))
           result[name] = ready ? await startOne(name, exe).catch(error => (log(`engine ${name}: ${error.message}`), false)) : false
         }),

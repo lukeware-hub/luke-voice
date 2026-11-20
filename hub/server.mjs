@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { createReadStream, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
+import { pipeline } from 'node:stream/promises'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -58,6 +59,15 @@ const PROVIDERS = ['local', 'elevenlabs']
 const newSecret = () => randomBytes(24).toString('base64url')
 // A short, one-way tag of the key so health can show which key is in use without exposing it.
 const keyId = key => (key ? createHash('sha256').update(key).digest('hex').slice(0, 8) : null)
+
+function readSeenKeys(file) {
+  try {
+    const ids = JSON.parse(readFileSync(file, 'utf8'))
+    return Array.isArray(ids) ? ids.filter(id => typeof id === 'string') : []
+  } catch {
+    return []
+  }
+}
 
 function sameSecret(given, expected) {
   if (typeof given !== 'string' || !expected) return false
@@ -122,6 +132,20 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
   let key = apiKey
   let agentId = null
   let isKeyRejected = false // ElevenLabs answered 401 to the current key
+  // Short hashes of every key this hub has used (never the keys), kept across restarts: a key seen
+  // before comes from a Claude session started before the user changed it.
+  const seenKeysFile = stateFile('keys-seen.json')
+  const seenKeys = new Set(readSeenKeys(seenKeysFile))
+  const rememberKey = value => {
+    if (!value || seenKeys.has(keyId(value))) return
+    seenKeys.add(keyId(value))
+    try {
+      writeFileSync(seenKeysFile, JSON.stringify([...seenKeys].slice(-50)), { mode: 0o600 })
+    } catch {
+      // Only a memory: without it, an old session may bring back its key until the next change.
+    }
+  }
+  rememberKey(key)
   let lastBusy = Date.now()
 
   // The voice the window uses: the one chosen in Claude Code (config or /luke-voice voz), else
@@ -403,8 +427,11 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     voiceRefB64 ??= voiceRef && existsSync(voiceRef) ? readFileSync(voiceRef).toString('base64') : ''
     // The transcript of the reference: with it, llama.cpp clones Ceci from the reference codes (ICL).
     voiceRefText ??= voiceRef && existsSync(voiceRef.replace(/\.wav$/, '.txt')) ? readFileSync(voiceRef.replace(/\.wav$/, '.txt'), 'utf8').trim() : ''
+    // The window hangs up when the user talks over Ceci: stop the generation with it, so the
+    // engine's single slot is free for the next answer. The request already closed after its body
+    // was read, so it is the response that tells.
     const stop = new AbortController()
-    req.on('close', () => stop.abort())
+    res.on('close', () => stop.abort())
     // /tts streams with stream:true (on /v1/audio/speech it would need stream_format).
     const upstream = await fetch(`${url}/tts`, {
       method: 'POST',
@@ -428,6 +455,14 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       // The window hung up (barge-in): the generation was aborted with it.
     }
     return res.end()
+  }
+
+  // A browser marks every request another web page makes (an <img>, a script tag) with the site it
+  // came from. Model and vendor files download on first use, so a page on another site must not be
+  // able to start gigabytes of downloads. The window and its workers are same-origin.
+  const isFromOtherSite = req => {
+    const site = req.headers['sec-fetch-site']
+    return Boolean(site) && site !== 'same-origin'
   }
 
   async function readBody(req) {
@@ -471,13 +506,16 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
         if (!sameSecret(bearer, serviceToken)) return send(res, 401, { error: 'token' })
         const body = await readBody(req)
         const offered = typeof body.apiKey === 'string' ? body.apiKey.trim() : ''
-        // The latest key saved in Claude Code wins, so a changed key works without waiting for the hub to exit.
-        if (offered && offered !== key) {
+        // A key never seen before was just saved in Claude Code: it wins, so a changed key works
+        // without waiting for the hub to exit. A key seen before comes from a session started
+        // before the change, and only replaces a missing or rejected one.
+        if (offered && offered !== key && (!key || isKeyRejected || !seenKeys.has(keyId(offered)))) {
           if (key) log('API key updated')
           key = offered
           isKeyRejected = false
           agentId = null
         }
+        rememberKey(offered)
         // Like the key, the latest voice chosen in Claude Code wins.
         if (PROVIDERS.includes(body.provider)) chosen = body.provider
         const token = newSecret()
@@ -526,6 +564,10 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
         return res.end(content)
       }
 
+      if (req.method === 'GET' && (url.pathname.startsWith('/vendor/') || url.pathname.startsWith('/models/')) && isFromOtherSite(req)) {
+        return send(res, 403, { error: 'only the call window may load these' })
+      }
+
       if (req.method === 'GET' && url.pathname.startsWith('/vendor/')) {
         const path = url.pathname.slice('/vendor/'.length)
         const content = await vendor(path)
@@ -538,6 +580,8 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       // Voice model files, verified by sha256 (hub/models.mjs); downloaded here if setup did not.
       if (req.method === 'GET' && url.pathname.startsWith('/models/')) {
         const path = url.pathname.slice('/models/'.length)
+        // The native engine reads its own files from disk; the window only needs the light voice and the turn models.
+        if (path.startsWith('native/')) return send(res, 404, { error: 'not found' })
         const file = await models(path)
         if (!file) return send(res, 404, { error: 'not found' })
         res.writeHead(200, {
@@ -546,7 +590,8 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
           'cache-control': 'public, max-age=31536000, immutable',
           ...ISOLATION,
         })
-        return createReadStream(file).pipe(res)
+        // A read error (the file replaced or locked meanwhile) ends this response, not the hub.
+        return pipeline(createReadStream(file), res).catch(() => res.destroy())
       }
 
       if (route === 'GET /stream') {
@@ -613,7 +658,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     profile: () => readProfile(),
     voiceRef: join(ROOT, 'agent', 'ceci-voice.wav'),
     onLocalVoice: () => startOnce(),
-    engineState: () => state,
+    // A server that came up after its start timed out is used: the window sees it ready.
+    engineState: () => (state === 'failed' && engine.status().tts && engine.status().asr ? 'ready' : state),
     onSetup: () => {
       if (process.env.LUKE_VOICE_ENGINE === 'off') return { started: false, reason: 'off' }
       if (isSetupRunning) return { started: false, reason: 'running' }
@@ -666,6 +712,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     })
     const up = engine.status()
     state = up.tts && up.asr ? 'ready' : 'failed'
+    // The next use of the free voice tries again (servers still starting are waited for, not doubled).
+    if (state === 'failed') engineStart = null
   }
   process.on('exit', () => engine.stop())
   // Two launchers can race to start a hub; the one that finds the port taken leaves quietly.

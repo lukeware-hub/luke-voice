@@ -71,3 +71,17 @@ test('commit on an old turn does nothing to the current one', () => {
   assert.equal(j.resumed(), true, 'the joined turn is still open')
   assert.equal(j.isCurrent(second.turn), false)
 })
+
+test('a part handed to a worker (transferred) is still joined whole', () => {
+  const now = clock()
+  const j = createTurnJoiner({ now })
+  const first = j.ended(audio(10, 1))
+  // The light profile transfers the audio to its worker, which empties the array here.
+  structuredClone(first.audio, { transfer: [first.audio.buffer] })
+  assert.equal(first.audio.length, 0)
+  now.advance(800)
+  assert.equal(j.resumed(), true)
+  const joined = j.ended(audio(5, 2))
+  assert.equal(joined.audio.length, 10 + 4800 + 5)
+  assert.equal(joined.audio[0], 1)
+})
