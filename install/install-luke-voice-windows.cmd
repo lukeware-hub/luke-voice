@@ -31,10 +31,17 @@ function Fail($text, $help) {
   Write-Host "  Then open this installer again." -ForegroundColor Yellow
   exit 1
 }
+# Runs claude and returns its output and exit code. Windows PowerShell 5.1 turns any stderr line of
+# a program into an error, which 'Stop' would make fatal: here stderr is just more output.
+function Invoke-Claude([string[]]$CliArgs) {
+  $ErrorActionPreference = 'Continue'
+  $out = & claude @CliArgs 2>&1 | ForEach-Object { "$_" } | Out-String
+  return @{ out = $out; code = $LASTEXITCODE }
+}
 function Run-Claude([string[]]$CliArgs) {
-  $out = & claude @CliArgs 2>&1 | Out-String
-  if ($LASTEXITCODE -ne 0) { Fail "the command 'claude $($CliArgs -join ' ')' failed." $out.Trim() }
-  return $out
+  $r = Invoke-Claude $CliArgs
+  if ($r.code -ne 0) { Fail "the command 'claude $($CliArgs -join ' ')' failed." $r.out.Trim() }
+  return $r.out
 }
 
 Write-Host ""
@@ -57,8 +64,9 @@ Ok "Node.js $major found."
 
 Step 3 'Installing the luke-voice mod'
 # Claude Code keeps one source per marketplace: switching between main and a branch replaces it.
-$added = & claude plugin marketplace add $Source 2>&1 | Out-String
-if ($LASTEXITCODE -ne 0 -or $added -match 'Failed to add') {
+$r = Invoke-Claude @('plugin', 'marketplace', 'add', $Source)
+$added = $r.out
+if ($r.code -ne 0 -or $added -match 'Failed to add') {
   if ($added -match "source doesn't match") {
     Say "      Switching the luke-voice source to $Source."
     Run-Claude @('plugin', 'marketplace', 'remove', 'luke-voice') | Out-Null
@@ -106,8 +114,19 @@ if ($provider -eq 'elevenlabs' -and $canAsk) {
 $values = @{ voice_provider = $provider }
 if ($key) { $values.api_key = $key }
 $json = $values | ConvertTo-Json -Compress
-$out = $json | & claude plugin configure $Plugin --values-stdin 2>&1 | Out-String
-$saved = $LASTEXITCODE -eq 0
+# On Windows, claude reads --values-stdin reliably only from a file (a pipe from PowerShell can
+# reach it empty). The file is in the user's own temp folder, which only they can read, and is
+# deleted right after.
+$valuesFile = Join-Path $env:TEMP ("luke-voice-" + [guid]::NewGuid().ToString('N') + '.json')
+try {
+  [IO.File]::WriteAllText($valuesFile, $json)
+  $ErrorActionPreference = 'Continue'
+  $out = & $env:ComSpec /d /c "claude plugin configure $Plugin --values-stdin < `"$valuesFile`"" 2>&1 | ForEach-Object { "$_" } | Out-String
+  $saved = $LASTEXITCODE -eq 0
+} finally {
+  $ErrorActionPreference = 'Stop'
+  Remove-Item -Force -ErrorAction SilentlyContinue $valuesFile
+}
 $values = $null; $json = $null
 if (-not $saved) { Fail 'the settings could not be saved.' $out.Trim() }
 if ($key) { $hasKey = $true }
@@ -161,7 +180,7 @@ Write-Host "   To switch the voice later: /luke-voice voz local or /luke-voice v
 if ($provider -eq 'local' -and -not $voiceReady) {
   Write-Host ""
   Write-Host "  The first call finishes downloading the free voice, only once."
-} elseif (-not $hasKey) {
+} elseif ($provider -eq 'elevenlabs' -and -not $hasKey) {
   Write-Host ""
   Write-Host "  The ElevenLabs voice needs a key. Open this installer again to add it, or use the free voice." -ForegroundColor Yellow
 }

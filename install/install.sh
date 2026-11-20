@@ -153,6 +153,6 @@ echo '   3. Type /luke-voice call to start talking with Ceci.'
 echo '   To switch the voice later: /luke-voice voz local or /luke-voice voz elevenlabs.'
 if [ "$provider" = 'local' ] && [ "$voice_ready" != 'true' ]; then
   printf '\n  The first call finishes downloading the free voice, only once.\n'
-elif [ "$has_key" != "true" ]; then
+elif [ "$provider" = 'elevenlabs' ] && [ "$has_key" != "true" ]; then
   printf '\n  \033[33mThe ElevenLabs voice needs a key. Run the installer again to add it, or use the free voice.\033[0m\n'
 fi
