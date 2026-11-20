@@ -66,4 +66,7 @@ test('both voices are Ceci: same name, age and creator, told only when asked, an
   }
   const def = JSON.parse(await readFile(join(root, 'agent/agent.json'), 'utf8'))
   assert.match(def.conversation_config.agent.first_message, /Eu sou a Ceci/)
+  // The free local voice greets with the same words.
+  const local = await readFile(join(root, 'window/engines/local.js'), 'utf8')
+  assert.ok(local.includes(`const GREETING = '${def.conversation_config.agent.first_message}'`))
 })

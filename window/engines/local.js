@@ -11,6 +11,7 @@ export const name = 'local'
 // The brain reads the latest context on every turn: keep it short, it is paid in tokens.
 const MAX_CONTEXT = 8
 const MAX_CONTEXT_CHARS = 3000
+const GREETING = 'Oi! Eu sou a Ceci. O que vamos fazer hoje?'
 const BRAIN_FAILED = 'Não consegui pensar numa resposta agora. Tente de novo.'
 const STOPPED = 'Parei o Claude.'
 const NOT_STOPPED = 'O Claude não está trabalhando agora.'
@@ -281,6 +282,9 @@ export async function startSession({
   }
 
   onConnect()
+  // Ceci greets like the ElevenLabs agent does (agent/agent.json first_message), so a call
+  // sounds the same with either voice and the user knows she is listening.
+  void say(GREETING)
   return session
 }
 
