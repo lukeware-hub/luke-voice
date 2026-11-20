@@ -4,7 +4,8 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { LastTool, Line, Link, Running } from '../types'
 
 const NAME = 'luke-voice'
-const HUB = 'http://127.0.0.1:4848'
+// The hub's address. LUKE_VOICE_PORT moves it, as it moves the hub itself (hub/paths.mjs).
+let HUB = 'http://127.0.0.1:4848'
 const PANE = 'luke-voice'
 const POLL_WAIT_MS = 20_000
 const RETRY_MS = 3_000
@@ -248,6 +249,34 @@ async function hubFetch($: EngineInterface, method: string, path: string, body?:
   return { status: res.status, ok: res.ok, json }
 }
 
+export type VoiceProvider = 'local' | 'elevenlabs'
+const PROVIDERS: VoiceProvider[] = ['local', 'elevenlabs']
+// What people say for each voice in /luke-voice voz.
+const VOICE_WORDS: Record<string, VoiceProvider> = {
+  local: 'local',
+  gratuita: 'local',
+  gratis: 'local',
+  'grátis': 'local',
+  free: 'local',
+  ceci: 'local',
+  elevenlabs: 'elevenlabs',
+  eleven: 'elevenlabs',
+}
+// The voice the hub uses, as it last answered; empty until the first subscribe.
+let voice: VoiceProvider | '' = ''
+// The voice chosen with /luke-voice voz, loaded from the store at session start.
+let storedVoice: VoiceProvider | '' = ''
+
+// The voice chosen with /luke-voice voz, else the one saved in the plugin config, else none
+// (the hub then picks: ElevenLabs while a key is set, else the free local voice).
+function chosenProvider(options: Record<string, unknown>): VoiceProvider | '' {
+  if (storedVoice) return storedVoice
+  const configured = typeof options.voice_provider === 'string' ? options.voice_provider.trim().toLowerCase() : ''
+  return PROVIDERS.includes(configured as VoiceProvider) ? (configured as VoiceProvider) : ''
+}
+
+const voiceName = (provider: string) => (provider === 'elevenlabs' ? 'ElevenLabs' : 'gratuita (Ceci, no seu computador)')
+
 async function apiKey($: EngineInterface, options: Record<string, unknown>) {
   const configured = typeof options.api_key === 'string' ? options.api_key.trim() : ''
   return configured || (await $.env.get('ELEVENLABS_API_KEY')) || ''
@@ -259,20 +288,29 @@ async function subscribeOnce($: EngineInterface, options: Record<string, unknown
     // The key goes to the launcher on stdin, so a hub it starts has it from the first call.
     const launched = await $.process.run(['node', `${$.plugin.root}/hub/launch.mjs`], {
       timeoutMs: 20_000,
-      stdin: JSON.stringify({ apiKey: await apiKey($, options) }),
+      stdin: JSON.stringify({ apiKey: await apiKey($, options), provider: chosenProvider(options) }),
     })
     const out = JSON.parse(launched.stdout.trim().split('\n').pop() || '{}') as { ok?: boolean; serviceToken?: string; error?: string }
     if (!out.ok || !out.serviceToken) {
       await setLink($, { state: 'down', reason: out.error || launched.stderr.trim() || 'the hub did not start' })
       return false
     }
-    const res = await hubFetch($, 'POST', '/subscribe', { cwd: await $.session.cwd(), sessionId: await $.session.id(), apiKey: await apiKey($, options) }, out.serviceToken)
+    const res = await hubFetch(
+      $,
+      'POST',
+      '/subscribe',
+      { cwd: await $.session.cwd(), sessionId: await $.session.id(), apiKey: await apiKey($, options), provider: chosenProvider(options) },
+      out.serviceToken,
+    )
     if (!res.ok || typeof res.json.token !== 'string') {
       await setLink($, { state: 'down', reason: `subscribe failed (${res.status})` })
       return false
     }
     token = res.json.token
-    await setLink($, { state: 'up', name: String(res.json.name), reason: res.json.hasKey ? null : 'no ElevenLabs key' })
+    // A hub older than 0.8.0 does not answer with a voice: it only has ElevenLabs.
+    voice = res.json.provider === 'local' ? 'local' : 'elevenlabs'
+    // Only the ElevenLabs voice needs a key; the free voice runs without one.
+    await setLink($, { state: 'up', name: String(res.json.name), reason: voice === 'elevenlabs' && !res.json.hasKey ? 'no ElevenLabs key' : null })
     return true
   } catch (error) {
     await setLink($, { state: 'down', reason: String(error instanceof Error ? error.message : error) })
@@ -438,6 +476,36 @@ async function show($: EngineInterface, options: Record<string, unknown>, withCa
   return `${withCall ? 'Calling' : 'Window shown'} as session "${l.name}".${res.json.isWindowOpen ? '' : ' The call window is opening.'}${keyNote}`
 }
 
+// /luke-voice voz [local|elevenlabs]: shows the voice, or switches it for the next call.
+async function voiceCommand($: EngineInterface, arg: string) {
+  const word = arg.trim().toLowerCase()
+  if (!word) {
+    const health = await hubFetch($, 'GET', '/health', undefined, null).catch(() => null)
+    const current = health?.ok && health.json.app === 'luke-voice' ? String(health.json.provider ?? '') : voice
+    return [
+      `Voz atual: ${current ? voiceName(current) : 'ainda não definida (o luke-voice escolhe quando liga)'}.`,
+      'Para trocar: /luke-voice voz local (gratuita, no seu computador) ou /luke-voice voz elevenlabs.',
+    ].join('\n')
+  }
+  const next = VOICE_WORDS[word]
+  if (!next) return `Não conheço a voz "${short(word, 30)}". Use /luke-voice voz local ou /luke-voice voz elevenlabs.`
+  await $.store.set('voiceProvider', next)
+  storedVoice = next
+  const res = token ? await hubFetch($, 'POST', '/provider', { provider: next }).catch(() => null) : null
+  const isApplied = Boolean(res?.ok)
+  const hasKey = Boolean(res?.json.hasKey)
+  if (isApplied) {
+    voice = next
+    await setLink($, { reason: next === 'elevenlabs' && !hasKey ? 'no ElevenLabs key' : null })
+  }
+  return [
+    `Voz trocada para ${voiceName(next)}. ${isApplied ? 'Vale a partir da próxima chamada.' : 'Vale quando o luke-voice ligar.'}`,
+    next === 'elevenlabs' && isApplied && !hasKey ? 'Falta a chave da ElevenLabs: salve com /plugin configure luke-voice@luke-voice e reinicie o Claude Code.' : null,
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
 async function statusText($: EngineInterface) {
   const on = await read($, isOn)
   if (!on) return 'luke-voice: off. Nothing from this session is sent anywhere.'
@@ -447,7 +515,8 @@ async function statusText($: EngineInterface) {
   return [
     `luke-voice: on (${l.state}${l.name ? `, session "${l.name}"` : ''})`,
     health?.ok ? `hub: up, version ${h.version}, ${h.sessions} session(s), call ${h.call}, window ${h.isWindowOpen ? 'open' : 'closed'}` : 'hub: down',
-    health?.ok && !h.hasKey ? 'missing: ElevenLabs API key' : null,
+    health?.ok ? `voz: ${voiceName(String(h.provider ?? 'elevenlabs'))}` : null,
+    health?.ok && (h.provider ?? 'elevenlabs') === 'elevenlabs' && !h.hasKey ? 'missing: ElevenLabs API key' : null,
     queued.length ? `queued prompts: ${queued.length}` : null,
   ]
     .filter(Boolean)
@@ -468,16 +537,26 @@ async function pluginVersion($: EngineInterface) {
 async function helpText($: EngineInterface) {
   const on = await read($, isOn)
   const health = await hubFetch($, 'GET', '/health', undefined, null).catch(() => null)
-  const h = (health?.ok && health.json.app === 'luke-voice' ? health.json : null) as { version?: string; hasKey?: boolean; keyStatus?: string } | null
+  const h = (health?.ok && health.json.app === 'luke-voice' ? health.json : null) as {
+    version?: string
+    hasKey?: boolean
+    keyStatus?: string
+    provider?: string
+  } | null
   const version = await pluginVersion($)
   const mark = (ok: boolean) => (ok ? '✓' : '✗')
+  // A hub older than 0.8.0 does not report a voice: it only has ElevenLabs.
+  const provider = h ? (h.provider ?? 'elevenlabs') : ''
+  const isEleven = provider === 'elevenlabs'
   const checks = [
     `${mark(on)} luke-voice ligado${on ? '' : ': clique no botão "✦ luke-voice: off" acima do prompt, ou digite /luke-voice'}`,
     `${mark(Boolean(h))} Servidor local (hub)${h ? ` rodando, versão ${h.version}` : ': não está rodando. Ele sobe sozinho quando você liga o luke-voice'}`,
-    h
+    h ? `✓ Voz: ${voiceName(provider)}. Para trocar: /luke-voice voz` : null,
+    // Only the ElevenLabs voice needs a key.
+    h && isEleven
       ? h.keyStatus === 'rejected'
-        ? '✗ Chave da ElevenLabs: a ElevenLabs recusou a chave salva. Crie uma nova (passo 2 abaixo) e reinicie o Claude Code'
-        : `${mark(Boolean(h.hasKey))} Chave da ElevenLabs${h.hasKey ? ' configurada' : ': falta. Veja o passo 2 abaixo'}`
+        ? '✗ Chave da ElevenLabs: a ElevenLabs recusou a chave salva. Crie uma nova (veja "Voz ElevenLabs" abaixo) e reinicie o Claude Code'
+        : `${mark(Boolean(h.hasKey))} Chave da ElevenLabs${h.hasKey ? ' configurada' : ': falta. Veja "Voz ElevenLabs" abaixo'}`
       : null,
     h && version && h.version !== version
       ? `✗ O hub é da versão ${h.version}, mas a instalada é ${version}: feche o Claude Code e abra de novo`
@@ -490,15 +569,20 @@ async function helpText($: EngineInterface) {
     'Seu status agora:',
     ...checks.map(line => `  ${line}`),
     '',
-    'O que é: uma assistente de voz, em português, ao lado do Claude Code. Você fala o que quer, ela repete e pergunta "posso?", e depois do seu "sim" um subagente do Claude faz a tarefa no seu computador. Quando termina, ela conta o resultado.',
+    'O que é: a Ceci, uma assistente de voz em português ao lado do Claude Code. Você fala o que quer, ela repete e pergunta "posso?", e depois do seu "sim" um subagente do Claude faz a tarefa no seu computador. Quando termina, ela conta o resultado.',
     '',
     'Antes de usar (uma vez só):',
     '  1. Tenha o Node.js 20 ou mais novo (nodejs.org, versão LTS) e o Google Chrome.',
-    '  2. Crie uma conta grátis em elevenlabs.io e copie uma chave em elevenlabs.io/app/settings/api-keys.',
-    '     Salve a chave com: /plugin configure luke-voice@luke-voice',
-    '     O plano grátis dá cerca de 15 minutos de chamada por mês.',
-    '  3. Depois de instalar, atualizar ou salvar a chave: feche o Claude Code e abra de novo.',
+    '  2. Depois de instalar, atualizar ou trocar a configuração: feche o Claude Code e abra de novo.',
     '     O /reload-plugins não basta para trocar de versão.',
+    '',
+    'As vozes (troque com /luke-voice voz):',
+    '  - Gratuita (padrão): roda no seu computador. A primeira chamada baixa cerca de 280 MB, uma vez só.',
+    '    O áudio não sai do seu computador; só o texto do que você falou vai para o Claude (Claude Haiku 5.5, da sua conta).',
+    '  - ElevenLabs (opcional, paga por uso): crie uma conta em elevenlabs.io e copie uma chave em elevenlabs.io/app/settings/api-keys.',
+    '    Salve a chave com: /plugin configure luke-voice@luke-voice e escolha /luke-voice voz elevenlabs.',
+    '    O plano grátis da ElevenLabs dá cerca de 15 minutos de chamada por mês.',
+    '  - A chave fica guardada pelo Claude Code (no Mac, no Keychain). Uma chave exportada no ~/.zshrc não chega a um Claude Code aberto pelo Dock.',
     '',
     'Como usar:',
     '  1. Clique em "✦ luke-voice: off" acima do prompt. Ele vira "on", a janela abre e a chamada começa.',
@@ -511,19 +595,22 @@ async function helpText($: EngineInterface) {
     '  /luke-voice call     abre a janela e começa a chamada',
     '  /luke-voice end      encerra a chamada',
     '  /luke-voice window   traz a janela para a frente',
+    '  /luke-voice voz      mostra ou troca a voz (local ou elevenlabs)',
     '  /luke-voice status   mostra o estado técnico',
     '  /luke-voice help     mostra esta ajuda',
     '',
     'Bom saber:',
-    '  - Na primeira chamada, o luke-voice cria um agente chamado "luke-voice" e adiciona a voz "Roberta" na sua conta da ElevenLabs. Leva alguns segundos.',
     '  - A janela usa um Chrome só dela, com o microfone e o som já liberados. O seu Chrome normal não muda.',
-    '  - Enquanto está ligado, o que acontece nesta sessão (seus pedidos e as ferramentas do Claude) é enviado ao agente na ElevenLabs. Desligado, nada sai do seu computador.',
+    '  - Voz gratuita: enquanto está ligado, o texto do que você fala e o resumo do que acontece nesta sessão vão para o Claude Haiku. Diga "pare" para parar o Claude na hora.',
+    '  - Voz ElevenLabs: na primeira chamada, o luke-voice cria um agente chamado "luke-voice" e adiciona a voz "Roberta" na sua conta. O que acontece nesta sessão (seus pedidos e as ferramentas do Claude) é enviado a esse agente.',
+    '  - Desligado, nada sai do seu computador.',
     '',
     'Se algo não funcionar:',
-    '  - Não ouço nada: veja se o som do Windows está ligado e se a janela mostra "Em chamada".',
-    '  - "No ElevenLabs API key" ou "Chave faltando": salve a chave (passo 2) e reinicie o Claude Code.',
+    '  - Não ouço nada: veja se o som do computador está ligado e se a janela mostra "Em chamada".',
+    '  - Voz gratuita demora para falar: o primeiro download leva alguns minutos; depois, sem placa de vídeo, cada resposta leva 1 a 2 segundos a mais.',
+    '  - "No ElevenLabs API key" ou "Chave faltando": salve a chave (veja "As vozes") e reinicie o Claude Code, ou volte para a voz gratuita com /luke-voice voz local.',
     '  - "Hub offline" na janela: ligue o luke-voice no Claude Code; a janela volta sozinha.',
-    '  - A chamada não conecta mais: os minutos grátis do mês podem ter acabado. Veja em elevenlabs.io.',
+    '  - ElevenLabs: a chamada não conecta mais: os minutos grátis do mês podem ter acabado. Veja em elevenlabs.io.',
     '  - A janela está com o visual antigo: feche o Claude Code e abra de novo.',
     '  - Outro erro: digite /luke-voice status e mande o resultado para quem cuida do luke-voice.',
   ]
@@ -537,7 +624,12 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const saved = await $.store.get('isOn')
     if (typeof saved === 'boolean') await update($, isOn, () => saved)
-    await $.command.register({ name: NAME, description: 'Voice coworker: on/off, call, end, window, status, help' })
+    const savedVoice = await $.store.get('voiceProvider')
+    storedVoice = typeof savedVoice === 'string' && PROVIDERS.includes(savedVoice as VoiceProvider) ? (savedVoice as VoiceProvider) : ''
+    // The hub's port follows LUKE_VOICE_PORT, like the hub (hub/paths.mjs).
+    const port = Number(await $.env.get('LUKE_VOICE_PORT'))
+    if (Number.isInteger(port) && port > 0 && port < 65536) HUB = `http://127.0.0.1:${port}`
+    await $.command.register({ name: NAME, description: 'Ceci, voice assistant: on/off, call, end, window, voz, status, help' })
     // Redraw the pane while a task runs, so its elapsed time moves.
     $.clock.every(15_000, () => {
       void read($, running)
@@ -551,6 +643,8 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: NAME }, async ($, e) => {
     const arg = e.args.trim().toLowerCase()
+    const voiceArg = arg.match(/^(voz|voice)(\s+(.*))?$/)
+    if (voiceArg) return { text: await voiceCommand($, voiceArg[3] ?? '') }
     switch (arg) {
       case '':
         return { text: (await toggle($, opts)) ? 'luke-voice: on. Starting the call.' : 'luke-voice: off' }

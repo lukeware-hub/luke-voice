@@ -1,16 +1,23 @@
 {
   "name": "luke-voice",
   "version": "0.7.9",
-  "description": "A voice coworker beside your Claude Code session: talk it through, and it sends the prompt to Claude. On/off button above the prompt.",
-  "author": { "name": "lukeware-hub" },
+  "description": "Ceci, a voice assistant beside your Claude Code session: talk it through, and it sends the work to Claude. Free local voice by default, ElevenLabs optional. On/off button above the prompt.",
+  "author": {
+    "name": "lukeware-hub"
+  },
   "license": "MIT",
   "icon": "./assets/icon.png",
   "types": "./types/index.d.ts",
   "userConfig": {
+    "voice_provider": {
+      "type": "string",
+      "title": "Voice: local (free, default) or elevenlabs",
+      "description": "local: the free voice that runs on your computer (Whisper + Kokoro in the call window; the brain is Claude Haiku on your Claude account). elevenlabs: the ElevenLabs voice agent, which needs the API key below. Empty: ElevenLabs while a key is set, else local. /luke-voice voz switches it too."
+    },
     "api_key": {
       "type": "string",
-      "title": "ElevenLabs API key",
-      "description": "The local hub creates your voice agent and starts calls with it. Falls back to the ELEVENLABS_API_KEY environment variable. It never leaves the hub process.",
+      "title": "ElevenLabs API key (optional)",
+      "description": "Only for the ElevenLabs voice. The local hub creates your voice agent and starts calls with it. Falls back to the ELEVENLABS_API_KEY environment variable. It never leaves the hub process.",
       "sensitive": true
     }
   }

@@ -234,6 +234,40 @@ test('the window gets the free local voice without a key, and ElevenLabs once a 
   }
 })
 
+test('the voice chosen in Claude Code wins over the env and the key, and /provider switches it while running', async () => {
+  const hub2 = createHub({ serviceToken: SERVICE, windowKey: WINDOW, apiKey: 'k', provider: 'elevenlabs', open: () => {} })
+  await new Promise(resolve => hub2.listen(0, '127.0.0.1', resolve))
+  const p = hub2.address().port
+  const ask = (method, path, { body, headers = {} } = {}) =>
+    new Promise((resolve, reject) => {
+      const req = request({ host: '127.0.0.1', port: p, method, path, headers: { host: `127.0.0.1:${p}`, 'content-type': 'application/json', ...headers } }, res => {
+        let text = ''
+        res.on('data', chunk => (text += chunk))
+        res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(text) }))
+      })
+      req.on('error', reject)
+      req.end(body === undefined ? undefined : JSON.stringify(body))
+    })
+  const config = async () => (await ask('GET', '/config', { headers: { 'x-luke-key': WINDOW } })).body.provider
+  try {
+    assert.equal(await config(), 'elevenlabs')
+    const s = (await ask('POST', '/subscribe', { body: { cwd: '/repos/v', provider: 'local' }, headers: { authorization: `Bearer ${SERVICE}` } })).body
+    assert.equal(s.provider, 'local')
+    assert.equal(await config(), 'local')
+    const switched = await ask('POST', '/provider', { body: { provider: 'elevenlabs' }, headers: { authorization: `Bearer ${s.token}` } })
+    assert.deepEqual(switched.body, { ok: true, provider: 'elevenlabs', hasKey: true })
+    assert.equal(await config(), 'elevenlabs')
+    assert.equal((await ask('POST', '/provider', { body: { provider: 'banana' }, headers: { authorization: `Bearer ${s.token}` } })).status, 400)
+    assert.equal((await ask('POST', '/provider', { body: { provider: 'local' }, headers: { authorization: 'Bearer nope' } })).status, 401)
+    // A subscribe with no choice keeps the voice chosen before.
+    await ask('POST', '/subscribe', { body: { cwd: '/repos/w' }, headers: { authorization: `Bearer ${SERVICE}` } })
+    assert.equal(await config(), 'elevenlabs')
+  } finally {
+    hub2.closeAllConnections()
+    hub2.close()
+  }
+})
+
 test('an explicit provider wins over the key', async () => {
   const pinned = createHub({ serviceToken: SERVICE, windowKey: WINDOW, apiKey: 'k', provider: 'local', open: () => {} })
   await new Promise(resolve => pinned.listen(0, '127.0.0.1', resolve))

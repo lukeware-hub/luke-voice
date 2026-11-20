@@ -7,10 +7,12 @@ import type { BrainRequest } from './register'
 const FOOTER = { plugin: 'luke-voice', component: 'SessionMode', props: { modes: [] } } as const
 const run = (args: string) => ({ command: 'luke-voice', args, origin: { kind: 'composer' } }) as Args<'command.run'>
 
-type Call = { method: string; path: string; body: Record<string, unknown> }
+type Call = { method: string; path: string; port: string; body: Record<string, unknown> }
 
 // What `claude -p` prints in the brain tests; the launcher answer is used for every other process.
 let brainStdout = ''
+// LUKE_VOICE_PORT as the engine reports it; unset in every test but the port one.
+let envPort: string | undefined
 
 // Stands for the engine and the hub: records each hub request and each submitted prompt.
 function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unknown }>> = [], after = { status: 410, body: {} as unknown }, envKey?: string, health?: Record<string, unknown>) {
@@ -25,7 +27,7 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: '/repos/api' }))
   on('session.id', () => ({ value: 'claude-session-1' }))
-  on('env.get', (_, e) => ({ value: e.name === 'ELEVENLABS_API_KEY' ? envKey : undefined }))
+  on('env.get', (_, e) => ({ value: e.name === 'ELEVENLABS_API_KEY' ? envKey : e.name === 'LUKE_VOICE_PORT' ? envPort : undefined }))
   on('store.set', (_, e) => (stored.push(e.value), { value: undefined }))
   on('ui.close', () => ({ value: undefined }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
@@ -42,7 +44,7 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
   on('http.fetch', async (_, e) => {
     const url = new URL(e.url)
     const raw = e.init?.body
-    calls.push({ method: e.init?.method ?? 'GET', path: url.pathname, body: typeof raw === 'string' ? JSON.parse(raw) : {} })
+    calls.push({ method: e.init?.method ?? 'GET', path: url.pathname, port: url.port, body: typeof raw === 'string' ? JSON.parse(raw) : {} })
     let status = 200
     let body: unknown = { ok: true }
     if (url.pathname === '/subscribe') body = { token: 'session-1', name: 'api', hasKey: true }
@@ -512,4 +514,71 @@ test('a brain that fails acks the think command as failed, with the reason', asy
   const ack = calls.find(c => c.path === '/ack')?.body
   expect(ack?.ok).toBe(false)
   expect(String(ack?.message)).toContain('Credit balance is too low')
+})
+
+test('/luke-voice voz shows the voice the hub uses, and an unknown voice points to the two choices', async ($, on) => {
+  engine(on, [], undefined, undefined, { app: 'luke-voice', version: '0.8.0', provider: 'local', hasKey: false })
+
+  expect((await $.command.run(run('voz'))).text).toContain('Voz atual: gratuita (Ceci, no seu computador)')
+  expect((await $.command.run(run('voz banana'))).text).toContain('/luke-voice voz local ou /luke-voice voz elevenlabs')
+})
+
+test('in help, the free voice needs no key, and ElevenLabs without a key is called out', async ($, on) => {
+  engine(on, [], undefined, undefined, { app: 'luke-voice', version: '0.8.0', provider: 'local', hasKey: false })
+  on('fs.read', () => ({ value: '{"version":"0.8.0"}' }))
+  const free = (await $.command.run(run('help'))).text
+  expect(free).toContain('✓ Voz: gratuita')
+  expect(free).not.toContain('✗ Chave da ElevenLabs')
+})
+
+test('in help, the ElevenLabs voice without a key is called out', async ($, on) => {
+  engine(on, [], undefined, undefined, { app: 'luke-voice', version: '0.8.0', provider: 'elevenlabs', hasKey: false })
+  on('fs.read', () => ({ value: '{"version":"0.8.0"}' }))
+  const paid = (await $.command.run(run('help'))).text
+  expect(paid).toContain('✓ Voz: ElevenLabs')
+  expect(paid).toContain('✗ Chave da ElevenLabs: falta')
+})
+
+// The tests below change module state (the stored voice, the hub port), so they run last.
+
+test('/luke-voice voz elevenlabs stores the choice, tells the hub, and says the key is missing', async ($, on) => {
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => (release = resolve))
+  const { calls, stored } = engine(on, [async () => (await held, { status: 410, body: {} })])
+
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/subscribe'))
+  const answer = (await $.command.run(run('voz elevenlabs'))).text
+  await $.command.run(run('off'))
+  release()
+
+  expect(stored).toContain('elevenlabs')
+  expect(calls.find(c => c.path === '/provider')?.body).toEqual({ provider: 'elevenlabs' })
+  expect(answer).toContain('Voz trocada para ElevenLabs')
+  expect(answer).toContain('Falta a chave da ElevenLabs')
+})
+
+test('the stored voice goes to the launcher on stdin and to the hub on subscribe', async ($, on) => {
+  on('store.get', (_, e) => ({ value: JSON.stringify(e).includes('voiceProvider') ? 'local' : true }))
+  const { calls, launches } = engine(on)
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await until(() => calls.some(c => c.path === '/subscribe'))
+  await $.command.run(run('off'))
+
+  expect(JSON.stringify(launches[0])).toContain('\\"provider\\":\\"local\\"')
+  expect(calls.find(c => c.path === '/subscribe')?.body.provider).toBe('local')
+})
+
+test('LUKE_VOICE_PORT moves the hub address the mod calls', async ($, on) => {
+  envPort = '4861'
+  on('store.get', () => ({ value: true }))
+  const { calls } = engine(on)
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await until(() => calls.some(c => c.path === '/subscribe'))
+  await $.command.run(run('off'))
+  envPort = undefined
+
+  expect(calls.find(c => c.path === '/subscribe')?.port).toBe('4861')
 })

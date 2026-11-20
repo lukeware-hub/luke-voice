@@ -114,8 +114,10 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
   let isKeyRejected = false // ElevenLabs answered 401 to the current key
   let lastBusy = Date.now()
 
-  // The voice the window uses: the one asked for, else ElevenLabs while a key is set, else the free local voice.
-  const voiceProvider = () => (PROVIDERS.includes(provider) ? provider : key ? 'elevenlabs' : 'local')
+  // The voice the window uses: the one chosen in Claude Code (config or /luke-voice voz), else
+  // LUKE_VOICE_PROVIDER, else ElevenLabs while a key is set, else the free local voice.
+  let chosen = ''
+  const voiceProvider = () => (PROVIDERS.includes(chosen) ? chosen : PROVIDERS.includes(provider) ? provider : key ? 'elevenlabs' : 'local')
 
   const byName = name => [...sessions.values()].find(s => s.name === name)
   // A named session must exist: falling back to another one would run the work in the wrong place.
@@ -230,6 +232,13 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     'POST /end': () => {
       broadcast({ type: 'end' })
       return [200, { ok: true }]
+    },
+    // /luke-voice voz: switches the voice for the next call.
+    'POST /provider': (_session, body) => {
+      if (!PROVIDERS.includes(body.provider)) return [400, { ok: false, message: 'Unknown voice.' }]
+      chosen = body.provider
+      log(`voice set to ${chosen}`)
+      return [200, { ok: true, provider: voiceProvider(), hasKey: Boolean(key) }]
     },
     'POST /unsubscribe': session => {
       drop(session)
@@ -359,6 +368,8 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
           isKeyRejected = false
           agentId = null
         }
+        // Like the key, the latest voice chosen in Claude Code wins.
+        if (PROVIDERS.includes(body.provider)) chosen = body.provider
         const token = newSecret()
         const sessionId = typeof body.sessionId === 'string' ? body.sessionId.slice(0, 200) : ''
         // A reloaded mod subscribes again from the same Claude session: it takes over the old row.
@@ -372,7 +383,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
         sessions.set(token, session)
         focused ??= session.name
         sendRoster()
-        return send(res, 200, { token, name: session.name, hasKey: Boolean(key) })
+        return send(res, 200, { token, name: session.name, hasKey: Boolean(key), provider: voiceProvider() })
       }
 
       if (route === 'POST /shutdown') {
