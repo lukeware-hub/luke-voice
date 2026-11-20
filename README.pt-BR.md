@@ -2,7 +2,7 @@
 
 **Read in English: [README.md](README.md)**
 
-Uma assistente de voz ao lado do Claude Code, em português do Brasil. Você fala o que quer, ela repete e pergunta "posso?", e depois do seu "sim" um subagente do Claude Code faz a tarefa no seu computador. Quando termina, ela conta o resultado em voz alta.
+A Ceci, uma assistente de voz ao lado do Claude Code, em português do Brasil. Você fala o que quer, ela repete e pergunta "posso?", e depois do seu "sim" um subagente do Claude Code faz a tarefa no seu computador. Quando termina, ela conta o resultado em voz alta.
 
 > Não tem ligação oficial com a ElevenLabs. O luke-voice usa a API pública da ElevenLabs com a sua própria chave.
 

@@ -1,6 +1,6 @@
 // A small voice activity detector on audio level: no model to download, a few lines of math per frame.
 // Frames are 512 samples at 16 kHz (32 ms). The noise floor follows the room while nobody speaks.
-// While Luke talks, the bar to interrupt is higher, so its own voice leaking into the mic does not cut it off.
+// While Ceci talks, the bar to interrupt is higher, so its own voice leaking into the mic does not cut it off.
 
 export const FRAME = 512
 export const RATE = 16_000
@@ -8,9 +8,9 @@ export const RATE = 16_000
 const DEFAULTS = {
   minLevel: 0.012, // below this RMS nothing counts as speech, however quiet the room
   ratio: 3, // speech is this many times louder than the noise floor
-  bargeRatio: 2.5, // while Luke speaks, the bar is this many times higher
+  bargeRatio: 2.5, // while Ceci speaks, the bar is this many times higher
   startFrames: 3, // ~100 ms of speech starts an utterance
-  bargeFrames: 8, // ~250 ms of loud speech interrupts Luke
+  bargeFrames: 8, // ~250 ms of loud speech interrupts Ceci
   endFrames: 25, // ~800 ms of silence ends it
   prerollFrames: 10, // ~320 ms kept from before the start, so the first syllable is not cut
   maxFrames: 940, // ~30 s at most per utterance

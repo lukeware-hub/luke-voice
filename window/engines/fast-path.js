@@ -2,7 +2,8 @@
 
 // A whole utterance that only asks to stop. "para" inside a longer sentence ("cria uma tarefa para...")
 // is a preposition, so the stop words must be the whole utterance, with at most a few fillers.
-const STOP_ONLY = /^\W*(luke\W+)?(pare|para|parar|cancela|cancelar|chega)(\W+(tudo|agora|o claude|isso|por favor|ai))*\W*$/i
+// The assistant's name may come first; Whisper sometimes writes "Ceci" as "Cecy" or "Sessi".
+const STOP_ONLY = /^\W*((luke|ceci|cecy|sessi)\W+)?(pare|para|parar|cancela|cancelar|chega)(\W+(tudo|agora|o claude|isso|por favor|ai))*\W*$/i
 
 const plain = text =>
   String(text ?? '')

@@ -72,7 +72,7 @@ const STATES = {
     pill: 'Em chamada',
     headline: 'Aguardando sua voz…',
     caption: 'Fale naturalmente.',
-    banner: ['i-waveform', 'Em chamada', 'Peça algo. Antes de agir no computador, ela confirma com você.'],
+    banner: ['i-waveform', 'Em chamada', 'Peça algo à Ceci. Antes de agir no computador, ela confirma com você.'],
   },
   error: {
     pill: 'Erro',

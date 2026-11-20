@@ -2,7 +2,7 @@
 
 **Leia em português: [README.pt-BR.md](README.pt-BR.md)**
 
-A voice assistant beside your Claude Code session, in Brazilian Portuguese. You say what you want, she repeats it and asks "posso?", and after your "sim" a Claude Code subagent does the task on your computer. When it finishes, she tells you the result out loud.
+Ceci, a voice assistant beside your Claude Code session, in Brazilian Portuguese. You say what you want, she repeats it and asks "posso?", and after your "sim" a Claude Code subagent does the task on your computer. When it finishes, she tells you the result out loud.
 
 > Not affiliated with ElevenLabs. luke-voice calls the public ElevenLabs API with your own key.
 

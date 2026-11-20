@@ -456,7 +456,7 @@ test('the brain reads the sessions, the quoted context, the conversation and wha
   const input = brainInput(REQUEST)
   expect(input).toContain('[sessões] api (ocupada, em foco), site (livre)')
   expect(input).toContain('<<<untrusted>>>')
-  expect(input).toContain('luke: Oi! Em que posso ajudar?')
+  expect(input).toContain('ceci: Oi! Em que posso ajudar?')
   expect(input.split('\n').pop()).toBe('[agora] usuário disse: verifica os testes de login')
   expect(brainInput({ ...REQUEST, kind: 'notice', text: 'conte' }).split('\n').pop()).toBe('[agora] aviso automático: conte')
 })

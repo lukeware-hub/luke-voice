@@ -43,7 +43,7 @@ test('steady room noise raises the floor, so it never counts as speech', () => {
   assert.ok(vad.floor > 0.005)
 })
 
-test('while Luke speaks, a quiet echo does not interrupt but loud speech barges in', () => {
+test('while Ceci speaks, a quiet echo does not interrupt but loud speech barges in', () => {
   const echo = feed(createVad(), Array(40).fill(0).map(() => tone(0.02)), { isSpeaking: true })
   assert.deepEqual(echo, [])
   const loud = feed(createVad(), Array(40).fill(0).map(() => tone(0.2)), { isSpeaking: true })

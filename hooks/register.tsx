@@ -67,7 +67,7 @@ export function brainInput(request: BrainRequest): string {
   const sessions = request.sessions.length
     ? request.sessions.map(s => `${s.name} (${s.isBusy ? 'ocupada' : 'livre'}${s.name === request.focused ? ', em foco' : ''})`).join(', ')
     : 'nenhuma'
-  const turns = request.turns.length ? request.turns.map(t => `${t.role === 'luke' ? 'luke' : 'usuário'}: ${t.text}`).join('\n') : '(vazia)'
+  const turns = request.turns.length ? request.turns.map(t => `${t.role === 'luke' ? 'ceci' : 'usuário'}: ${t.text}`).join('\n') : '(vazia)'
   const now =
     request.kind === 'notice' ? `aviso automático: ${request.text}` : request.kind === 'tool_result' ? `resultado da ferramenta: ${request.text}` : `usuário disse: ${request.text}`
   return [`[sessões] ${sessions}`, '[contexto]', request.context.join('\n') || '(nada)', '[conversa]', turns, `[agora] ${now}`].join('\n')
