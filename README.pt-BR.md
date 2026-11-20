@@ -146,6 +146,8 @@ Em 40 frases em pt-BR pelo caminho de produção:
 - nenhuma frase falhou nem entrou em repetição;
 - os erros de palavras ficaram em 8% (Whisper large-v3-turbo), quase todos em palavras técnicas em inglês ("branch", "main") e em números escritos com algarismos.
 
+As perguntas terminam subindo, do jeito brasileiro: a janela sobe o tom do último meio segundo de uma pergunta depois que ela é gerada, sem mudar a duração (`window/engines/question-rise.js`). Em 20 perguntas, o fim agora sobe +3,4 semitons (antes +2,0, como uma afirmação), e o Whisper reconhece 9 de 20 como perguntas (antes 6). O dono escolheu essa versão de ouvido, entre três. `?voice-question=0` desliga.
+
 ### Trocar a voz
 
 Escolha de qualquer um destes jeitos; vale a escolha mais recente:

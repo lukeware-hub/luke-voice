@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-import { createEngine, groupBytes, maxFrames, prepareEngine, profileGroups, VOICE_SETTINGS } from './engine.mjs'
+import { ASR_GLOSSARY, createEngine, groupBytes, maxFrames, prepareEngine, profileGroups, VOICE_SETTINGS } from './engine.mjs'
 import { modelsDir } from './models.mjs'
 import { route } from './router.mjs'
 
@@ -65,6 +65,7 @@ export async function smokeTest(profile, { engine = createEngine(), voice = VOIC
         form.append('file', new Blob([wav], { type: 'audio/wav' }), 'test.wav')
         form.append('model', 'qwen3-asr')
         form.append('language', 'pt')
+        form.append('prompt', ASR_GLOSSARY)
         const answer = await fetch(`${asr}/v1/audio/transcriptions`, { method: 'POST', body: form })
         heard = answer.ok ? String((await answer.json()).text ?? '').replace(/^[\s\S]*<asr_text>/, '').trim() : ''
         if (!/ceci|pronta/i.test(heard)) problems.push(`the ears heard "${heard}"`)

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 
 process.env.LUKE_VOICE_HOME = mkdtempSync(join(tmpdir(), 'luke-voice-setup-'))
-const { progressPrinter, setup, size } = await import('./setup.mjs')
+const { progressPrinter, setup, size, smokeTest } = await import('./setup.mjs')
 
 const sink = (isTTY = false) => {
   const lines = []
@@ -44,4 +44,36 @@ test('the light profile needs no test', async () => {
   assert.equal(result.ok, true)
   assert.equal(tested, false)
   assert.match(lines.join(''), /light voice in the browser \(no GPU found\)/)
+})
+
+test('the install test asks the ears with the glossary, so they write "Ceci" and not "assim se"', async () => {
+  const { createServer } = await import('node:http')
+  const { ASR_GLOSSARY } = await import('./engine.mjs')
+  let asrBody = ''
+  const server = createServer((req, res) => {
+    let body = ''
+    req.setEncoding('latin1')
+    req.on('data', d => (body += d))
+    req.on('end', () => {
+      if (req.url === '/v1/audio/speech') return res.end(Buffer.alloc(30_000))
+      if (req.url === '/v1/audio/transcriptions') {
+        asrBody = Buffer.from(body, 'latin1').toString('utf8')
+        // A warm-up call has no "test.wav"; answer it like the real engine would, with nothing.
+        return res.end(JSON.stringify({ text: asrBody.includes('test.wav') ? 'language Portuguese<asr_text>Oi, eu sou a Ceci. Estou pronta!' : '' }))
+      }
+      res.end(JSON.stringify({ choices: [{ message: { content: '{"intent":"greeting"}' } }] }))
+    })
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const url = `http://127.0.0.1:${server.address().port}`
+  const engine = { start: async () => {}, status: () => ({ tts: true, asr: true, router: true }), warm: async () => {}, url: () => url, stop: () => {} }
+  try {
+    const result = await smokeTest({ profile: 'gpu' }, { engine, voice: 'missing.wav' })
+    assert.equal(result.ok, true, result.problems.join('; '))
+    assert.equal(result.heard, 'Oi, eu sou a Ceci. Estou pronta!')
+    assert.match(asrBody, /name="prompt"/)
+    assert.ok(asrBody.includes(ASR_GLOSSARY), 'the glossary is sent')
+  } finally {
+    server.close()
+  }
 })

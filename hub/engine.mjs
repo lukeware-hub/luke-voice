@@ -61,6 +61,10 @@ export const SERVICES = {
 // the same.
 export const VOICE_SETTINGS = { temperature: 0.75, top_p: 0.9, seed: 7 }
 
+// What Qwen3-ASR is told, so English tech words, Ceci's name and session names come out right.
+// The same prompt warms the engine up, so the first real transcription is not a cold one.
+export const ASR_GLOSSARY = 'Conversa em português do Brasil com a Ceci, uma assistente de programação. Termos comuns: API, commit, branch, main, deploy, build, bug, pull request, GitHub, Claude, Ceci, lint, TypeScript, token, login, checkout, README.'
+
 // Audio frames allowed for a text (12.5 per second; ~14 characters per second in pt-BR), so a
 // rare generation loop stops after a few seconds instead of babbling for 40.
 export const maxFrames = text => Math.ceil(String(text).length * 1.5) + 25
@@ -283,6 +287,7 @@ export function createEngine({ dir = engineDir(), models = modelsDir(), spawn = 
         form.append('file', new Blob([silence], { type: 'audio/wav' }), 'warm.wav')
         form.append('model', 'qwen3-asr')
         form.append('language', 'pt')
+        form.append('prompt', ASR_GLOSSARY)
         jobs.push(request(`${asr}/v1/audio/transcriptions`, { method: 'POST', body: form }).then(r => r.arrayBuffer()))
       }
       const tts = this.url('tts')

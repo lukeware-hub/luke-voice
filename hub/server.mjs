@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { conversationToken, credits, ensureAgent, outOfCreditsMessage } from './agent.mjs'
 import { PORT, stateDir, stateFile } from './paths.mjs'
-import { VOICE_SETTINGS, createEngine, maxFrames, prepareEngine, profileReady, readProfile } from './engine.mjs'
+import { ASR_GLOSSARY, VOICE_SETTINGS, createEngine, maxFrames, prepareEngine, profileReady, readProfile } from './engine.mjs'
 import { ensureModel } from './models.mjs'
 import { route as routeUtterance } from './router.mjs'
 import { contentType, vendorFile } from './vendor.mjs'
@@ -19,8 +19,6 @@ const VERSION = JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'plugin.jso
 const MAX_BODY = 64 * 1024
 // One utterance as 16 kHz PCM16 WAV: 30 s is under 1 MB.
 const MAX_AUDIO = 4 * 1024 * 1024
-// What Qwen3-ASR is told, so English tech words and session names come out right.
-const ASR_GLOSSARY = 'Conversa em português do Brasil com a Ceci, uma assistente de programação. Termos comuns: API, commit, branch, main, deploy, build, bug, pull request, GitHub, Claude, Ceci, lint, TypeScript, token, login, checkout, README.'
 const MAX_ACTIVITY = 60
 const ACK_WAIT_MS = 15_000
 // The router answers in ~0.3 s; past this, the utterance goes to the brain instead.
@@ -38,6 +36,7 @@ const STATIC = {
   '/engines/speech-text.js': ['engines/speech-text.js', 'text/javascript; charset=utf-8'],
   '/engines/fast-path.js': ['engines/fast-path.js', 'text/javascript; charset=utf-8'],
   '/engines/turn-join.js': ['engines/turn-join.js', 'text/javascript; charset=utf-8'],
+  '/engines/question-rise.js': ['engines/question-rise.js', 'text/javascript; charset=utf-8'],
   '/engines/vad.js': ['engines/vad.js', 'text/javascript; charset=utf-8'],
   '/engines/piper-ids.js': ['engines/piper-ids.js', 'text/javascript; charset=utf-8'],
   '/engines/mic-worklet.js': ['engines/mic-worklet.js', 'text/javascript; charset=utf-8'],

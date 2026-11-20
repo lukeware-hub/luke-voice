@@ -5,6 +5,7 @@
 import { isConfirm, isDeny, isStopOnly } from '/engines/fast-path.js'
 import { speechChunks } from '/engines/speech-text.js'
 import { createTurnJoiner } from '/engines/turn-join.js'
+import { riseQuestion } from '/engines/question-rise.js'
 import { FRAME, RATE, createVad, rms } from '/engines/vad.js'
 
 export const name = 'local'
@@ -77,6 +78,12 @@ function ask(type, data = {}, transfer = []) {
 // ?voice-device=wasm, ?voice-dtype= and ?voice-threads= override the defaults, to measure a machine.
 const query = new URLSearchParams(location.search)
 const isDebug = query.get('voice-debug') === '1'
+// Questions end with a Brazilian rise (question-rise.js); ?voice-question=0 turns it off.
+const isQuestionRise = query.get('voice-question') !== '0'
+const isQuestion = text => isQuestionRise && /\?\s*$/.test(text)
+// The native voice holds back the end of a question this long, to raise its pitch before it plays.
+const QUESTION_HOLD_SECONDS = 0.7
+const QUESTION_CONTEXT_SECONDS = 0.6
 const overrides = Object.fromEntries(
   [['device', query.get('voice-device')], ['dtype', query.get('voice-dtype')], ['threads', Number(query.get('voice-threads')) || null], ['sttDtype', query.get('voice-stt-dtype')], ['tts', query.get('voice-tts')], ['sttDevice', query.get('voice-stt-device')]].filter(([, v]) => v),
 )
@@ -368,16 +375,46 @@ export async function startSession({
       let pendingLength = 0
       let isFirst = true
       let rate = 24_000
-      const flush = () => {
-        if (!pendingLength) return
+      // A question keeps its last QUESTION_HOLD_SECONDS back until the stream ends; `played` keeps
+      // the end of what already played, as pitch context for the rise.
+      const question = isQuestion(parts[i])
+      let played = new Float32Array(0)
+      const joined = () => {
         const audio = new Float32Array(pendingLength)
         let at = 0
         for (const piece of pending) {
           audio.set(piece, at)
           at += piece.length
         }
-        pending = []
-        pendingLength = 0
+        return audio
+      }
+      const flush = (isEnd = false) => {
+        if (!pendingLength) return
+        let audio = joined()
+        if (question && !isEnd) {
+          const hold = Math.round(rate * QUESTION_HOLD_SECONDS)
+          if (audio.length <= hold) return
+          pending = [audio.subarray(audio.length - hold)]
+          pendingLength = hold
+          audio = audio.subarray(0, audio.length - hold)
+        } else {
+          pending = []
+          pendingLength = 0
+        }
+        if (question && isEnd) {
+          const context = played.subarray(Math.max(0, played.length - Math.round(rate * QUESTION_CONTEXT_SECONDS)))
+          const whole = new Float32Array(context.length + audio.length)
+          whole.set(context)
+          whole.set(audio, context.length)
+          audio = riseQuestion(whole, rate, { keep: context.length }).slice(context.length)
+        } else if (question) {
+          const keep = Math.round(rate * QUESTION_CONTEXT_SECONDS)
+          const next = new Float32Array(Math.min(keep, played.length + audio.length))
+          const tail = audio.subarray(Math.max(0, audio.length - next.length))
+          next.set(played.subarray(played.length - (next.length - tail.length)))
+          next.set(tail, next.length - tail.length)
+          played = next
+        }
         lastNode = play(audio, rate, mine, false)
       }
       await readWavStream(
@@ -386,15 +423,16 @@ export async function startSession({
           rate = sampleRate
           pending.push(piece)
           pendingLength += piece.length
-          if (isFirst && pendingLength >= rate * 0.08) {
+          const held = question ? rate * QUESTION_HOLD_SECONDS : 0
+          if (isFirst && pendingLength >= rate * 0.08 + held) {
             if (i === 0) timing('speak', Math.round(performance.now() - started), 'to first audio (native)')
             isFirst = false
             flush()
-          } else if (pendingLength >= rate * 0.3) flush()
+          } else if (pendingLength >= rate * 0.3 + held) flush()
         },
         () => mine !== speech || isEnded,
       )
-      flush()
+      flush(true)
     }
     if (mine !== speech || isEnded) return
     // Back to listening when the last piece ends (or now, if nothing played).
@@ -421,7 +459,7 @@ export async function startSession({
         if (i === parts.length - 1 && playing.size === 0) setMode('listening')
         continue
       }
-      play(audio, sampleRate, mine, i === parts.length - 1)
+      play(isQuestion(parts[i]) ? riseQuestion(audio, sampleRate) : audio, sampleRate, mine, i === parts.length - 1)
     }
   }
 

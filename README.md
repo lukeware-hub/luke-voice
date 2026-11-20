@@ -146,6 +146,8 @@ On 40 pt-BR sentences through the production path:
 - no sentence failed or looped;
 - word errors were 8% (Whisper large-v3-turbo), mostly English tech words ("branch", "main") and numbers written as digits.
 
+Questions end with a Brazilian rise: the window raises the pitch of the last half second of a question after it is made, keeping its length (`window/engines/question-rise.js`). On 20 questions the end now rises +3.4 semitones (was +2.0, like a statement), and Whisper hears 9 of 20 as questions (was 6). The owner picked this by ear among three versions. `?voice-question=0` turns it off.
+
 ### Switching the voice
 
 Pick it in any of these ways; the newest choice wins:
