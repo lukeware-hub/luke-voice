@@ -171,6 +171,44 @@ test('health reports a missing key, and a new key offered on subscribe is taken 
   await call('POST', '/unsubscribe', { auth: s.token })
 })
 
+test('a changed key offered on subscribe replaces the one in use, and the same key changes nothing', async () => {
+  const first = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/keys-a', apiKey: 'key-a' } })).body
+  const idA = (await call('GET', '/health')).body.keyId
+  const second = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/keys-b', apiKey: 'key-b' } })).body
+  const idB = (await call('GET', '/health')).body.keyId
+  assert.match(idA, /^[0-9a-f]{8}$/)
+  assert.notEqual(idB, idA)
+  const third = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/keys-c', apiKey: 'key-b' } })).body
+  assert.equal((await call('GET', '/health')).body.keyId, idB)
+  assert.equal((await call('GET', '/health')).body.keyStatus, 'set')
+  for (const s of [first, second, third]) await call('POST', '/unsubscribe', { auth: s.token })
+})
+
+test('a command or activity for an unknown session is refused, never sent to another session', async () => {
+  const s1 = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/real' } })).body
+  const out = await call('POST', '/command', { key: WINDOW, body: { type: 'task', session: 'ghost', task: 'apaga tudo' } })
+  assert.equal(out.status, 404)
+  assert.equal(out.body.ok, false)
+  assert.match(out.body.message, /ghost/)
+  assert.match(out.body.message, new RegExp(s1.name))
+  const activity = (await call('GET', '/activity?session=ghost', { key: WINDOW })).body.text
+  assert.match(activity, /ghost/)
+  const inbox = await call('GET', '/inbox?wait=200', { auth: s1.token })
+  assert.deepEqual(inbox.body.commands, [])
+  await call('POST', '/unsubscribe', { auth: s1.token })
+})
+
+test('a command with no session still goes to the focused one', async () => {
+  const s1 = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/solo' } })).body
+  await call('POST', '/focus', { key: WINDOW, body: { name: s1.name } })
+  const sent = call('POST', '/command', { key: WINDOW, body: { type: 'stop' } })
+  const inbox = await call('GET', '/inbox?wait=2000', { auth: s1.token })
+  assert.equal(inbox.body.commands[0].type, 'stop')
+  await call('POST', '/ack', { auth: s1.token, body: { id: inbox.body.commands[0].id, ok: true, message: 'Stopped.' } })
+  assert.equal((await sent).body.ok, true)
+  await call('POST', '/unsubscribe', { auth: s1.token })
+})
+
 test('loadSecrets keeps the window key across hub restarts', () => {
   const first = loadSecrets()
   const second = loadSecrets()

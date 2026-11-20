@@ -1,7 +1,7 @@
 // The luke-voice hub: one local process for every subscribed Claude session and one call window.
 // It never calls Claude. It queues a command; the matching session's mod pulls it and runs it.
 import { spawn } from 'node:child_process'
-import { randomBytes, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { basename, dirname, join } from 'node:path'
@@ -26,6 +26,8 @@ const STATIC = {
 }
 
 const newSecret = () => randomBytes(24).toString('base64url')
+// A short, one-way tag of the key so health can show which key is in use without exposing it.
+const keyId = key => (key ? createHash('sha256').update(key).digest('hex').slice(0, 8) : null)
 
 function sameSecret(given, expected) {
   if (typeof given !== 'string' || !expected) return false
@@ -93,7 +95,12 @@ export function createHub({ serviceToken, windowKey, apiKey = '', root = ROOT, o
   let lastBusy = Date.now()
 
   const byName = name => [...sessions.values()].find(s => s.name === name)
-  const target = name => (name ? byName(name) : byName(focused)) ?? [...sessions.values()][0]
+  // A named session must exist: falling back to another one would run the work in the wrong place.
+  const target = name => (name ? byName(name) : (byName(focused) ?? [...sessions.values()][0]))
+  const missing = name =>
+    sessions.size
+      ? `No session is named "${name}". Open sessions: ${[...sessions.values()].map(s => s.name).join(', ')}.`
+      : 'No Claude session is connected.'
 
   const roster = () =>
     [...sessions.values()].map(s => ({ name: s.name, cwd: s.cwd, isBusy: s.isBusy, needsYou: s.needsYou }))
@@ -230,7 +237,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', root = ROOT, o
     },
     'POST /command': async (_none, body) => {
       const session = target(body.session)
-      if (!session) return [404, { ok: false, message: 'No Claude session is connected.' }]
+      if (!session) return [404, { ok: false, message: missing(body.session) }]
       if (body.type === 'send') {
         const prompt = String(body.prompt ?? '').trim()
         if (!prompt) return [400, { ok: false, message: 'The prompt is empty.' }]
@@ -245,7 +252,11 @@ export function createHub({ serviceToken, windowKey, apiKey = '', root = ROOT, o
       if (body.type === 'stop') return [200, await enqueue(session, { type: 'stop' })]
       return [400, { ok: false, message: 'Unknown command.' }]
     },
-    'GET /activity': (_none, _body, url) => [200, { text: activityText(target(url.searchParams.get('session'))) }],
+    'GET /activity': (_none, _body, url) => {
+      const name = url.searchParams.get('session')
+      const session = target(name)
+      return [200, { text: session ? activityText(session) : missing(name) }]
+    },
     'POST /call': (_none, body) => {
       call = ['idle', 'connecting', 'live', 'error'].includes(body.state) ? body.state : 'idle'
       sendRoster()
@@ -288,15 +299,16 @@ export function createHub({ serviceToken, windowKey, apiKey = '', root = ROOT, o
       const bearer = (req.headers.authorization ?? '').replace(/^Bearer /, '')
 
       if (route === 'GET /health') {
-        return send(res, 200, { app: 'luke-voice', version: VERSION, sessions: sessions.size, isWindowOpen: streams.size > 0, call, hasKey: Boolean(key), keyStatus: !key ? 'missing' : isKeyRejected ? 'rejected' : 'set' })
+        return send(res, 200, { app: 'luke-voice', version: VERSION, sessions: sessions.size, isWindowOpen: streams.size > 0, call, hasKey: Boolean(key), keyStatus: !key ? 'missing' : isKeyRejected ? 'rejected' : 'set', keyId: keyId(key) })
       }
 
       if (route === 'POST /subscribe') {
         if (!sameSecret(bearer, serviceToken)) return send(res, 401, { error: 'token' })
         const body = await readBody(req)
         const offered = typeof body.apiKey === 'string' ? body.apiKey.trim() : ''
-        // A new key replaces one ElevenLabs rejected; otherwise the first key stays.
-        if (offered && (!key || (isKeyRejected && offered !== key))) {
+        // The latest key saved in Claude Code wins, so a changed key works without waiting for the hub to exit.
+        if (offered && offered !== key) {
+          if (key) log('API key updated')
           key = offered
           isKeyRejected = false
           agentId = null
