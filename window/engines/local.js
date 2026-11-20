@@ -62,7 +62,7 @@ function ask(type, data = {}, transfer = []) {
 // ?voice-device=wasm, ?voice-dtype= and ?voice-threads= override the defaults, to measure a machine.
 const query = new URLSearchParams(location.search)
 const overrides = Object.fromEntries(
-  [['device', query.get('voice-device')], ['dtype', query.get('voice-dtype')], ['threads', Number(query.get('voice-threads')) || null]].filter(([, v]) => v),
+  [['device', query.get('voice-device')], ['dtype', query.get('voice-dtype')], ['threads', Number(query.get('voice-threads')) || null], ['stt', query.get('voice-stt')], ['sttDtype', query.get('voice-stt-dtype')]].filter(([, v]) => v),
 )
 const loadVoice = () => (workerLoad ??= ask('load', overrides).catch(error => ((workerLoad = null), Promise.reject(error))))
 
@@ -159,10 +159,16 @@ export async function startSession({
     onMessage({ source: 'ai', message: text })
     let next = ask('speak', { text: parts[0] })
     for (let i = 0; i < parts.length; i++) {
-      const { audio, sampleRate, ms } = await next
-      timing('speak', ms, `for ${(audio.length / sampleRate).toFixed(1)} s of audio`)
+      const { audio, sampleRate, ms, isBroken, retried } = await next
+      timing('speak', ms, `for ${(audio.length / sampleRate).toFixed(1)} s of audio${retried ? ' (retried after NaN audio)' : ''}`)
       if (mine !== speech || isEnded) return
       if (i + 1 < parts.length) next = ask('speak', { text: parts[i + 1] })
+      // A chunk the voice could not make is skipped, so the rest of the answer is still said.
+      if (isBroken || audio.length === 0) {
+        console.warn(`[luke-voice] the voice could not say: ${parts[i]}`)
+        if (i === parts.length - 1 && playing.size === 0) setMode('listening')
+        continue
+      }
       const buffer = outContext.createBuffer(1, audio.length, sampleRate)
       buffer.copyToChannel(audio, 0)
       const node = outContext.createBufferSource()
