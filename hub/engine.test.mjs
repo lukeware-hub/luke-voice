@@ -213,3 +213,21 @@ setInterval(() => {}, 1000)`,
   }
   assert.equal(isUp, false, 'the server outlived the killed hub')
 })
+
+test('a CPU posing as a GPU (llvmpipe) or Intel integrated graphics gets the light voice, not the natural one', () => {
+  const key = 'linux-x64'
+  const cases = [
+    [[{ id: 'Vulkan0', name: 'llvmpipe (LLVM 15.0.7, 256 bits)', mib: 32000 }], 'light'],
+    [[{ id: 'Vulkan0', name: 'Intel(R) UHD Graphics 770', mib: 16000 }], 'light'],
+    [[{ id: 'Vulkan0', name: 'Intel(R) Iris(R) Xe Graphics', mib: 8000 }], 'light'],
+    [[{ id: 'Vulkan0', name: 'Intel(R) Arc(TM) A770 Graphics', mib: 16000 }], 'gpu'],
+    [[{ id: 'Vulkan0', name: 'AMD Radeon RX 7600', mib: 8176 }], 'gpu'],
+    [[{ id: 'Metal', name: 'Apple M2 Pro', mib: 21000 }], 'gpu'],
+    // A laptop with both: the dedicated one is picked.
+    [[{ id: 'Vulkan0', name: 'Intel(R) UHD Graphics', mib: 16000 }, { id: 'Vulkan1', name: 'NVIDIA GeForce RTX 4060 Laptop GPU', mib: 8188 }], 'gpu'],
+  ]
+  for (const [devices, profile] of cases) assert.equal(pickProfile({ key, devices }).profile, profile, devices.map(d => d.name).join(' + '))
+  assert.match(pickProfile({ key, devices: cases[0][0] }).reason, /integrated or software GPU \(llvmpipe/)
+  assert.equal(pickProfile({ key, devices: cases[3 - 2][0], override: 'gpu' }).profile, 'gpu', 'forced, it is still allowed')
+  assert.equal(pickProfile({ key, devices: cases[6][0] }).device, 'NVIDIA GeForce RTX 4060 Laptop GPU')
+})

@@ -29,7 +29,7 @@ luke-voice picks the profile by itself at install time:
 
 On the gpu profile, the hub downloads llama.cpp's official release build b12556 (pinned by sha256, about 39 MB) and runs three local `llama-server` processes: Ceci's voice, her ears and the router.
 
-`LUKE_VOICE_PROFILE=gpu` or `light` forces a profile (an installer environment variable, or for the hub).
+`LUKE_VOICE_PROFILE=gpu` or `light` forces a profile: an installer environment variable, or for the hub (it prepares that profile on its next start).
 
 ## Install in 5 steps
 
@@ -73,7 +73,7 @@ When it asks **Which voice should Ceci use?**:
   2. Open [elevenlabs.io/app/settings/api-keys](https://elevenlabs.io/app/settings/api-keys) and click **Create API key**. If it asks which permissions, keep **Agents** and **Voices** allowed.
   3. Paste the key and press Enter. It stays hidden.
 
-The installer has 6 steps. The last one, **Downloading Ceci's voice (up to 3 GB, only once)**, runs `node hub/setup.mjs`. It picks the profile, downloads everything and checks each file by sha256. Downloads can resume if they are cut. On the gpu profile it also runs a short test: Ceci says a line, her ears write it back, and the router answers a greeting. If this step fails, calls use the light voice until it is fixed.
+The installer has 6 steps. The last one, **Downloading Ceci's voice (up to 3 GB, only once)**, runs `node hub/setup.mjs`. It picks the profile, downloads everything and checks each file by sha256. Downloads can resume if they are cut. On the gpu profile it also runs a short test: Ceci says a line, her ears write it back, and the router answers a greeting. If the test fails, setup downloads the light voice too (about 320 MB) and calls use it until `/luke-voice setup` passes the test.
 
 **Done when:** it ends with the green message **Installation complete**. If it stops, read the **What to do** line, fix that one thing and run it again.
 
@@ -160,7 +160,7 @@ With no choice at all, luke-voice uses ElevenLabs while a key is saved, and the 
 ### What leaves your computer
 
 - **While it is off:** nothing.
-- **Free voice:** the audio never leaves your computer. Only the text of what you said, a short summary of what happens in the session, and finished task results go to Claude Haiku on your Claude account, which decides what Ceci says. The model files are downloaded once (from Hugging Face and GitHub) at install or setup, never during a call.
+- **Free voice:** the audio never leaves your computer. Only the text of what you said, a short summary of what happens in the session, and finished task results go to Claude Haiku on your Claude account, which decides what Ceci says. The model files are downloaded once (from Hugging Face and GitHub): at install or setup, or on the first call if neither ran. After that, nothing is downloaded.
 - **ElevenLabs voice:** your voice and what happens in the session (your prompts and Claude's tool calls) go to your agent at ElevenLabs.
 
 ## If something does not work

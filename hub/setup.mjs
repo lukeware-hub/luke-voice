@@ -6,10 +6,11 @@
 // LUKE_VOICE_PROFILE=gpu|light forces the profile. Exit code 0 when the voice is ready.
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 
 import { ASR_GLOSSARY, createEngine, groupBytes, maxFrames, prepareEngine, profileGroups, VOICE_SETTINGS } from './engine.mjs'
 import { modelsDir } from './models.mjs'
+import { isMainModule } from './paths.mjs'
 import { route } from './router.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -98,7 +99,15 @@ export async function setup({ out = process.stdout, prepare = prepareEngine, tes
     if (!result.ok) {
       say(`      The natural voice did not pass its test: ${result.problems.join('; ')}.`)
       say('      Calls will use the light voice in the browser until this is fixed. Run /luke-voice setup to try again.')
-      return { profile, test: result, ok: false }
+      // Saved as the light profile, so the hub and the window do not use the broken natural voice.
+      try {
+        const fallback = await prepare({ onProgress: progressPrinter(out), override: 'light', devices: profile.devices, reason: `the natural voice failed its test: ${result.problems.join('; ')}` })
+        say(`      Light voice ready. Models: ${size(groupBytes(profileGroups(fallback.profile, fallback.devices)))} in ${modelsDir()}.`)
+        return { profile, test: result, ok: false, fallback }
+      } catch (error) {
+        say(`      The light voice could not be downloaded either: ${error?.message ?? error}.`)
+        return { profile, test: result, ok: false, fallback: null }
+      }
     }
     say(`      Natural voice ready (test in ${(result.ms / 1000).toFixed(1)} s; she said "${result.heard}").`)
     return { profile, test: result, ok: true }
@@ -107,7 +116,7 @@ export async function setup({ out = process.stdout, prepare = prepareEngine, tes
   return { profile, test: null, ok: true }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+if (isMainModule(import.meta.url, process.argv[1])) {
   const asJson = process.argv.includes('--json')
   try {
     const result = await setup({ out: asJson ? { write: () => true, isTTY: false } : process.stdout, isTested: !process.argv.includes('--no-test') })

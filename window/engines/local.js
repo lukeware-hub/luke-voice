@@ -6,6 +6,7 @@ import { isConfirm, isDeny, isStopOnly } from '/engines/fast-path.js'
 import { speechChunks } from '/engines/speech-text.js'
 import { createTurnJoiner } from '/engines/turn-join.js'
 import { riseQuestion } from '/engines/question-rise.js'
+import { risingPercent } from '/engines/progress.js'
 import { FRAME, RATE, createVad, rms } from '/engines/vad.js'
 
 export const name = 'local'
@@ -212,8 +213,9 @@ export async function startSession({
   onMessage = () => {},
   onStatus = () => {},
 }) {
+  const downloaded = risingPercent()
   const showProgress = data => {
-    if (data.type === 'progress') onStatus(`Baixando a voz gratuita (só na primeira vez): ${percent(data)}%`)
+    if (data.type === 'progress') onStatus(`Baixando a voz gratuita (só na primeira vez): ${downloaded(data)}%`)
     if (data.type === 'status') onStatus(data.stage === 'warming' ? 'Aquecendo a voz…' : 'Carregando a voz…')
   }
   listeners.add(showProgress)
@@ -483,6 +485,8 @@ export async function startSession({
     const made = ackAudio.get(text)
     if (!made) return
     timing('ack', 0, `"${text}"`)
+    // On screen too, or the caption would show Ceci's previous line while she says "Certo.".
+    onMessage({ source: 'ai', message: text })
     play(made.audio, made.sampleRate, ++speech, true)
   }
 

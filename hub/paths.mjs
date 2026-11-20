@@ -1,6 +1,7 @@
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 export const PORT = Number(process.env.LUKE_VOICE_PORT || 4848)
 export const ORIGIN = `http://127.0.0.1:${PORT}`
@@ -24,4 +25,20 @@ export function isOlderVersion(a, b) {
     if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) < (y[i] ?? 0)
   }
   return false
+}
+
+// Whether the module at `metaUrl` is the script node was started with (`argv1`). Node gives the
+// module its real path, while argv keeps the path as typed: through a symlinked or junctioned
+// ~/.claude they differ, and comparing them as text would skip the whole script.
+export function isMainModule(metaUrl, argv1) {
+  if (!argv1) return false
+  const real = path => {
+    try {
+      return realpathSync.native(path)
+    } catch {
+      return path
+    }
+  }
+  const [a, b] = [real(fileURLToPath(metaUrl)), real(argv1)]
+  return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b
 }

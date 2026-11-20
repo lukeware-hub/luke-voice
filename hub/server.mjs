@@ -6,10 +6,10 @@ import { createReadStream, existsSync, readFileSync, statSync, writeFileSync } f
 import { createServer } from 'node:http'
 import { pipeline } from 'node:stream/promises'
 import { basename, dirname, join } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 
 import { conversationToken, credits, ensureAgent, outOfCreditsMessage } from './agent.mjs'
-import { PORT, stateDir, stateFile } from './paths.mjs'
+import { PORT, isMainModule, stateDir, stateFile } from './paths.mjs'
 import { ASR_GLOSSARY, VOICE_SETTINGS, createEngine, maxFrames, prepareEngine, profileReady, readProfile } from './engine.mjs'
 import { ensureModel } from './models.mjs'
 import { route as routeUtterance } from './router.mjs'
@@ -28,6 +28,9 @@ const ROUTER_WAIT_MS = 1500
 const BRAIN_WAIT_MS = 40_000
 const NO_SESSION_SAY = 'Nenhuma sessão do Claude está ligada. Ligue o luke-voice no Claude Code e me chame de novo.'
 const STALE_SESSION_MS = 90_000
+// A session whose luke-voice is older than 0.9.5 cannot think for the free voice: it would hand
+// the command to Claude as a prompt. It says which session to restart instead.
+const oldSessionSay = name => `A sessão ${name} está com uma versão antiga do luke-voice. Feche o Claude Code e abra de novo para atualizar.`
 
 const STATIC = {
   '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
@@ -38,6 +41,7 @@ const STATIC = {
   '/engines/fast-path.js': ['engines/fast-path.js', 'text/javascript; charset=utf-8'],
   '/engines/turn-join.js': ['engines/turn-join.js', 'text/javascript; charset=utf-8'],
   '/engines/question-rise.js': ['engines/question-rise.js', 'text/javascript; charset=utf-8'],
+  '/engines/progress.js': ['engines/progress.js', 'text/javascript; charset=utf-8'],
   '/engines/vad.js': ['engines/vad.js', 'text/javascript; charset=utf-8'],
   '/engines/piper-ids.js': ['engines/piper-ids.js', 'text/javascript; charset=utf-8'],
   '/engines/mic-worklet.js': ['engines/mic-worklet.js', 'text/javascript; charset=utf-8'],
@@ -110,16 +114,25 @@ export function chromeArgs(url, profile) {
   ]
 }
 
-// A Chrome app window; else the default browser.
+// A Chrome app window; else the default browser. On Windows not through cmd's `start`: cmd cuts
+// the URL at its "&", and the call (`&call=1`) would not start.
+export function windowCommand(url, { chrome = chromePath(), platform = process.platform, profile = join(stateDir(), 'chrome') } = {}) {
+  if (chrome) return [chrome, chromeArgs(url, profile)]
+  if (platform === 'win32') return ['rundll32', ['url.dll,FileProtocolHandler', url]]
+  return [platform === 'darwin' ? 'open' : 'xdg-open', [url]]
+}
+
 export function openWindow(url) {
-  const chrome = chromePath()
-  const [cmd, args] = chrome
-    ? [chrome, chromeArgs(url, join(stateDir(), 'chrome'))]
-    : process.platform === 'win32'
-      ? ['cmd', ['/c', 'start', '', url]]
-      : [process.platform === 'darwin' ? 'open' : 'xdg-open', [url]]
-  // windowsHide only for cmd: Chrome opens its first window with the hidden show flag it is given.
-  spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: cmd === 'cmd' }).unref()
+  const [cmd, args] = windowCommand(url)
+  // windowsHide only for rundll32: Chrome opens its first window with the hidden show flag it is given.
+  spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: cmd === 'rundll32' }).unref()
+}
+
+// The engine must be prepared (again) when it never was, when a file of its profile is missing (a
+// new model in an update), or when LUKE_VOICE_PROFILE asks for the other profile.
+export function needsPrepare(chosen, { isReady, override = '' }) {
+  if (!chosen || !isReady(chosen)) return true
+  return ['gpu', 'light'].includes(override) && chosen.profile !== override
 }
 
 export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, engine = null, profile = () => null, voiceRef = null, onLocalVoice = () => {}, onSetup = () => ({ started: false }), engineState = () => 'off', log = () => {}, onShutdown = () => process.exit(0) }) {
@@ -335,6 +348,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     'POST /brain': async (_none, body) => {
       const session = target()
       if (!session) return [200, { say: NO_SESSION_SAY, tool: null }]
+      if (!session.canThink) return [200, { say: oldSessionSay(session.name), tool: null }]
       const clip = (value, max) => String(value ?? '').slice(0, max)
       const request = {
         kind: ['user', 'notice', 'tool_result'].includes(body.kind) ? body.kind : 'user',
@@ -516,7 +530,8 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
           agentId = null
         }
         rememberKey(offered)
-        // Like the key, the latest voice chosen in Claude Code wins.
+        // Like the key, the latest voice chosen in Claude Code wins. A session from before 0.9.5
+        // sends no voice (nor version): see canThink below.
         if (PROVIDERS.includes(body.provider)) chosen = body.provider
         const token = newSecret()
         const sessionId = typeof body.sessionId === 'string' ? body.sessionId.slice(0, 200) : ''
@@ -527,7 +542,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
           replaced.add(previous.token)
           wake(previous)
         }
-        const session = { token, sessionId, name: previous?.name ?? uniqueName(body.cwd), cwd: String(body.cwd ?? ''), inbox: [], waiters: [], activity: [], isBusy: false, needsYou: false, seenAt: Date.now() }
+        const session = { token, sessionId, name: previous?.name ?? uniqueName(body.cwd), cwd: String(body.cwd ?? ''), canThink: typeof body.version === 'string' || typeof body.provider === 'string', inbox: [], waiters: [], activity: [], isBusy: false, needsYou: false, seenAt: Date.now() }
         sessions.set(token, session)
         focused ??= session.name
         sendRoster()
@@ -645,7 +660,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
 }
 
 // Run directly: listen on the fixed port and exit after ten idle minutes.
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+if (isMainModule(import.meta.url, process.argv[1])) {
   const { serviceToken, windowKey } = loadSecrets()
   const log = line => console.log(line)
   const engine = createEngine({ log })
@@ -693,8 +708,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const startEngine = async ({ isForced = false } = {}) => {
     state = 'starting'
     let chosen = readProfile()
-    // Never prepared, a file of its profile is missing (a new model in an update), or asked for.
-    if (isForced || !chosen || !profileReady(chosen)) {
+    if (isForced || needsPrepare(chosen, { isReady: profileReady, override: process.env.LUKE_VOICE_PROFILE })) {
       hub.setEngineDownload({ loaded: 0, total: 0, label: 'preparando' })
       chosen = await prepareEngine({ onProgress: (loaded, total, label) => hub.setEngineDownload({ loaded, total, label }) })
       hub.setEngineDownload(null)

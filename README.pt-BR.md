@@ -29,7 +29,7 @@ O luke-voice escolhe o perfil sozinho, na hora da instalação:
 
 No perfil gpu, o hub baixa a versão oficial b12556 do llama.cpp (fixada por sha256, cerca de 39 MB) e roda três processos `llama-server` locais: a voz da Ceci, os ouvidos dela e o roteador.
 
-`LUKE_VOICE_PROFILE=gpu` ou `light` força um perfil (variável de ambiente do instalador, ou do hub).
+`LUKE_VOICE_PROFILE=gpu` ou `light` força um perfil: variável de ambiente do instalador, ou do hub (ele prepara esse perfil quando iniciar de novo).
 
 ## Instalação em 5 passos
 
@@ -73,7 +73,7 @@ Quando ele perguntar **Which voice should Ceci use?** (qual voz a Ceci deve usar
   2. Abra [elevenlabs.io/app/settings/api-keys](https://elevenlabs.io/app/settings/api-keys) e clique em **Create API key**. Se perguntar as permissões, deixe **Agents** e **Voices** liberadas.
   3. Cole a chave e aperte Enter. Ela fica escondida.
 
-O instalador tem 6 etapas. A última, **Downloading Ceci's voice (up to 3 GB, only once)** (baixando a voz da Ceci, até 3 GB, uma vez só), roda `node hub/setup.mjs`. Ela escolhe o perfil, baixa tudo e confere cada arquivo por sha256. Se o download for cortado, ele continua de onde parou. No perfil gpu, ela também faz um teste curto: a Ceci fala uma frase, os ouvidos dela escrevem de volta e o roteador responde a um cumprimento. Se essa etapa falhar, as chamadas usam a voz leve até você arrumar.
+O instalador tem 6 etapas. A última, **Downloading Ceci's voice (up to 3 GB, only once)** (baixando a voz da Ceci, até 3 GB, uma vez só), roda `node hub/setup.mjs`. Ela escolhe o perfil, baixa tudo e confere cada arquivo por sha256. Se o download for cortado, ele continua de onde parou. No perfil gpu, ela também faz um teste curto: a Ceci fala uma frase, os ouvidos dela escrevem de volta e o roteador responde a um cumprimento. Se o teste falhar, o setup baixa também a voz leve (cerca de 320 MB) e as chamadas usam ela até o `/luke-voice setup` passar no teste.
 
 **Deu certo quando:** aparece a mensagem verde **Installation complete**. Se ele parar, leia a linha **What to do**, resolva aquilo e rode de novo.
 
@@ -160,7 +160,7 @@ Sem nenhuma escolha, o luke-voice usa a ElevenLabs se houver chave salva, e a vo
 ### O que sai do seu computador
 
 - **Desligado:** nada.
-- **Voz gratuita:** o áudio não sai do seu computador. Só o texto do que você falou, um resumo curto do que acontece na sessão e o resultado das tarefas vão para o Claude Haiku, da sua conta do Claude, que decide o que a Ceci fala. Os arquivos dos modelos são baixados uma vez (do Hugging Face e do GitHub) na instalação ou no setup, nunca durante uma chamada.
+- **Voz gratuita:** o áudio não sai do seu computador. Só o texto do que você falou, um resumo curto do que acontece na sessão e o resultado das tarefas vão para o Claude Haiku, da sua conta do Claude, que decide o que a Ceci fala. Os arquivos dos modelos são baixados uma vez (do Hugging Face e do GitHub): na instalação ou no setup, ou na primeira chamada se nenhum dos dois rodou. Depois disso, nada é baixado.
 - **Voz ElevenLabs:** a sua voz e o que acontece na sessão (seus pedidos e as ferramentas que o Claude usa) vão para o seu agente na ElevenLabs.
 
 ## Se algo não funcionar

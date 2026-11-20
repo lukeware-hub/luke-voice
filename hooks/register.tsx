@@ -367,7 +367,7 @@ async function subscribeOnce($: EngineInterface, options: Record<string, unknown
       $,
       'POST',
       '/subscribe',
-      { cwd: await $.session.cwd(), sessionId: await $.session.id(), apiKey: await apiKey($, options), provider: chosenProvider(options) },
+      { cwd: await $.session.cwd(), sessionId: await $.session.id(), apiKey: await apiKey($, options), provider: chosenProvider(options), version: await pluginVersion($) },
       out.serviceToken,
     )
     if (!res.ok || typeof res.json.token !== 'string') {
