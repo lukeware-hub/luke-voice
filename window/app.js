@@ -1,6 +1,6 @@
 // The call window: one voice call for every subscribed Claude session.
-// The ElevenLabs key never reaches this page; the hub hands it a per-call token.
-// The ElevenLabs client comes from a pinned CDN file that index.html loads with an integrity hash.
+// The voice itself comes from an engine (engines/*.js); this page drives its session the same way for each.
+import * as engine from '/engines/elevenlabs.js'
 import {
   NOTICE,
   QUIET_NOTICE,
@@ -13,8 +13,6 @@ import {
   quoteUntrusted,
   safeKind,
 } from '/guard.js'
-
-const { Conversation } = window.ElevenLabsClient
 
 const params = new URLSearchParams(location.search)
 const KEY = params.get('k') ?? ''
@@ -389,12 +387,9 @@ async function startCall() {
   if (conversation || callState === 'connecting') return
   setCall('connecting')
   try {
-    // The token first: it also sets up the agent, and its errors say what is missing.
-    const { token } = await hub('POST', '/token')
-    await microphone()
-    conversation = await Conversation.startSession({
-      conversationToken: token,
-      connectionType: 'webrtc',
+    conversation = await engine.startSession({
+      hub,
+      prepare: microphone,
       clientTools,
       onConnect: async () => {
         connectedAt = Date.now()
@@ -409,7 +404,7 @@ async function startCall() {
         // A call the agent drops in its first seconds never really started: say so, with the reason.
         if (!wasEnded && Date.now() - connectedAt < EARLY_DROP_MS) {
           const reason = details?.message || details?.reason || ''
-          setCall('error', `A ElevenLabs encerrou a chamada logo no início${reason && reason !== 'agent' ? `: ${reason}` : ''}. Veja os créditos da sua conta em elevenlabs.io e tente de novo.`)
+          setCall('error', engine.earlyDropMessage(reason))
           return
         }
         setCall('idle', 'Chamada encerrada. Toque em Chamar para falar de novo.')
