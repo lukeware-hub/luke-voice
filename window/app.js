@@ -293,8 +293,10 @@ function voiceFacts(health) {
   }
   const info = engine?.name === 'local' ? engine.getVoiceInfo?.() : null
   const runsOn = info ? (info.device === 'webgpu' ? 'placa de vídeo (WebGPU)' : `processador (${info.threads} threads)`) : 'carrega na primeira chamada'
+  const model = info ? (info.tts === 'piper' ? 'Piper (voz leve, para computadores mais lentos)' : 'Kokoro') : null
   return [
     ['Voz', 'Ceci, gratuita, no seu computador', 'ok'],
+    ...(model ? [['Modelo de voz', model, '']] : []),
     ['Roda em', runsOn, ''],
   ]
 }

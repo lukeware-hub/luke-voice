@@ -62,7 +62,7 @@ function ask(type, data = {}, transfer = []) {
 // ?voice-device=wasm, ?voice-dtype= and ?voice-threads= override the defaults, to measure a machine.
 const query = new URLSearchParams(location.search)
 const overrides = Object.fromEntries(
-  [['device', query.get('voice-device')], ['dtype', query.get('voice-dtype')], ['threads', Number(query.get('voice-threads')) || null], ['stt', query.get('voice-stt')], ['sttDtype', query.get('voice-stt-dtype')]].filter(([, v]) => v),
+  [['device', query.get('voice-device')], ['dtype', query.get('voice-dtype')], ['threads', Number(query.get('voice-threads')) || null], ['stt', query.get('voice-stt')], ['sttDtype', query.get('voice-stt-dtype')], ['tts', query.get('voice-tts')], ['sttDevice', query.get('voice-stt-device')]].filter(([, v]) => v),
 )
 const loadVoice = () => (workerLoad ??= ask('load', overrides).catch(error => ((workerLoad = null), Promise.reject(error))))
 
@@ -75,8 +75,8 @@ export const getVoiceInfo = () => voiceInfo
 
 listeners.add(data => {
   if (data.type !== 'ready') return
-  voiceInfo = { device: data.device, threads: data.threads }
-  timing('voice ready', data.warmMs ?? 0, `(${data.device}, ${data.threads} threads, warm-up)`)
+  voiceInfo = { device: data.device, threads: data.threads, tts: data.tts, stt: data.stt }
+  timing('voice ready', data.warmMs ?? 0, `(${data.tts}, ${data.stt}, ${data.device}, ${data.threads} threads, warm-up)`)
 })
 
 const percent = ({ loaded, total }) => Math.min(99, Math.round((loaded / total) * 100))

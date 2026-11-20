@@ -118,7 +118,7 @@ echo "   2. Above the prompt, click the button 'luke-voice: off' to turn it on."
 echo '   3. Type /luke-voice call to start talking with Ceci.'
 echo '   To switch the voice later: /luke-voice voz local or /luke-voice voz elevenlabs.'
 if [ "$provider" = 'local' ]; then
-  printf '\n  The first call downloads the free voice (about 280 MB), only once.\n'
+  printf '\n  The first call downloads the free voice (270 to 430 MB), only once.\n'
 elif [ "$has_key" != "true" ]; then
   printf '\n  \033[33mThe ElevenLabs voice needs a key. Run the installer again to add it, or use the free voice.\033[0m\n'
 fi

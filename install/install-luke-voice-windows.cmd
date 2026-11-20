@@ -123,7 +123,7 @@ Write-Host "   3. Type /luke-voice call to start talking with Ceci."
 Write-Host "   To switch the voice later: /luke-voice voz local or /luke-voice voz elevenlabs."
 if ($provider -eq 'local') {
   Write-Host ""
-  Write-Host "  The first call downloads the free voice (about 280 MB), only once."
+  Write-Host "  The first call downloads the free voice (270 to 430 MB), only once."
 } elseif (-not $hasKey) {
   Write-Host ""
   Write-Host "  The ElevenLabs voice needs a key. Open this installer again to add it, or use the free voice." -ForegroundColor Yellow

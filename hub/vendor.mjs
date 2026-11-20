@@ -11,12 +11,15 @@ import { stateDir } from './paths.mjs'
 
 const TRANSFORMERS = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist'
 const ESPEAK = 'https://cdn.jsdelivr.net/npm/espeak-phonemizer@0.2.0/dist'
+// The onnxruntime build transformers.js 3.8.1 is made with; Piper runs on it, using the same .jsep.wasm.
+const ORT = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0-dev.20250409-89f8206ba4/dist'
 
 // Served path (under /vendor/) -> source URL and integrity.
 export const VENDOR = {
   'transformers/transformers.min.js': { url: `${TRANSFORMERS}/transformers.min.js`, sha384: 'sOua6i337lNLWtuIG44PBf5JXIvhoicFClCcI4XHDe/eHW3dwhQ3Y6t6wQjfRrkT' },
   'transformers/ort-wasm-simd-threaded.jsep.mjs': { url: `${TRANSFORMERS}/ort-wasm-simd-threaded.jsep.mjs`, sha384: '7GJqH5vc83Yt7VHwrMXTM8bNCrt/e/8eCtok8zlB2u5dwqmhzSakzCkQWrfYGRN4' },
   'transformers/ort-wasm-simd-threaded.jsep.wasm': { url: `${TRANSFORMERS}/ort-wasm-simd-threaded.jsep.wasm`, sha384: 'u/bDsx39c+wt0LbHmOCydxt4fyiig3118hQgOTfOvrfkgScM4hRo2IwTtlxyoI02' },
+  'onnxruntime/ort.webgpu.bundle.min.mjs': { url: `${ORT}/ort.webgpu.bundle.min.mjs`, sha384: '9vxusunYUQi25RPghvqUdZn3KgeSUFsgQjEZWSP7iAx5TQFrOMxy4iaQVxyLO72P' },
   'espeak/dist/espeak.mjs': { url: `${ESPEAK}/espeak.mjs`, sha384: '9mFo4AxtuW2zg0K6d8MDGuPwvKkcnQ+jaz+BfFFmA91Fx0invCjCYBY/uI0aXxsz' },
   'espeak/dist/constants.mjs': { url: `${ESPEAK}/constants.mjs`, sha384: 'YlHorzeMKVJSmFa757+mBfgS1m3twWsqFFoERP8M5+wKmvIPDAMRwML4R/VrcmgM' },
   'espeak/dist/version.mjs': { url: `${ESPEAK}/version.mjs`, sha384: 'RHxZI3yLU2zKL0va808bdHQCyQEoWg3T8MocYu8w7euWUyawxEfGOnekhkSRMA9/' },

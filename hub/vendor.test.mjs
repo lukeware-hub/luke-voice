@@ -21,7 +21,7 @@ const ok = bytes => async () => ({ ok: true, status: 200, arrayBuffer: async () 
 
 test('every vendored file is pinned to an exact version on jsDelivr with a sha384', () => {
   for (const [path, { url, sha384 }] of Object.entries(VENDOR)) {
-    assert.match(url, /^https:\/\/cdn\.jsdelivr\.net\/npm\/(@[^/]+\/)?[^/@]+@\d+\.\d+\.\d+\//, path)
+    assert.match(url, /^https:\/\/cdn\.jsdelivr\.net\/npm\/(@[^/]+\/)?[^/@]+@\d+\.\d+\.\d+(-[\w.-]+)?\//, path)
     assert.match(sha384, /^[A-Za-z0-9+/]{64}$/, path)
   }
 })

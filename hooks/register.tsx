@@ -577,7 +577,7 @@ async function helpText($: EngineInterface) {
     '     O /reload-plugins não basta para trocar de versão.',
     '',
     'As vozes (troque com /luke-voice voz):',
-    '  - Gratuita (padrão): roda no seu computador. A primeira chamada baixa cerca de 280 MB, uma vez só.',
+    '  - Gratuita (padrão): roda no seu computador. A primeira chamada baixa de 270 a 430 MB (mais com placa de vídeo), uma vez só.',
     '    O áudio não sai do seu computador; só o texto do que você falou vai para o Claude (Claude Haiku 5.5, da sua conta).',
     '  - ElevenLabs (opcional, paga por uso): crie uma conta em elevenlabs.io e copie uma chave em elevenlabs.io/app/settings/api-keys.',
     '    Salve a chave com: /plugin configure luke-voice@luke-voice e escolha /luke-voice voz elevenlabs.',
