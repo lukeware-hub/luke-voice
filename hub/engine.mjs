@@ -55,10 +55,10 @@ export const SERVICES = {
   },
 }
 
-// How Ceci's voice is sampled. Chosen on 40 pt-BR sentences with automatic judges (Brazilian vs
-// European accent classifier, UTMOSv2 naturalness against ElevenLabs pt-BR samples, Whisper
-// large-v3-turbo word errors): every sentence judged Brazilian, naturalness at ElevenLabs' level,
-// 4-6% word errors. The fixed seed makes the same sentence always sound the same.
+// How Ceci's voice is sampled. With the reference clip in agent/ceci-voice.wav (a real Brazilian
+// speaker, picked by the owner by ear), 40 pt-BR sentences ran with no failed or looping sentence
+// and 8% word errors (Whisper large-v3-turbo). The fixed seed makes the same sentence always sound
+// the same.
 export const VOICE_SETTINGS = { temperature: 0.75, top_p: 0.9, seed: 7 }
 
 // Audio frames allowed for a text (12.5 per second; ~14 characters per second in pt-BR), so a

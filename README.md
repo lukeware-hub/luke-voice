@@ -128,17 +128,15 @@ Measured on an RTX 3060 Ti, gpu profile:
 - end of turn: about 0.18 s;
 - "sim" after "posso?" until "Comecei": about 0.7 s.
 
-The voice was chosen with automatic judges, not with a human listening test. On 40 pt-BR sentences (20 not seen while choosing):
-- every sentence was classified Brazilian Portuguese (not European) by an accent classifier;
-- word errors were 4 to 6% (Whisper large-v3-turbo);
-- on a 0 to 10 scale anchored on the old Kokoro voice (3) and real pt-BR human recordings (10), Ceci scored 9.2 (95% interval 8.8 to 9.5; 9.1 on the unseen sentences). 38 public ElevenLabs pt-BR voice previews scored 6.3 on the same scale.
+The voice was chosen by the owner, listening:
+- An earlier voice, designed with Qwen3-TTS VoiceDesign, scored well with automatic judges, but the owner heard a European Portuguese accent in it. The accent classifier used then also called some real Brazilian recordings European, so it was dropped as a judge.
+- Ceci now clones a real Brazilian speaker: a clip from the CML-TTS Portuguese dataset (see Credits).
+- The clip was made brighter (a little higher, more pitch movement, 8% faster), because the plain reading sounded sleepy.
+- The owner compared candidates by ear and picked this one.
 
-How that scale was built:
-- Nine automatic judges were tried.
-- A judge was used only if it rates real human recordings clearly above the old Kokoro voice. Four passed: three synthetic-speech detectors (how real a clip sounds) and pitch expressiveness.
-- Four MOS predictors (UTMOSv2, UTMOS22, Distill-MOS, NISQA-TTS) and a fourth detector failed that check: they rate the human recordings no higher than Kokoro, so they were not used.
-
-These are automatic measurements, not a human listening test.
+On 40 pt-BR sentences through the production path:
+- no sentence failed or looped;
+- word errors were 8% (Whisper large-v3-turbo), mostly English tech words ("branch", "main") and numbers written as digits.
 
 ### Switching the voice
 
@@ -282,4 +280,4 @@ The free voice downloads third-party parts at install time; none of them is in t
 - The Piper voice: see its model card.
 - espeak-ng (through espeak-phonemizer): GPL-3.0.
 
-Ceci's reference voice clip `agent/ceci-voice.wav` was designed with Qwen3-TTS VoiceDesign (Apache-2.0) for this project.
+Ceci's reference voice clip `agent/ceci-voice.wav` comes from CML-TTS (Oliveira et al., 2023), Portuguese, speaker 3050, licensed CC-BY-4.0; the recording is a LibriVox public-domain reading. It was changed for this project: trimmed, raised one semitone, with more pitch movement and 8% faster.

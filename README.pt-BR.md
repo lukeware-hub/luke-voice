@@ -128,17 +128,15 @@ Medido numa RTX 3060 Ti, perfil gpu:
 - fim do turno: cerca de 0,18 s;
 - "sim" depois de "posso?" até "Comecei": cerca de 0,7 s.
 
-A voz foi escolhida com juízes automáticos, não com um teste de escuta humano. Em 40 frases em pt-BR (20 não vistas durante a escolha):
-- todas as frases foram classificadas como português do Brasil (e não europeu) por um classificador de sotaque;
-- os erros de palavras ficaram em 4 a 6% (Whisper large-v3-turbo);
-- numa escala de 0 a 10 ancorada na voz antiga, o Kokoro (3), e em gravações humanas reais em pt-BR (10), a Ceci tirou 9,2 (intervalo de 95%: 8,8 a 9,5; 9,1 nas frases não vistas). 38 prévias públicas de vozes pt-BR da ElevenLabs tiraram 6,3 na mesma escala.
+A voz foi escolhida pelo dono, ouvindo:
+- Uma voz anterior, desenhada com o Qwen3-TTS VoiceDesign, foi bem em juízes automáticos, mas o dono ouviu sotaque de Portugal nela. O classificador de sotaque usado na época também chamava de europeias algumas gravações brasileiras reais, então deixou de ser usado como juiz.
+- Agora a Ceci clona uma locutora brasileira real: um trecho do banco CML-TTS em português (veja os Créditos).
+- O trecho foi deixado mais alegre (um pouco mais agudo, com mais melodia e 8% mais rápido), porque a leitura original soava sonolenta.
+- O dono comparou as candidatas de ouvido e escolheu esta.
 
-Como essa escala foi montada:
-- Foram testados nove juízes automáticos.
-- Um juiz só foi usado se der às gravações humanas reais uma nota claramente acima da voz antiga do Kokoro. Quatro passaram: três detectores de voz sintética (o quanto o áudio soa real) e a expressividade da entonação.
-- Quatro preditores de MOS (UTMOSv2, UTMOS22, Distill-MOS, NISQA-TTS) e um quarto detector falharam nesse teste: dão às gravações humanas nota igual ou menor que a do Kokoro, então não foram usados.
-
-São medições automáticas, não um teste de escuta humano.
+Em 40 frases em pt-BR pelo caminho de produção:
+- nenhuma frase falhou nem entrou em repetição;
+- os erros de palavras ficaram em 8% (Whisper large-v3-turbo), quase todos em palavras técnicas em inglês ("branch", "main") e em números escritos com algarismos.
 
 ### Trocar a voz
 
@@ -231,6 +229,6 @@ A voz gratuita baixa na instalação partes de terceiros; nenhuma delas está ne
 - A voz do Piper: veja o cartão do modelo.
 - espeak-ng (pelo espeak-phonemizer): GPL-3.0.
 
-O trecho de voz de referência da Ceci, `agent/ceci-voice.wav`, foi desenhado com o Qwen3-TTS VoiceDesign (Apache-2.0) para este projeto.
+O trecho de voz de referência da Ceci, `agent/ceci-voice.wav`, vem do CML-TTS (Oliveira et al., 2023), português, locutora 3050, licença CC-BY-4.0; a gravação é uma leitura do LibriVox em domínio público. Ele foi alterado para este projeto: cortado, um semitom mais agudo, com mais melodia e 8% mais rápido.
 
 Mais detalhes, em inglês, no [README.md](README.md).

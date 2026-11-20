@@ -35,12 +35,12 @@ test('small talk is answered with Ceci\'s own written lines', async () => {
   assert.ok(REPLIES.greeting.includes(first.say))
   // Taken in turn, so she does not repeat herself.
   assert.notEqual((await route('olá', { ask })).say, first.say)
-  assert.equal((await route('quantos anos você tem?', fixed('age'))).say, 'Eu tenho 23 anos!')
+  assert.equal((await route('quantos anos você tem?', fixed('age'))).say, 'Eu tenho 22 anos!')
   assert.match((await route('quem te criou?', fixed('creator'))).say, /Diego Morais.*Lukeware/)
   // "quem é você?" gets her name and job, never her age or creator.
   const who = (await route('quem é você?', fixed('identity'))).say
   assert.match(who, /Ceci/)
-  assert.doesNotMatch(who, /23|Diego|Lukeware/)
+  assert.doesNotMatch(who, /22|Diego|Lukeware/)
 })
 
 test('a request is never answered locally, even when the model calls it small talk', async () => {
