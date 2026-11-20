@@ -130,10 +130,15 @@ Measured on an RTX 3060 Ti, gpu profile:
 
 The voice was chosen with automatic judges, not with a human listening test. On 40 pt-BR sentences (20 not seen while choosing):
 - every sentence was classified Brazilian Portuguese (not European) by an accent classifier;
-- naturalness (UTMOSv2) was at the level of public ElevenLabs pt-BR samples (2.98 to 3.20 against 3.09);
-- word errors were 4 to 6% (Whisper large-v3-turbo).
+- word errors were 4 to 6% (Whisper large-v3-turbo);
+- on a 0 to 10 scale anchored on the old Kokoro voice (3) and real pt-BR human recordings (10), Ceci scored 9.2 (95% interval 8.8 to 9.5; 9.1 on the unseen sentences). 38 public ElevenLabs pt-BR voice previews scored 6.3 on the same scale.
 
-These are automatic measurements.
+How that scale was built:
+- Nine automatic judges were tried.
+- A judge was used only if it rates real human recordings clearly above the old Kokoro voice. Four passed: three synthetic-speech detectors (how real a clip sounds) and pitch expressiveness.
+- Four MOS predictors (UTMOSv2, UTMOS22, Distill-MOS, NISQA-TTS) and a fourth detector failed that check: they rate the human recordings no higher than Kokoro, so they were not used.
+
+These are automatic measurements, not a human listening test.
 
 ### Switching the voice
 

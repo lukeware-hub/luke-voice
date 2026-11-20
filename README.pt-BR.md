@@ -130,10 +130,15 @@ Medido numa RTX 3060 Ti, perfil gpu:
 
 A voz foi escolhida com juízes automáticos, não com um teste de escuta humano. Em 40 frases em pt-BR (20 não vistas durante a escolha):
 - todas as frases foram classificadas como português do Brasil (e não europeu) por um classificador de sotaque;
-- a naturalidade (UTMOSv2) ficou no nível de amostras públicas pt-BR da ElevenLabs (2,98 a 3,20 contra 3,09);
-- os erros de palavras ficaram em 4 a 6% (Whisper large-v3-turbo).
+- os erros de palavras ficaram em 4 a 6% (Whisper large-v3-turbo);
+- numa escala de 0 a 10 ancorada na voz antiga, o Kokoro (3), e em gravações humanas reais em pt-BR (10), a Ceci tirou 9,2 (intervalo de 95%: 8,8 a 9,5; 9,1 nas frases não vistas). 38 prévias públicas de vozes pt-BR da ElevenLabs tiraram 6,3 na mesma escala.
 
-São medições automáticas.
+Como essa escala foi montada:
+- Foram testados nove juízes automáticos.
+- Um juiz só foi usado se der às gravações humanas reais uma nota claramente acima da voz antiga do Kokoro. Quatro passaram: três detectores de voz sintética (o quanto o áudio soa real) e a expressividade da entonação.
+- Quatro preditores de MOS (UTMOSv2, UTMOS22, Distill-MOS, NISQA-TTS) e um quarto detector falharam nesse teste: dão às gravações humanas nota igual ou menor que a do Kokoro, então não foram usados.
+
+São medições automáticas, não um teste de escuta humano.
 
 ### Trocar a voz
 
