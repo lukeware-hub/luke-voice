@@ -307,6 +307,11 @@ if ($canCall) {
   Write-Host "   3. Digite /luke-voice call para falar com a Ceci."
 }
 Write-Host "  Para trocar a voz: /luke-voice voz local ou /luke-voice voz elevenlabs."
+$chrome = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:LOCALAPPDATA) | Where-Object { $_ } | ForEach-Object { Join-Path $_ 'Google\Chrome\Application\chrome.exe' } | Where-Object { Test-Path $_ }
+if (-not $chrome) {
+  Write-Host ""
+  Write-Host "  Dica: instale o Google Chrome (https://www.google.com/chrome). A janela da chamada funciona melhor nele." -ForegroundColor Yellow
+}
 if ($provider -eq 'local' -and -not $voiceReady) {
   Write-Host ""
   Write-Host "  A primeira chamada termina de baixar a voz gratuita, só uma vez."

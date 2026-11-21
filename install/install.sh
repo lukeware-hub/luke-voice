@@ -234,6 +234,15 @@ else
   echo '   3. Digite /luke-voice call para falar com a Ceci.'
 fi
 echo '  Para trocar a voz: /luke-voice voz local ou /luke-voice voz elevenlabs.'
+if [ "$(uname -s)" = Darwin ]; then
+  echo '  Na primeira chamada, o Mac pergunta se o Chrome pode usar o microfone: clique em Permitir.'
+  has_chrome=false; [ -d '/Applications/Google Chrome.app' ] && has_chrome=true
+else
+  has_chrome=false; for c in google-chrome google-chrome-stable chromium; do command -v "$c" >/dev/null 2>&1 && has_chrome=true; done
+fi
+if [ "$has_chrome" != true ]; then
+  printf '\n  \033[33mDica: instale o Google Chrome (https://www.google.com/chrome). A janela da chamada funciona melhor nele.\033[0m\n'
+fi
 if [ "$provider" = 'local' ] && [ "$voice_ready" != 'true' ]; then
   printf '\n  A primeira chamada termina de baixar a voz gratuita, só uma vez.\n'
 elif [ "$provider" = 'elevenlabs' ] && [ "$has_key" != "true" ]; then
