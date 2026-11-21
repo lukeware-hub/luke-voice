@@ -22,7 +22,7 @@ test('in an installer log, progress is printed every 10%, not on every chunk', (
   const print = progressPrinter(out)
   for (let loaded = 0; loaded <= 1000; loaded += 1) print(loaded, 1000, 'modelos')
   assert.ok(lines.length >= 10 && lines.length <= 12, String(lines.length))
-  assert.match(lines.at(-1), /Voice models: 100% of/)
+  assert.match(lines.at(-1), /Modelos de voz: 100% de/)
 })
 
 test('the gpu profile is tested; a failed test says the light voice will be used', async () => {
@@ -30,36 +30,36 @@ test('the gpu profile is tested; a failed test says the light voice will be used
   const passed = sink()
   const ok = await setup({ out: passed.out, prepare: async () => gpu, test: async () => ({ ok: true, ms: 4000, heard: 'Oi, eu sou a Ceci.', problems: [] }) })
   assert.equal(ok.ok, true)
-  assert.match(passed.lines.join(''), /Natural voice ready.*Oi, eu sou a Ceci/)
+  assert.match(passed.lines.join(''), /Voz natural pronta.*Oi, eu sou a Ceci/)
   const failed = sink()
   const asked = []
   const prepare = async options => {
     asked.push(options)
     return options.override === 'light' ? { profile: 'light', reason: options.reason, devices: options.devices } : gpu
   }
-  const bad = await setup({ out: failed.out, prepare, test: async () => ({ ok: false, ms: 1, heard: '', problems: ['the tts server did not start'] }) })
+  const bad = await setup({ out: failed.out, prepare, test: async () => ({ ok: false, ms: 1, heard: '', problems: ['o servidor tts não iniciou'] }) })
   assert.equal(bad.ok, false)
-  assert.match(failed.lines.join(''), /tts server did not start[\s\S]*light voice[\s\S]*Light voice ready/)
+  assert.match(failed.lines.join(''), /servidor tts não iniciou[\s\S]*voz leve[\s\S]*Voz leve pronta/)
   // The light profile is saved (prepared) in its place, so calls really use the light voice.
   assert.equal(asked.length, 2)
   assert.equal(asked[1].override, 'light')
   assert.deepEqual(asked[1].devices, gpu.devices)
-  assert.match(asked[1].reason, /failed its test: the tts server did not start/)
+  assert.match(asked[1].reason, /falhou no teste: o servidor tts não iniciou/)
   assert.equal(bad.fallback.profile, 'light')
   // With no internet for the light voice either, setup still ends and says so.
   const offline = sink()
   const worse = await setup({ out: offline.out, prepare: async o => { if (o.override === 'light') throw new Error('fetch failed'); return gpu }, test: async () => ({ ok: false, ms: 1, heard: '', problems: ['x'] }) })
   assert.equal(worse.ok, false)
-  assert.match(offline.lines.join(''), /could not be downloaded either: fetch failed/)
+  assert.match(offline.lines.join(''), /não pôde ser baixada: fetch failed/)
 })
 
 test('the light profile needs no test', async () => {
   const { lines, out } = sink()
   let tested = false
-  const result = await setup({ out, prepare: async () => ({ profile: 'light', reason: 'no GPU found', devices: [] }), test: async () => (tested = true) })
+  const result = await setup({ out, prepare: async () => ({ profile: 'light', reason: 'nenhuma placa de vídeo encontrada', devices: [] }), test: async () => (tested = true) })
   assert.equal(result.ok, true)
   assert.equal(tested, false)
-  assert.match(lines.join(''), /light voice in the browser \(no GPU found\)/)
+  assert.match(lines.join(''), /voz leve, no navegador \(nenhuma placa de vídeo encontrada\)/)
 })
 
 test('the install test asks the ears with the glossary, so they write "Ceci" and not "assim se"', async () => {

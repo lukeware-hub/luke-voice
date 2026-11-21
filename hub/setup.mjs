@@ -35,7 +35,7 @@ export function progressPrinter(out = process.stdout) {
     const percent = Math.min(100, Math.floor((loaded / total) * 100))
     if (percent === shown || (!out.isTTY && percent < shown + 10 && percent !== 100)) return
     shown = percent
-    const line = `      ${label === 'llama.cpp' ? 'Voice engine (llama.cpp)' : 'Voice models'}: ${percent}% of ${size(total)}`
+    const line = `      ${label === 'llama.cpp' ? 'Motor de voz (llama.cpp)' : 'Modelos de voz'}: ${percent}% de ${size(total)}`
     out.write(out.isTTY ? `\r${line}   ${percent === 100 ? '\n' : ''}` : `${line}\n`)
     if (out.isTTY && percent === 100) label = ''
   }
@@ -49,7 +49,7 @@ export async function smokeTest(profile, { engine = createEngine(), voice = VOIC
   try {
     await engine.start(undefined, { exe: profile.exe })
     const status = engine.status()
-    for (const [name, isUp] of Object.entries(status)) if (!isUp) problems.push(`the ${name} server did not start`)
+    for (const [name, isUp] of Object.entries(status)) if (!isUp) problems.push(`o servidor ${name} não iniciou`)
     const refB64 = existsSync(voice) ? readFileSync(voice).toString('base64') : ''
     const refText = existsSync(voice.replace(/\.wav$/, '.txt')) ? readFileSync(voice.replace(/\.wav$/, '.txt'), 'utf8').trim() : ''
     await engine.warm({ speakerRefB64: refB64, speakerRefText: refText })
@@ -59,7 +59,7 @@ export async function smokeTest(profile, { engine = createEngine(), voice = VOIC
       const body = { input: TEST_LINE, lang: 'pt', response_format: 'wav', n_predict: maxFrames(TEST_LINE), ...VOICE_SETTINGS, ...(refB64 ? { speaker_ref_b64: refB64, speaker_ref_text: refText } : {}) }
       const res = await fetch(`${tts}/v1/audio/speech`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
       const wav = Buffer.from(await res.arrayBuffer())
-      if (!res.ok || wav.length < 24_000) problems.push('the voice made no audio')
+      if (!res.ok || wav.length < 24_000) problems.push('a voz não gerou áudio')
       const asr = engine.url('asr')
       if (asr && res.ok) {
         const form = new FormData()
@@ -69,14 +69,14 @@ export async function smokeTest(profile, { engine = createEngine(), voice = VOIC
         form.append('prompt', ASR_GLOSSARY)
         const answer = await fetch(`${asr}/v1/audio/transcriptions`, { method: 'POST', body: form })
         heard = answer.ok ? String((await answer.json()).text ?? '').replace(/^[\s\S]*<asr_text>/, '').trim() : ''
-        if (!/ceci|pronta/i.test(heard)) problems.push(`the ears heard "${heard}"`)
+        if (!/ceci|pronta/i.test(heard)) problems.push(`os ouvidos ouviram "${heard}"`)
       }
     }
     const router = engine.url('router')
     if (router) {
       const ask = chat => fetch(`${router}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(chat) }).then(r => r.json())
       const { intent } = await route('oi, tudo bem?', { ask })
-      if (intent === 'claude') problems.push('the router did not answer a greeting')
+      if (intent === 'claude') problems.push('o roteador não respondeu a um cumprimento')
     }
     return { ok: problems.length === 0, ms: Date.now() - started, heard, problems }
   } catch (error) {
@@ -92,27 +92,27 @@ export async function setup({ out = process.stdout, prepare = prepareEngine, tes
   const profile = await prepare({ onProgress: progressPrinter(out) })
   const bytes = groupBytes(profileGroups(profile.profile, profile.devices))
   if (profile.profile === 'gpu') {
-    say(`      Profile: natural voice on the GPU (${profile.reason}). Models: ${size(bytes)} in ${modelsDir()}.`)
+    say(`      Perfil: voz natural na placa de vídeo (${profile.reason}). Modelos: ${size(bytes)} em ${modelsDir()}.`)
     if (!isTested) return { profile, test: null, ok: true }
-    say('      Testing the voice, the ears and the router...')
+    say('      Testando a voz, os ouvidos e o roteador...')
     const result = await test(profile)
     if (!result.ok) {
-      say(`      The natural voice did not pass its test: ${result.problems.join('; ')}.`)
-      say('      Calls will use the light voice in the browser until this is fixed. Run /luke-voice setup to try again.')
+      say(`      A voz natural não passou no teste: ${result.problems.join('; ')}.`)
+      say('      As chamadas vão usar a voz leve, no navegador, até isso ser resolvido. Para tentar de novo: /luke-voice setup.')
       // Saved as the light profile, so the hub and the window do not use the broken natural voice.
       try {
-        const fallback = await prepare({ onProgress: progressPrinter(out), override: 'light', devices: profile.devices, reason: `the natural voice failed its test: ${result.problems.join('; ')}` })
-        say(`      Light voice ready. Models: ${size(groupBytes(profileGroups(fallback.profile, fallback.devices)))} in ${modelsDir()}.`)
+        const fallback = await prepare({ onProgress: progressPrinter(out), override: 'light', devices: profile.devices, reason: `a voz natural falhou no teste: ${result.problems.join('; ')}` })
+        say(`      Voz leve pronta. Modelos: ${size(groupBytes(profileGroups(fallback.profile, fallback.devices)))} em ${modelsDir()}.`)
         return { profile, test: result, ok: false, fallback }
       } catch (error) {
-        say(`      The light voice could not be downloaded either: ${error?.message ?? error}.`)
+        say(`      A voz leve também não pôde ser baixada: ${error?.message ?? error}.`)
         return { profile, test: result, ok: false, fallback: null }
       }
     }
-    say(`      Natural voice ready (test in ${(result.ms / 1000).toFixed(1)} s; she said "${result.heard}").`)
+    say(`      Voz natural pronta (teste em ${(result.ms / 1000).toFixed(1)} s; ela disse "${result.heard}").`)
     return { profile, test: result, ok: true }
   }
-  say(`      Profile: light voice in the browser${profile.reason ? ` (${profile.reason})` : ''}. Models: ${size(bytes)} in ${modelsDir()}.`)
+  say(`      Perfil: voz leve, no navegador${profile.reason ? ` (${profile.reason})` : ''}. Modelos: ${size(bytes)} em ${modelsDir()}.`)
   return { profile, test: null, ok: true }
 }
 

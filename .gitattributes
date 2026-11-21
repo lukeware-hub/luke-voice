@@ -1,3 +1,5 @@
-*.cmd text eol=crlf
+# Kept with CRLF in the repository too: GitHub serves the stored bytes, and cmd.exe misreads a
+# batch file with LF line endings and UTF-8 text (it ran the comments as commands).
+*.cmd -text
 *.ps1 text eol=crlf
 *.sh text eol=lf

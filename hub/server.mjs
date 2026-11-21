@@ -122,10 +122,14 @@ export function windowCommand(url, { chrome = chromePath(), platform = process.p
   return [platform === 'darwin' ? 'open' : 'xdg-open', [url]]
 }
 
-export function openWindow(url) {
-  const [cmd, args] = windowCommand(url)
+export function openWindow(url, { command = windowCommand(url), log = () => {} } = {}) {
+  const [cmd, args] = command
   // windowsHide only for rundll32: Chrome opens its first window with the hidden show flag it is given.
-  spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: cmd === 'rundll32' }).unref()
+  const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: cmd === 'rundll32' })
+  // No browser to open (a Linux server without xdg-open): the hub keeps running; the window can be
+  // opened by hand at the URL /luke-voice status shows.
+  child.on('error', error => log(`the call window could not be opened: ${error.message}`))
+  child.unref()
 }
 
 // The engine must be prepared (again) when it never was, when a file of its profile is missing (a
@@ -274,7 +278,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       focused = session.name
       const startCall = Boolean(body.call)
       if (streams.size === 0) {
-        open(`http://127.0.0.1:${PORT}/?k=${windowKey}${startCall ? '&call=1' : ''}`)
+        open(`http://127.0.0.1:${PORT}/?k=${windowKey}${startCall ? '&call=1' : ''}`, { log })
       } else {
         broadcast({ type: 'focus', name: session.name, startCall })
       }

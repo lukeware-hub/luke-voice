@@ -31,61 +31,62 @@ No perfil gpu, o hub baixa a versão oficial b12556 do llama.cpp (fixada por sha
 
 `LUKE_VOICE_PROFILE=gpu` ou `light` força um perfil: variável de ambiente do instalador, ou do hub (ele prepara esse perfil quando iniciar de novo).
 
-## Instalação em 5 passos
+## Instalação em 3 passos
 
 Cada passo diz como saber que deu certo. Faça na ordem.
 
-**Ou deixe o Claude Code fazer:** com os passos 1 e 2 feitos, mande esta mensagem para o Claude Code: *"Instale o luke-voice seguindo https://github.com/lukeware-hub/luke-voice/blob/main/INSTALL.md"*. O [INSTALL.md](INSTALL.md) tem uma seção para agentes de IA com os comandos exatos.
+**Ou deixe o Claude Code fazer:** com o passo 1 feito, mande esta mensagem para o Claude Code: *"Instale o luke-voice seguindo https://github.com/lukeware-hub/luke-voice/blob/main/INSTALL.md"*. O [INSTALL.md](INSTALL.md) tem uma seção para agentes de IA com os comandos exatos.
 
 ### 1. Tenha o Claude Code funcionando
 
 Instale em [claude.com/claude-code](https://claude.com/claude-code), abra e entre na sua conta uma vez.
 **Deu certo quando:** você escreve uma mensagem no Claude Code e recebe resposta.
 
-### 2. Instale o Node.js 20 ou mais novo
+Não precisa de mais nada antes. O instalador traz o Node.js e o Git quando faltam (só para você: sem administrador e sem senha). O Google Chrome é o melhor para a janela da chamada, que abre num perfil só dela; qualquer navegador com microfone também funciona, mas talvez você precise liberar o microfone na mão.
 
-Baixe a versão **LTS** em [nodejs.org](https://nodejs.org) e instale com as opções padrão. O luke-voice usa o Node.js para rodar um pequeno servidor no seu computador.
-**Deu certo quando:** o comando `node -v` num terminal mostra `v20` ou maior.
+### 2. Rode o instalador
 
-### 3. Tenha o Google Chrome
+- **Windows:** aperte **Windows + R**, cole esta linha e aperte **Enter**:
 
-A janela da chamada abre no Chrome, num perfil só dela, então o seu Chrome normal não muda. Sem o Chrome, qualquer navegador com microfone funciona, mas talvez você precise liberar o microfone na mão.
-
-### 4. Rode o instalador
-
-- **Windows:** abra o PowerShell e cole esta linha:
-
-  ```powershell
-  powershell -c "irm https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/install-luke-voice-windows.cmd | iex"
+  ```
+  powershell -c "$env:LUKE_VOICE_PAUSE=1; irm https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/install-luke-voice-windows.cmd | iex"
   ```
 
-  Ou baixe o [install-luke-voice-windows.cmd](https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/install-luke-voice-windows.cmd) e dê dois cliques nele. Se o Windows disser "O Windows protegeu o computador", clique em **Mais informações** e depois em **Executar assim mesmo**.
+  A mesma linha funciona no PowerShell. Ou baixe o [install-luke-voice-windows.cmd](https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/install-luke-voice-windows.cmd) e dê dois cliques nele. Se o Windows disser "O Windows protegeu o computador", clique em **Mais informações** e depois em **Executar assim mesmo**.
 - **macOS / Linux:** cole isto no Terminal:
 
   ```bash
   curl -fsSL https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/install.sh | bash
   ```
 
-Quando ele perguntar **Which voice should Ceci use?** (qual voz a Ceci deve usar):
+Quando ele perguntar **Qual voz a Ceci deve usar?**:
 - Aperte **Enter** para a voz gratuita. Não precisa de mais nada.
-- Ou digite **e** para a ElevenLabs. Aí ele pede a **Key** (chave). Para pegar uma:
+- Ou digite **e** para a ElevenLabs. Aí ele pede a **Chave**. Para pegar uma:
   1. Crie uma conta em [elevenlabs.io](https://elevenlabs.io).
   2. Abra [elevenlabs.io/app/settings/api-keys](https://elevenlabs.io/app/settings/api-keys) e clique em **Create API key**. Se perguntar as permissões, deixe **Agents** e **Voices** liberadas.
   3. Cole a chave e aperte Enter. Ela fica escondida.
 
-O instalador tem 6 etapas. A última, **Downloading Ceci's voice (up to 3 GB, only once)** (baixando a voz da Ceci, até 3 GB, uma vez só), roda `node hub/setup.mjs`. Ela escolhe o perfil, baixa tudo e confere cada arquivo por sha256. Se o download for cortado, ele continua de onde parou. No perfil gpu, ela também faz um teste curto: a Ceci fala uma frase, os ouvidos dela escrevem de volta e o roteador responde a um cumprimento. Se o teste falhar, o setup baixa também a voz leve (de 320 a 480 MB) e as chamadas usam ela até o `/luke-voice setup` passar no teste.
+O instalador tem 6 etapas:
+1. Procura o Claude Code.
+2. Prepara o Node.js e o Git. O que faltar é baixado do site oficial, conferido por sha256 e guardado em `~/.luke-voice` só para você: o Node.js 24 LTS (cerca de 30 MB) e, no Windows, o MinGit, a versão portátil do Git para Windows (cerca de 40 MB). Sem git no macOS ou no Linux, o luke-voice é baixado como arquivo compactado.
+3. Instala o luke-voice no Claude Code.
+4. Pergunta a voz.
+5. Confere que o luke-voice está instalado e ativado.
+6. **Baixando a voz da Ceci (até 3 GB, só uma vez)** roda `node hub/setup.mjs`. Ela escolhe o perfil, baixa tudo e confere cada arquivo por sha256. Se o download for cortado, ele continua de onde parou. No perfil gpu, ela também faz um teste curto: a Ceci fala uma frase, os ouvidos dela escrevem de volta e o roteador responde a um cumprimento. Se o teste falhar, o setup baixa também a voz leve (de 320 a 480 MB) e as chamadas usam ela até o `/luke-voice setup` passar no teste.
 
-**Deu certo quando:** aparece a mensagem verde **Installation complete**. Se ele parar, leia a linha **What to do**, resolva aquilo e rode de novo.
+**Deu certo quando:** aparece a mensagem verde **Instalação concluída**. Se ele parar com **A instalação parou**, leia a linha **O que fazer**, resolva aquilo e rode de novo. Rodar de novo é sempre seguro.
 
-Para instalar sem perguntas, defina `LUKE_VOICE_PROVIDER=local` (ou `elevenlabs`) e `LUKE_VOICE_NO_PROMPT=1` antes de rodar. Acrescente `LUKE_VOICE_PROFILE=gpu` ou `light` para forçar o perfil. `LUKE_VOICE_REF=<branch ou tag>` instala essa versão em vez da `main`, para testar uma mudança.
+Para instalar sem perguntas, defina `LUKE_VOICE_NO_PROMPT=1` antes de rodar; acrescente `LUKE_VOICE_PROVIDER=local` (ou `elevenlabs`) para escolher a voz, e `LUKE_VOICE_PROFILE=gpu` ou `light` para forçar o perfil. `LUKE_VOICE_REF=<branch ou tag>` instala essa versão em vez da `main`, para testar uma mudança.
 
-### 5. Reinicie o Claude Code e ligue
+### 3. Abra o Claude Code
 
-1. **Feche o Claude Code por completo e abra de novo.** O `/reload-plugins` não basta para carregar uma instalação ou atualização nova.
-2. Acima do prompt aparece **✦ luke-voice: off**. Clique. Ele vira **on**, uma janela abre e a chamada começa sozinha.
-3. A primeira chamada:
-   - **Voz gratuita:** o instalador já baixou a voz. Se você atualizou pelo marketplace e nada foi baixado ainda, rode `/luke-voice setup`. Ou simplesmente ligue: a primeira chamada prepara a voz, com o progresso na janela.
+1. **Feche o Claude Code por completo e abra de novo.** Se o instalador acabou de instalar o Node.js ou o Git, abra por uma janela nova do terminal. O `/reload-plugins` não basta para carregar uma instalação ou atualização nova.
+2. Na primeira vez, o luke-voice liga sozinho, a janela da chamada abre e a Ceci cumprimenta você. É só falar.
+   - **Voz gratuita:** o instalador já baixou a voz. Se você atualizou pelo marketplace e nada foi baixado ainda, a primeira chamada prepara a voz, com o progresso na janela (ou rode `/luke-voice setup`).
    - **ElevenLabs:** o luke-voice cria um agente chamado `luke-voice` e adiciona a voz "Roberta" na sua conta.
+3. Depois disso: o **✦ luke-voice: on/off**, acima do prompt, liga e desliga, e o `/luke-voice call` começa uma chamada.
+
+**No Mac:** na primeira chamada, o Mac pergunta se o Chrome pode usar o microfone: clique em **Permitir**. Um Mac com chip Apple fica com a voz natural; um Mac com Intel fica com a voz leve.
 
 **Deu certo quando:** você ouve "Oi! Eu sou a Ceci. O que vamos fazer hoje?". Se faltar alguma coisa, digite `/luke-voice help`: ele confere a sua instalação e diz o que arrumar.
 
@@ -178,12 +179,26 @@ Sem nenhuma escolha, o luke-voice usa a ElevenLabs se houver chave salva, e a vo
 | A janela mostra **Hub offline** | Ligue o luke-voice no Claude Code; a janela volta sozinha. |
 | ElevenLabs: a chamada parou de conectar | Os minutos grátis do mês podem ter acabado. Veja o seu uso em elevenlabs.io, ou troque para a voz gratuita. |
 | A janela continua com o visual antigo | Feche o Claude Code por completo e abra de novo. |
-| Instalador: "Claude Code was not found" ou "Node.js was not found" | Faça o passo 1 ou o passo 2 e rode o instalador de novo. |
+| Instalador: "o Claude Code não foi encontrado" | Faça o passo 1 e rode o instalador de novo. |
 | Qualquer outra coisa | Digite `/luke-voice status` e mande o resultado para quem cuida do luke-voice. |
 
 ## Desinstalar
 
-No Claude Code, digite `/plugin`, escolha **luke-voice** e **Uninstall**. Ou rode `claude plugin uninstall luke-voice@luke-voice`.
+Uma linha remove tudo: o luke-voice do Claude Code, a voz baixada, e o Node.js e o Git que o instalador trouxe (e tira os dois do PATH). Ela pergunta antes de começar; o resto do computador não muda.
+
+- **Windows:** aperte **Windows + R**, cole esta linha e aperte **Enter**:
+
+  ```
+  powershell -c "$env:LUKE_VOICE_PAUSE=1; irm https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/uninstall-luke-voice-windows.cmd | iex"
+  ```
+
+- **macOS / Linux:** cole isto no Terminal:
+
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/uninstall.sh | bash
+  ```
+
+Para remover só o plugin e manter a voz: no Claude Code, digite `/plugin`, escolha **luke-voice** e **Uninstall**.
 
 ## Como funciona
 

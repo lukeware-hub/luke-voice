@@ -99,14 +99,14 @@ const WEAK_DEVICE = /llvmpipe|lavapipe|swiftshader|microsoft basic render|intel.
 // gpu when this platform has a build and a dedicated device with enough memory; light otherwise.
 // LUKE_VOICE_PROFILE=gpu|light overrides the choice.
 export function pickProfile({ key, devices = [], override = '' }) {
-  if (override === 'light') return { profile: 'light', reason: 'chosen' }
-  if (!key) return { profile: 'light', reason: 'no native build for this platform' }
+  if (override === 'light') return { profile: 'light', reason: 'escolhido' }
+  if (!key) return { profile: 'light', reason: 'sem versão nativa para este sistema' }
   const usable = devices.filter(d => !WEAK_DEVICE.test(d.name))
   const best = [...usable].sort((a, b) => b.mib - a.mib)[0]
-  if (override === 'gpu') return { profile: 'gpu', reason: 'chosen', device: (best ?? devices[0])?.name ?? null }
-  if (!best && devices.length) return { profile: 'light', reason: `only an integrated or software GPU (${devices[0].name})`, device: devices[0].name }
-  if (!best) return { profile: 'light', reason: 'no GPU found' }
-  if (best.mib < MIN_VRAM_MIB) return { profile: 'light', reason: `GPU with ${best.mib} MiB (needs ${MIN_VRAM_MIB})`, device: best.name }
+  if (override === 'gpu') return { profile: 'gpu', reason: 'escolhido', device: (best ?? devices[0])?.name ?? null }
+  if (!best && devices.length) return { profile: 'light', reason: `só placa de vídeo integrada ou por software (${devices[0].name})`, device: devices[0].name }
+  if (!best) return { profile: 'light', reason: 'nenhuma placa de vídeo encontrada' }
+  if (best.mib < MIN_VRAM_MIB) return { profile: 'light', reason: `placa de vídeo com ${best.mib} MiB (precisa de ${MIN_VRAM_MIB})`, device: best.name }
   return { profile: 'gpu', reason: `${best.name}, ${best.mib} MiB`, device: best.name }
 }
 
