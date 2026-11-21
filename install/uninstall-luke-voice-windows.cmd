@@ -77,7 +77,28 @@ if (Get-Command claude -ErrorAction SilentlyContinue) {
   Ok 'O Claude Code não está neste computador: nada a remover nele.'
 }
 
-Step 3 'Apagando a pasta do luke-voice'
+Step 3 'Tirando o Node.js e o Git do luke-voice do PATH'
+# Before the folder goes: a short (8.3) and a long spelling of the same folder are matched while
+# it still exists to be resolved.
+$roots = @($LvHome.TrimEnd('\'), $full) | Select-Object -Unique
+function Is-Ours($entry) {
+  $forms = @($entry.TrimEnd('\'))
+  try { $forms += [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($entry)).TrimEnd('\') } catch { }
+  foreach ($form in $forms) { foreach ($root in $roots) { if ($form.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) { return $true } } }
+  return $false
+}
+$key = Get-Item 'HKCU:\Environment'
+$userPath = [string]$key.GetValue('Path', '', 'DoNotExpandEnvironmentNames')
+$kept = @($userPath -split ';' | Where-Object { $_ -and -not (Is-Ours $_) })
+$next = $kept -join ';'
+if ($next -ne $userPath) {
+  Set-ItemProperty 'HKCU:\Environment' -Name Path -Value $next -Type ExpandString
+  [Environment]::SetEnvironmentVariable('LUKE_VOICE_PATH_CHANGED', '1', 'User')
+  [Environment]::SetEnvironmentVariable('LUKE_VOICE_PATH_CHANGED', $null, 'User')
+}
+Ok 'PATH limpo.'
+
+Step 4 'Apagando a pasta do luke-voice'
 if (Test-Path $full) {
   for ($try = 1; $try -le 3 -and (Test-Path $full); $try++) {
     Remove-Item -Recurse -Force $full -ErrorAction SilentlyContinue
@@ -86,18 +107,6 @@ if (Test-Path $full) {
   if (Test-Path $full) { Fail "não consegui apagar tudo em $full." 'Feche o Claude Code e a janela da chamada, e rode o desinstalador de novo.' }
 }
 Ok 'Pasta apagada.'
-
-Step 4 'Tirando o Node.js e o Git do luke-voice do PATH'
-$key = Get-Item 'HKCU:\Environment'
-$userPath = [string]$key.GetValue('Path', '', 'DoNotExpandEnvironmentNames')
-$kept = @($userPath -split ';' | Where-Object { $_ -and -not $_.TrimEnd('\').StartsWith($full, [StringComparison]::OrdinalIgnoreCase) })
-$next = $kept -join ';'
-if ($next -ne $userPath) {
-  Set-ItemProperty 'HKCU:\Environment' -Name Path -Value $next -Type ExpandString
-  [Environment]::SetEnvironmentVariable('LUKE_VOICE_PATH_CHANGED', '1', 'User')
-  [Environment]::SetEnvironmentVariable('LUKE_VOICE_PATH_CHANGED', $null, 'User')
-}
-Ok 'PATH limpo.'
 
 Write-Host ""
 Write-Host "  ======================================" -ForegroundColor Green
