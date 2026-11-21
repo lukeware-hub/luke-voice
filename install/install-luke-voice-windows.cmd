@@ -4,9 +4,10 @@ setlocal
 rem The path goes through the environment: a quote in it (C:\Users\O'Brien) would end a PowerShell string.
 set "LUKE_VOICE_SELF=%~f0"
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$s = [IO.File]::ReadAllText($env:LUKE_VOICE_SELF, [Text.Encoding]::UTF8); Invoke-Expression $s"
+set "LUKE_VOICE_CODE=%errorlevel%"
 echo.
 pause
-exit /b
+exit /b %LUKE_VOICE_CODE%
 #>
 
 # luke-voice installer for Windows. It installs Node.js when it is missing, installs the luke-voice
@@ -60,6 +61,11 @@ function Run-Claude([string[]]$CliArgs) {
   if ($r.code -ne 0) { Fail "o comando 'claude $($CliArgs -join ' ')' falhou." $r.out.Trim() }
   return $r.out
 }
+# With .NET, not Get-FileHash: Windows PowerShell started from PowerShell 7 can miss that cmdlet.
+function Get-Sha256($file) {
+  $stream = [IO.File]::OpenRead($file)
+  try { return (([Security.Cryptography.SHA256]::Create().ComputeHash($stream) | ForEach-Object { $_.ToString('x2') }) -join '') } finally { $stream.Dispose() }
+}
 function Node-Major {
   if (-not (Get-Command node -ErrorAction SilentlyContinue)) { return 0 }
   try { return [int](& node -p "process.versions.node.split('.')[0]") } catch { return 0 }
@@ -75,7 +81,7 @@ function Install-Node {
   } catch {
     Fail 'não consegui baixar o Node.js.' 'Confira a internet. Ou instale a versão LTS em https://nodejs.org.'
   }
-  if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() -ne $NodeSha256[$arch]) {
+  if ((Get-Sha256 $zip) -ne $NodeSha256[$arch]) {
     Remove-Item -Force $zip
     Fail 'o Node.js baixado não passou na conferência de segurança.' 'Rode o instalador de novo. Se repetir, instale a versão LTS em https://nodejs.org.'
   }
@@ -102,6 +108,8 @@ function Install-Node {
   }
   $env:Path = "$dir;$env:Path"
 }
+# Anything unexpected still ends with a message a person can act on, not a red stack trace.
+trap { Fail "algo inesperado aconteceu: $($_.Exception.Message)" 'Rode o instalador de novo. Se repetir, tire uma foto desta tela e abra um aviso em https://github.com/lukeware-hub/luke-voice/issues.' }
 
 Write-Host ""
 Write-Host "  Instalador do luke-voice" -ForegroundColor White
