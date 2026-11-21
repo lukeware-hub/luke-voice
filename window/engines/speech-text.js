@@ -48,6 +48,35 @@ const RESPELL = {
   elevenlabs: 'éleven labs',
 }
 
+// The native voice (Qwen3-TTS, told to speak Portuguese) reads some English tech words with
+// Portuguese rules ("token" as "toque", "cache" as "caixa", "merge" as "méxico"). Each spelling here
+// was picked by ear: several spellings per word in three sentences, kept only when the English word
+// came back more often, then checked on new sentences (whole: English terms heard 7/24 before,
+// 12/24 after; cut into chunks as the window does: 9/24 and 10/24, with "caixa", "toque" and
+// "mergulho" gone; no Portuguese word lost). A capital letter alone is enough for some. Words that no spelling
+// helped (branch, main, commit, hooks, TypeScript) stay as written. Keys are lower case.
+const NATIVE_RESPELL = {
+  merge: 'Merge',
+  feature: 'Feature',
+  'pull request': 'Pull Request',
+  backend: 'back-end',
+  frontend: 'Front End',
+  staging: 'Staging',
+  endpoint: 'end-point',
+  token: 'tôquen',
+  cache: 'quéche',
+  docker: 'dócker',
+  changelog: 'tchêindj log',
+  state: 'stêit',
+  store: 'Store',
+  'force push': 'fórce push',
+  readme: 'Read Me',
+}
+const NATIVE_RE = new RegExp(
+  `(?<![\\p{L}\\d-])(${Object.keys(NATIVE_RESPELL).sort((a, b) => b.length - a.length).map(k => k.replace(' ', '\\s+')).join('|')})(?![\\p{L}\\d-])`,
+  'giu',
+)
+
 const MAX_CHUNK = 220
 // The first chunk is short: on a CPU the voice takes ~0.7 s per second of audio, so the first sound comes sooner.
 const FIRST_CHUNK = 70
@@ -88,6 +117,11 @@ export function respell(text) {
   return String(text ?? '').replace(/\p{L}[\p{L}\d]*/gu, word => RESPELL[word.toLowerCase()] ?? word)
 }
 
+// English tech words in the spelling the native voice says best; anything else stays as written.
+export function respellNative(text) {
+  return String(text ?? '').replace(NATIVE_RE, word => NATIVE_RESPELL[word.toLowerCase().replace(/\s+/g, ' ')])
+}
+
 // Sentences; a sentence longer than `max` is cut at a comma or space. When the first sentence is
 // longer than `first`, it is cut at its first comma (if that comma is within twice `first`), so the
 // first audio starts sooner. Never mid-phrase for that early cut: the voice would pause where a
@@ -117,9 +151,9 @@ export function chunks(text, max = MAX_CHUNK, first = max) {
 }
 
 // Everything at once: what the voice gets, one chunk at a time. The browser voices (Kokoro, Piper)
-// read English words with Portuguese rules and need the respelling; the native voice (Qwen3-TTS)
-// knows them and is better without it.
+// read English words with Portuguese rules and need the full respelling; the native voice (Qwen3-TTS)
+// knows most of them and gets only its own short list.
 export function speechChunks(text, { isNative = false } = {}) {
   const spoken = spokenForms(plainText(text))
-  return isNative ? chunks(spoken, MAX_CHUNK, FIRST_CHUNK_NATIVE) : chunks(respell(spoken), MAX_CHUNK, FIRST_CHUNK)
+  return isNative ? chunks(respellNative(spoken), MAX_CHUNK, FIRST_CHUNK_NATIVE) : chunks(respell(spoken), MAX_CHUNK, FIRST_CHUNK)
 }

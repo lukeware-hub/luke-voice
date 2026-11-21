@@ -147,6 +147,8 @@ On 40 pt-BR sentences through the production path:
 - no sentence failed or looped;
 - word errors were 8% (Whisper large-v3-turbo), mostly English tech words ("branch", "main") and numbers written as digits.
 
+English tech words: the voice speaks Portuguese, so it reads some of them with Portuguese rules ("token" as "toque", "cache" as "caixa"). `speech-text.js` gives it its own spelling for 15 of them, picked by ear: several spellings per word, kept only when the English word came back more often. On 10 new sentences said whole, the ASR heard 12 of 24 English terms (was 7), with no Portuguese word lost. Through the window's real path, which cuts the first clause short, it heard 10 of 24 (was 9), and the plainly Portuguese readings ("caixa", "toque", "mergulho", "rei de mim") were gone. No spelling helped "branch", "main", "commit", "hooks" or "TypeScript" on this model, so they stay as written.
+
 Questions end with a Brazilian rise: the window raises the pitch of the last half second of a question after it is made, keeping its length (`window/engines/question-rise.js`). On 20 questions the end now rises +3.4 semitones (was +2.0, like a statement), and Whisper hears 9 of 20 as questions (was 6). The owner picked this by ear among three versions. `?voice-question=0` turns it off.
 
 ### Switching the voice

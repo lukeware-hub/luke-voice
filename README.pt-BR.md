@@ -147,6 +147,8 @@ Em 40 frases em pt-BR pelo caminho de produção:
 - nenhuma frase falhou nem entrou em repetição;
 - os erros de palavras ficaram em 8% (Whisper large-v3-turbo), quase todos em palavras técnicas em inglês ("branch", "main") e em números escritos com algarismos.
 
+Palavras técnicas em inglês: a voz fala português, então lê algumas delas com regras do português ("token" vira "toque", "cache" vira "caixa"). O `speech-text.js` dá a ela uma grafia própria para 15 delas, escolhida de ouvido: várias grafias por palavra, e só ficou a que trazia a palavra em inglês de volta mais vezes. Em 10 frases novas ditas inteiras, o reconhecedor ouviu 12 de 24 termos em inglês (antes 7), sem perder nenhuma palavra em português. Pelo caminho real da janela, que corta a primeira oração mais curta, ouviu 10 de 24 (antes 9), e as leituras claramente em português ("caixa", "toque", "mergulho", "rei de mim") sumiram. Nenhuma grafia ajudou "branch", "main", "commit", "hooks" ou "TypeScript" neste modelo, então elas ficam como estão.
+
 As perguntas terminam subindo, do jeito brasileiro: a janela sobe o tom do último meio segundo de uma pergunta depois que ela é gerada, sem mudar a duração (`window/engines/question-rise.js`). Em 20 perguntas, o fim agora sobe +3,4 semitons (antes +2,0, como uma afirmação), e o Whisper reconhece 9 de 20 como perguntas (antes 6). O dono escolheu essa versão de ouvido, entre três. `?voice-question=0` desliga.
 
 ### Trocar a voz
