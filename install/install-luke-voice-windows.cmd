@@ -152,9 +152,9 @@ Step 2 'Preparando o Node.js e o Git'
 $installedTools = $false
 # Ones this installer put here before are used even if this window does not see them yet.
 $ownNode = Join-Path $LvHome 'node'
-if ((Node-Major) -lt 20 -and (Test-Path (Join-Path $ownNode 'node.exe'))) { $env:Path = "$ownNode;$env:Path" }
+if ((Node-Major) -lt 20 -and (Test-Path (Join-Path $ownNode 'node.exe'))) { Add-UserPath $ownNode }
 $ownGit = Join-Path $LvHome 'git\cmd'
-if (-not (Has-Git) -and (Test-Path (Join-Path $ownGit 'git.exe'))) { $env:Path = "$ownGit;$env:Path" }
+if (-not (Has-Git) -and (Test-Path (Join-Path $ownGit 'git.exe'))) { Add-UserPath $ownGit }
 $major = Node-Major
 if ($major -eq 0) {
   Say "      O Node.js não está instalado. Instalando o Node.js $NodeVersion só para você (cerca de 30 MB)..."

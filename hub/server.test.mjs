@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 
 process.env.LUKE_VOICE_HOME = mkdtempSync(join(tmpdir(), 'luke-voice-test-'))
-const { chromeArgs, createHub, loadSecrets, needsPrepare, windowCommand } = await import('./server.mjs')
+const { chromeArgs, createHub, loadSecrets, needsPrepare, openWindow, windowCommand } = await import('./server.mjs')
 
 const SERVICE = 'service-token'
 const WINDOW = 'window-key'
@@ -640,4 +640,11 @@ test('without Chrome, the default browser gets the whole URL (on Windows not thr
   assert.deepEqual(windowCommand(url, { chrome: null, platform: 'darwin' }), ['open', [url]])
   assert.deepEqual(windowCommand(url, { chrome: null, platform: 'linux' }), ['xdg-open', [url]])
   assert.equal(windowCommand(url, { chrome: 'C:/chrome.exe', platform: 'win32', profile: 'P' })[1][0], `--app=${url}`)
+})
+
+test('with no program to open the window (no xdg-open), the hub keeps running and says why', async () => {
+  const said = []
+  openWindow('http://127.0.0.1:1/?k=x', { command: ['luke-voice-no-such-browser', []], log: line => said.push(line) })
+  for (let i = 0; i < 100 && said.length === 0; i++) await new Promise(resolve => setTimeout(resolve, 20))
+  assert.match(said[0] ?? '', /could not be opened: .*ENOENT/)
 })
