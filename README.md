@@ -73,7 +73,7 @@ When it asks **Which voice should Ceci use?**:
   2. Open [elevenlabs.io/app/settings/api-keys](https://elevenlabs.io/app/settings/api-keys) and click **Create API key**. If it asks which permissions, keep **Agents** and **Voices** allowed.
   3. Paste the key and press Enter. It stays hidden.
 
-The installer has 6 steps. The last one, **Downloading Ceci's voice (up to 3 GB, only once)**, runs `node hub/setup.mjs`. It picks the profile, downloads everything and checks each file by sha256. Downloads can resume if they are cut. On the gpu profile it also runs a short test: Ceci says a line, her ears write it back, and the router answers a greeting. If the test fails, setup downloads the light voice too (about 320 MB) and calls use it until `/luke-voice setup` passes the test.
+The installer has 6 steps. The last one, **Downloading Ceci's voice (up to 3 GB, only once)**, runs `node hub/setup.mjs`. It picks the profile, downloads everything and checks each file by sha256. Downloads can resume if they are cut. On the gpu profile it also runs a short test: Ceci says a line, her ears write it back, and the router answers a greeting. If the test fails, setup downloads the light voice too (320 to 480 MB) and calls use it until `/luke-voice setup` passes the test.
 
 **Done when:** it ends with the green message **Installation complete**. If it stops, read the **What to do** line, fix that one thing and run it again.
 

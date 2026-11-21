@@ -73,7 +73,7 @@ Quando ele perguntar **Which voice should Ceci use?** (qual voz a Ceci deve usar
   2. Abra [elevenlabs.io/app/settings/api-keys](https://elevenlabs.io/app/settings/api-keys) e clique em **Create API key**. Se perguntar as permissões, deixe **Agents** e **Voices** liberadas.
   3. Cole a chave e aperte Enter. Ela fica escondida.
 
-O instalador tem 6 etapas. A última, **Downloading Ceci's voice (up to 3 GB, only once)** (baixando a voz da Ceci, até 3 GB, uma vez só), roda `node hub/setup.mjs`. Ela escolhe o perfil, baixa tudo e confere cada arquivo por sha256. Se o download for cortado, ele continua de onde parou. No perfil gpu, ela também faz um teste curto: a Ceci fala uma frase, os ouvidos dela escrevem de volta e o roteador responde a um cumprimento. Se o teste falhar, o setup baixa também a voz leve (cerca de 320 MB) e as chamadas usam ela até o `/luke-voice setup` passar no teste.
+O instalador tem 6 etapas. A última, **Downloading Ceci's voice (up to 3 GB, only once)** (baixando a voz da Ceci, até 3 GB, uma vez só), roda `node hub/setup.mjs`. Ela escolhe o perfil, baixa tudo e confere cada arquivo por sha256. Se o download for cortado, ele continua de onde parou. No perfil gpu, ela também faz um teste curto: a Ceci fala uma frase, os ouvidos dela escrevem de volta e o roteador responde a um cumprimento. Se o teste falhar, o setup baixa também a voz leve (de 320 a 480 MB) e as chamadas usam ela até o `/luke-voice setup` passar no teste.
 
 **Deu certo quando:** aparece a mensagem verde **Installation complete**. Se ele parar, leia a linha **What to do**, resolva aquilo e rode de novo.
 
