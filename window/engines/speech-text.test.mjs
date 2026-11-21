@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { chunks, plainText, respell, speechChunks } from './speech-text.js'
+import { chunks, plainText, respell, respellNative, speechChunks } from './speech-text.js'
 
 test('markdown and code are dropped, the words stay', () => {
   const text = '## Pronto\n\nCorrigi o **login** em `auth.ts`:\n\n```ts\nconst x = 1\n```\n- veja [o PR](https://github.com/x/y/pull/2)'
@@ -43,9 +43,23 @@ test('times and percentages are written the way a Brazilian reads them; plain nu
   assert.equal(spokenForms('A porta 4848 e a versão 0.8.1.'), 'A porta 4848 e a versão 0.8.1.')
 })
 
-test('the native voice keeps English tech words as they are; the browser voices get them respelled', () => {
+test('the native voice keeps most English tech words as they are; the browser voices get them respelled', () => {
   assert.deepEqual(speechChunks('Fiz o commit na branch main.', { isNative: true }), ['Fiz o commit na branch main.'])
   assert.deepEqual(speechChunks('Fiz o commit na branch main.'), ['Fiz o comít na brentch main.'])
+})
+
+test('the native voice gets its own spelling for the tech words it says in Portuguese, in any case', () => {
+  assert.equal(respellNative('O TOKEN fica no cache, e o Backend chama o endpoint.'), 'O tôquen fica no quéche, e o back-end chama o end-point.')
+  assert.equal(respellNative('Abri o pull  request da feature e fiz o merge.'), 'Abri o Pull Request da Feature e fiz o Merge.')
+  assert.equal(respellNative('Sem force push; atualizei o README e o changelog.'), 'Sem fórce push; atualizei o Read Me e o tchêindj log.')
+  assert.deepEqual(speechChunks('O frontend lê o state do store.', { isNative: true }), ['O Front End lê o stêit do Store.'])
+})
+
+test('the native spelling touches whole words only, and leaves the rest of the sentence alone', () => {
+  for (const text of ['Os tokens e o cached ficam no back-end.', 'A mergeada do dockerfile.', 'A casa é azul, e o estado é bom.', 'O caché do cachecol.']) {
+    assert.equal(respellNative(text), text)
+  }
+  assert.equal(respellNative('Docker, token.'), 'dócker, tôquen.')
 })
 
 test('the native voice starts on one short clause, so the first audio comes sooner', () => {
