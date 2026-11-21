@@ -476,6 +476,9 @@ test('speech goes to the native engine: /stt sends the WAV with the glossary, /t
     assert.deepEqual([seen.tts.temperature, seen.tts.top_p, seen.tts.seed], [0.75, 0.9, 7])
     assert.equal(seen.tts.n_predict, Math.ceil('Comecei, te aviso quando terminar.'.length * 1.5) + 25)
     assert.equal((await post('/tts', JSON.stringify({ text: '  ' }), 'application/json')).status, 400)
+    // The engine's small context holds ~380 characters: a longer text is capped, not cut mid-audio.
+    await post('/tts', JSON.stringify({ text: 'a'.repeat(500) }), 'application/json')
+    assert.equal(seen.tts.input.length, 360)
   } finally {
     hub2.closeAllConnections()
     hub2.close()

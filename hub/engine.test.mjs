@@ -36,6 +36,12 @@ test('every native service names models that exist in the manifest, and the gpu 
   assert.ok(bytes < 3e9, `${(bytes / 1e9).toFixed(2)} GB`)
 })
 
+test('the voice runs with a small context and batch, which saves video memory and keeps the audio identical', () => {
+  const args = SERVICES.tts.args(['m.gguf', 'mm.gguf'])
+  const flag = name => args[args.indexOf(name) + 1]
+  assert.deepEqual([flag('-c'), flag('-ub'), flag('-np'), flag('-ngl')], ['1024', '256', '1', '99'])
+})
+
 test('each profile downloads its own groups at install time, within budget', () => {
   assert.deepEqual(profileGroups('gpu', [{ name: 'Vulkan0' }]), ['turn', 'native'])
   assert.deepEqual(profileGroups('light', []), ['turn', 'light', 'light-cpu'])

@@ -26,6 +26,7 @@ luke-voice picks the profile by itself at install time:
 | Listens | Qwen3-ASR 0.6B. | Whisper base in the browser. |
 | Small talk | An instant local router, Qwen3.5 0.8B on the CPU. | Goes to Claude Haiku like everything else. |
 | Download | About 2.8 GB, once. No Python, no PyTorch. | About 320 MB, once (about 480 MB on a machine with a small GPU, where Kokoro runs in fp32 on WebGPU). |
+| Video memory in a call | About 5.0 GB for the voice and the ears together (measured on an RTX 3060 Ti). | None beyond the browser's. |
 
 On the gpu profile, the hub downloads llama.cpp's official release build b12556 (pinned by sha256, about 39 MB) and runs three local `llama-server` processes: Ceci's voice, her ears and the router.
 
