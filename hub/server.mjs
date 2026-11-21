@@ -20,6 +20,7 @@ const VERSION = JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'plugin.jso
 const MAX_BODY = 64 * 1024
 // One utterance as 16 kHz PCM16 WAV: 30 s is under 1 MB.
 const MAX_AUDIO = 4 * 1024 * 1024
+const MAX_TTS_CHARS = 360
 const MAX_ACTIVITY = 60
 const ACK_WAIT_MS = 15_000
 // The router answers in ~0.3 s; past this, the utterance goes to the brain instead.
@@ -440,7 +441,9 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     const url = engine?.url('tts')
     if (!url) return send(res, 503, { error: 'The native voice engine is not running.' })
     const body = await readBody(req)
-    const text = String(body.text ?? '').slice(0, 2000).trim()
+    // The window sends chunks of at most 220 characters. The engine's 1024 context holds the
+    // reference plus ~380 characters; past that the audio would be cut short.
+    const text = String(body.text ?? '').slice(0, MAX_TTS_CHARS).trim()
     if (!text) return send(res, 400, { error: 'Nothing to say.' })
     voiceRefB64 ??= voiceRef && existsSync(voiceRef) ? readFileSync(voiceRef).toString('base64') : ''
     // The transcript of the reference: with it, llama.cpp clones Ceci from the reference codes (ICL).

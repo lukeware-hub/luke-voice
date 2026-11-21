@@ -44,7 +44,9 @@ export const SERVICES = {
   tts: {
     models: ['native/qwen3-tts-0.6b-base-q8_0.gguf', 'native/qwen3-tts-0.6b-base-mmproj-icl-q8_0.gguf'],
     // One slot: every request reuses the cached reference voice, so the first audio comes in ~100 ms.
-    args: ([model, mmproj]) => ['-m', model, '-mm', mmproj, '-ngl', '99', '-c', '2048', '-np', '1'],
+    // A 1024 context and 256 batch fit the reference plus the longest chunk (220 characters) and
+    // save ~420 MiB of video memory (3.7 to 3.3 GiB) with byte-identical audio and the same speed.
+    args: ([model, mmproj]) => ['-m', model, '-mm', mmproj, '-ngl', '99', '-c', '1024', '-ub', '256', '-np', '1'],
   },
   asr: {
     models: ['native/qwen3-asr-0.6b-q8_0.gguf', 'native/qwen3-asr-0.6b-mmproj-q8_0.gguf'],
