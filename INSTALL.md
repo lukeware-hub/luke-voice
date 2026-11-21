@@ -88,4 +88,15 @@ In Claude Code, `/luke-voice voz local` or `/luke-voice voz elevenlabs` switches
 
 ## Uninstall
 
-In Claude Code, type `/plugin`, choose **luke-voice** and select **Uninstall**. Or run `claude plugin uninstall luke-voice@luke-voice` in a terminal. The downloaded voice, and the Node.js and Git the installer brought, are in the `.luke-voice` folder in your home folder; delete it to free the space.
+One line removes everything: luke-voice from Claude Code, the downloaded voice, and the Node.js and Git the installer brought. It asks before it starts.
+
+- Windows (Windows + R, or PowerShell):
+  ```
+  powershell -c "$env:LUKE_VOICE_PAUSE=1; irm https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/uninstall-luke-voice-windows.cmd | iex"
+  ```
+- macOS or Linux:
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/uninstall.sh | bash
+  ```
+
+For AI agents: add `LUKE_VOICE_NO_PROMPT=1` (as in step 2 above) only when the user asked to remove luke-voice.

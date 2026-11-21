@@ -86,6 +86,8 @@ Para instalar sem perguntas, defina `LUKE_VOICE_NO_PROMPT=1` antes de rodar; acr
    - **ElevenLabs:** o luke-voice cria um agente chamado `luke-voice` e adiciona a voz "Roberta" na sua conta.
 3. Depois disso: o **✦ luke-voice: on/off**, acima do prompt, liga e desliga, e o `/luke-voice call` começa uma chamada.
 
+**No Mac:** na primeira chamada, o Mac pergunta se o Chrome pode usar o microfone: clique em **Permitir**. Um Mac com chip Apple fica com a voz natural; um Mac com Intel fica com a voz leve.
+
 **Deu certo quando:** você ouve "Oi! Eu sou a Ceci. O que vamos fazer hoje?". Se faltar alguma coisa, digite `/luke-voice help`: ele confere a sua instalação e diz o que arrumar.
 
 ## Como usar
@@ -182,7 +184,21 @@ Sem nenhuma escolha, o luke-voice usa a ElevenLabs se houver chave salva, e a vo
 
 ## Desinstalar
 
-No Claude Code, digite `/plugin`, escolha **luke-voice** e **Uninstall**. Ou rode `claude plugin uninstall luke-voice@luke-voice`. A voz, e o Node.js e o Git que o instalador trouxe, ficam na pasta `.luke-voice` da sua pasta pessoal; apague para liberar o espaço.
+Uma linha remove tudo: o luke-voice do Claude Code, a voz baixada, e o Node.js e o Git que o instalador trouxe (e tira os dois do PATH). Ela pergunta antes de começar; o resto do computador não muda.
+
+- **Windows:** aperte **Windows + R**, cole esta linha e aperte **Enter**:
+
+  ```
+  powershell -c "$env:LUKE_VOICE_PAUSE=1; irm https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/uninstall-luke-voice-windows.cmd | iex"
+  ```
+
+- **macOS / Linux:** cole isto no Terminal:
+
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/uninstall.sh | bash
+  ```
+
+Para remover só o plugin e manter a voz: no Claude Code, digite `/plugin`, escolha **luke-voice** e **Uninstall**.
 
 ## Como funciona
 

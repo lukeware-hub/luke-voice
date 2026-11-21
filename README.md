@@ -86,6 +86,8 @@ To install without questions, set `LUKE_VOICE_NO_PROMPT=1` before you run it; ad
    - **ElevenLabs:** luke-voice creates an agent named `luke-voice` and adds the voice "Roberta" to your account.
 3. From then on: **✦ luke-voice: on/off** above the prompt turns it on and off, and `/luke-voice call` starts a call.
 
+**On a Mac:** the first call asks whether Chrome may use the microphone: click **Allow**. A Mac with Apple silicon gets the natural voice; an Intel Mac gets the light voice.
+
 **Done when:** you hear "Oi! Eu sou a Ceci. O que vamos fazer hoje?". If anything is missing, type `/luke-voice help`: it checks your setup and says what to fix.
 
 ## Use
@@ -182,7 +184,21 @@ With no choice at all, luke-voice uses ElevenLabs while a key is saved, and the 
 
 ## Uninstall
 
-In Claude Code, type `/plugin`, choose **luke-voice** and **Uninstall**. Or run `claude plugin uninstall luke-voice@luke-voice`. The voice, and the Node.js and Git the installer brought, are in the `.luke-voice` folder in your home folder; delete it to free the space.
+One line removes everything: luke-voice from Claude Code, the downloaded voice, and the Node.js and Git the installer brought (and takes them off the PATH). It asks before it starts; nothing else on the computer changes.
+
+- **Windows:** press **Windows + R**, paste this line and press **Enter**:
+
+  ```
+  powershell -c "$env:LUKE_VOICE_PAUSE=1; irm https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/uninstall-luke-voice-windows.cmd | iex"
+  ```
+
+- **macOS / Linux:** paste this in the Terminal:
+
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/uninstall.sh | bash
+  ```
+
+To remove only the mod and keep the voice: in Claude Code, type `/plugin`, choose **luke-voice** and **Uninstall**.
 
 <details>
 <summary>Manual install (for developers)</summary>
