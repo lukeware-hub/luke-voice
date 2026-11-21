@@ -414,6 +414,17 @@ test('a stopped task is not reported; its later, finished run is reported once',
   expect(done[0]).toContain('Achei dois pontos.')
 })
 
+test('subscribe says which luke-voice this session runs, so the hub never asks an older one to think', async ($, on) => {
+  const { calls } = engine(on)
+  on('fs.read', () => ({ value: '{"version":"0.9.6"}' }))
+
+  await $.command.run(run(''))
+  await until(() => calls.some(c => c.path === '/subscribe'))
+
+  expect(calls.find(c => c.path === '/subscribe')?.body.version).toBe('0.9.6')
+  await $.command.run(run(''))
+})
+
 test('/luke-voice help says what is missing and teaches every step, in Portuguese', async ($, on) => {
   engine(on)
   on('fs.read', () => ({ value: '{"version":"9.9.9"}' }))

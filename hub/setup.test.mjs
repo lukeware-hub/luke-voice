@@ -32,9 +32,25 @@ test('the gpu profile is tested; a failed test says the light voice will be used
   assert.equal(ok.ok, true)
   assert.match(passed.lines.join(''), /Natural voice ready.*Oi, eu sou a Ceci/)
   const failed = sink()
-  const bad = await setup({ out: failed.out, prepare: async () => gpu, test: async () => ({ ok: false, ms: 1, heard: '', problems: ['the tts server did not start'] }) })
+  const asked = []
+  const prepare = async options => {
+    asked.push(options)
+    return options.override === 'light' ? { profile: 'light', reason: options.reason, devices: options.devices } : gpu
+  }
+  const bad = await setup({ out: failed.out, prepare, test: async () => ({ ok: false, ms: 1, heard: '', problems: ['the tts server did not start'] }) })
   assert.equal(bad.ok, false)
-  assert.match(failed.lines.join(''), /tts server did not start[\s\S]*light voice/)
+  assert.match(failed.lines.join(''), /tts server did not start[\s\S]*light voice[\s\S]*Light voice ready/)
+  // The light profile is saved (prepared) in its place, so calls really use the light voice.
+  assert.equal(asked.length, 2)
+  assert.equal(asked[1].override, 'light')
+  assert.deepEqual(asked[1].devices, gpu.devices)
+  assert.match(asked[1].reason, /failed its test: the tts server did not start/)
+  assert.equal(bad.fallback.profile, 'light')
+  // With no internet for the light voice either, setup still ends and says so.
+  const offline = sink()
+  const worse = await setup({ out: offline.out, prepare: async o => { if (o.override === 'light') throw new Error('fetch failed'); return gpu }, test: async () => ({ ok: false, ms: 1, heard: '', problems: ['x'] }) })
+  assert.equal(worse.ok, false)
+  assert.match(offline.lines.join(''), /could not be downloaded either: fetch failed/)
 })
 
 test('the light profile needs no test', async () => {

@@ -66,12 +66,13 @@ These steps install luke-voice with no questions. Run them in a terminal on the 
 2. **Install, with no prompts.** Run the installer for the user's system:
    - Windows (PowerShell):
      ```powershell
-     $env:LUKE_VOICE_NO_PROMPT='1'; $env:LUKE_VOICE_PROVIDER='local'; powershell -c "irm https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/install-luke-voice-windows.cmd | iex"
+     $env:LUKE_VOICE_NO_PROMPT='1'; powershell -c "irm https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/install-luke-voice-windows.cmd | iex"
      ```
    - macOS or Linux:
      ```bash
-     curl -fsSL https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/install.sh | LUKE_VOICE_NO_PROMPT=1 LUKE_VOICE_PROVIDER=local bash
+     curl -fsSL https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/install.sh | LUKE_VOICE_NO_PROMPT=1 bash
      ```
+   - The voice: a new install gets the free voice; an existing one keeps the voice it has (someone with an ElevenLabs key stays on ElevenLabs). Set `LUKE_VOICE_PROVIDER=local` or `elevenlabs` only when the user asked for that voice.
    - It can take several minutes (step 6 downloads up to 3 GB). Allow a timeout of at least 30 minutes, or run it in the background and wait for it to end.
 3. **Check the result:**
    - The output ends with `Installation complete: luke-voice <version>`.
@@ -81,6 +82,7 @@ These steps install luke-voice with no questions. Run them in a terminal on the 
 5. **Tell the user:** close Claude Code completely and open it again, click **✦ luke-voice: off**, then type `/luke-voice call`.
 
 Options (environment variables, all optional):
+- `LUKE_VOICE_PROVIDER=local|elevenlabs`: the voice, when the user chose one.
 - `LUKE_VOICE_PROFILE=gpu|light`: force the natural voice on the graphics card, or the light voice.
 - `LUKE_VOICE_REF=<branch or tag>`: install that version instead of `main`, to test a change.
 

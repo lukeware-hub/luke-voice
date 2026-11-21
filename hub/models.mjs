@@ -2,7 +2,7 @@
 // ~/.luke-voice/models (at install time by setup.mjs, or on first use), resumed when a download is
 // cut, and checked before use. The hub serves them to the call window at /models/.
 import { createHash } from 'node:crypto'
-import { createReadStream, createWriteStream, existsSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs'
+import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -227,25 +227,89 @@ async function download(entry, file, { request, onProgress }) {
   return file
 }
 
-// A verified file at `file` for `entry` ({ url, sha256, size }), downloading it if needed.
-export async function ensureFile(entry, file, { request = fetch, onProgress } = {}) {
-  if (verified.has(file) && sizeOf(file) === entry.size) return file
-  if (sizeOf(file) === entry.size && (await sha256Of(file)) === entry.sha256) {
-    verified.add(file)
-    return file
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+
+const isAlive = pid => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return error.code === 'EPERM'
   }
-  if (!inFlight.has(file)) {
+}
+
+async function isGood(entry, file) {
+  if (sizeOf(file) !== entry.size || (await sha256Of(file)) !== entry.sha256) return false
+  verified.add(file)
+  return true
+}
+
+// Another process can download the same file at the same time: the hub on a first call, and
+// setup.mjs from the installer or /luke-voice setup. Both would write the same `.part`, and both
+// downloads would fail their check. `${file}.lock` holds the writer's pid; the other process waits
+// for it (showing its progress), then uses the file. A lock whose process is gone, or whose
+// download stopped growing for `staleMs`, is taken over.
+async function downloadLocked(entry, file, { request, onProgress, pollMs, staleMs }) {
+  const lock = `${file}.lock`
+  const part = `${file}.part`
+  mkdirSync(dirname(file), { recursive: true })
+  for (;;) {
+    try {
+      writeFileSync(lock, String(process.pid), { flag: 'wx' })
+      break
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error
+    }
+    let owner = 0
+    try {
+      owner = Number(readFileSync(lock, 'utf8'))
+    } catch {
+      continue // Released meanwhile.
+    }
+    if (owner && (owner === process.pid || !isAlive(owner))) {
+      rmSync(lock, { force: true })
+      continue
+    }
+    let seen = sizeOf(part)
+    let grewAt = Date.now()
+    while (existsSync(lock)) {
+      await sleep(pollMs)
+      const now = sizeOf(part)
+      if (now !== seen) {
+        seen = now
+        grewAt = Date.now()
+        if (now) onProgress?.(now, entry.size)
+      } else if (Date.now() - grewAt > staleMs) {
+        rmSync(lock, { force: true })
+      }
+    }
+    if (await isGood(entry, file)) return file
+  }
+  try {
+    // The other process may have finished just before this one took the lock.
+    if (await isGood(entry, file)) return file
     rmSync(file, { force: true })
-    inFlight.set(file, download(entry, file, { request, onProgress }).finally(() => inFlight.delete(file)))
+    return await download(entry, file, { request, onProgress })
+  } finally {
+    rmSync(lock, { force: true })
+  }
+}
+
+// A verified file at `file` for `entry` ({ url, sha256, size }), downloading it if needed.
+export async function ensureFile(entry, file, { request = fetch, onProgress, pollMs = 1000, staleMs = 120_000 } = {}) {
+  if (verified.has(file) && sizeOf(file) === entry.size) return file
+  if (await isGood(entry, file)) return file
+  if (!inFlight.has(file)) {
+    inFlight.set(file, downloadLocked(entry, file, { request, onProgress, pollMs, staleMs }).finally(() => inFlight.delete(file)))
   }
   return inFlight.get(file)
 }
 
 // The local path of a verified model file, downloading it if needed. Null for an unknown path.
-export async function ensureModel(path, { dir = modelsDir(), request = fetch, onProgress } = {}) {
+export async function ensureModel(path, { dir = modelsDir(), ...options } = {}) {
   const entry = MODELS[path]
   if (!entry) return null
-  return ensureFile(entry, join(dir, ...path.split('/')), { request, onProgress })
+  return ensureFile(entry, join(dir, ...path.split('/')), options)
 }
 
 // What is on disk for a group of models (or all): how many files and bytes, of how many.

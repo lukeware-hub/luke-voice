@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 
 process.env.LUKE_VOICE_HOME = mkdtempSync(join(tmpdir(), 'luke-voice-test-'))
-const { chromeArgs, createHub, loadSecrets } = await import('./server.mjs')
+const { chromeArgs, createHub, loadSecrets, needsPrepare, windowCommand } = await import('./server.mjs')
 
 const SERVICE = 'service-token'
 const WINDOW = 'window-key'
@@ -93,7 +93,7 @@ test('every external script on the page carries an integrity hash, and the page 
     assert.match(tag, /\bintegrity="sha(256|384|512)-[A-Za-z0-9+/=]+"/)
     assert.match(tag, /\bcrossorigin="anonymous"/)
   }
-  for (const path of ['/app.js', '/guard.js', '/engines/elevenlabs.js', '/engines/local.js', '/engines/speech-text.js', '/engines/fast-path.js', '/engines/turn-join.js', '/engines/question-rise.js', '/engines/vad.js', '/engines/piper-ids.js', '/engines/mic-worklet.js', '/engines/voice-worker.js']) {
+  for (const path of ['/app.js', '/guard.js', '/engines/elevenlabs.js', '/engines/local.js', '/engines/speech-text.js', '/engines/fast-path.js', '/engines/turn-join.js', '/engines/question-rise.js', '/engines/progress.js', '/engines/vad.js', '/engines/piper-ids.js', '/engines/mic-worklet.js', '/engines/voice-worker.js']) {
     const res = await call('GET', path)
     assert.equal(res.status, 200)
     assert.doesNotMatch(res.body, /\bfrom\s*['"]https?:|import\s*\(\s*['"]https?:/)
@@ -352,7 +352,7 @@ test('vendored files are served from the hub, unknown ones are 404, and the page
 })
 
 test('the brain turn goes to the focused session as a think command, and its JSON reply comes back', async () => {
-  const s1 = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/brainy' } })).body
+  const s1 = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/brainy', version: '0.9.6' } })).body
   await call('POST', '/focus', { key: WINDOW, body: { name: s1.name } })
   const asked = call('POST', '/brain', { key: WINDOW, body: { kind: 'user', text: 'oi', context: Array(20).fill('x'), turns: [{ role: 'user', text: 'oi' }] } })
   const inbox = await call('GET', '/inbox?wait=2000', { auth: s1.token })
@@ -373,6 +373,27 @@ test('the brain turn goes to the focused session as a think command, and its JSO
   assert.equal(failed.status, 502)
   assert.match(failed.body.error, /no credits/)
   await call('POST', '/unsubscribe', { auth: s1.token })
+})
+
+test('a session from an older luke-voice (no version, no voice) is never asked to think', async () => {
+  // 0.7.9 handed any command it did not know to Claude as a prompt: "…pass this on: undefined".
+  const old = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/oldie' } })).body
+  await call('POST', '/focus', { key: WINDOW, body: { name: old.name } })
+  const reply = await call('POST', '/brain', { key: WINDOW, body: { kind: 'user', text: 'oi' } })
+  assert.equal(reply.status, 200)
+  assert.match(reply.body.say, new RegExp(`${old.name} está com uma versão antiga`))
+  const inbox = await call('GET', '/inbox?wait=50', { auth: old.token })
+  assert.equal((inbox.body.commands ?? []).length, 0, 'no think command reached the old session')
+  // A 0.9.5 session sends its voice but no version: it can think.
+  const s095 = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/ninefive', provider: 'local' } })).body
+  await call('POST', '/focus', { key: WINDOW, body: { name: s095.name } })
+  const asked = call('POST', '/brain', { key: WINDOW, body: { kind: 'user', text: 'oi' } })
+  const command = (await call('GET', '/inbox?wait=2000', { auth: s095.token })).body.commands[0]
+  assert.equal(command.type, 'think')
+  await call('POST', '/ack', { auth: s095.token, body: { id: command.id, ok: true, message: JSON.stringify({ say: 'Oi!', tool: null, pending: null }) } })
+  assert.equal((await asked).body.say, 'Oi!')
+  await call('POST', '/unsubscribe', { auth: old.token })
+  await call('POST', '/unsubscribe', { auth: s095.token })
 })
 
 test('with no Claude session, the brain says how to connect one instead of failing', async () => {
@@ -598,4 +619,25 @@ test('loadSecrets keeps the window key across hub restarts', () => {
   assert.equal(second.windowKey, first.windowKey)
   assert.equal(second.serviceToken, first.serviceToken)
   assert.ok(first.windowKey.length > 0)
+})
+
+test('the engine is prepared again when it never was, misses a file, or LUKE_VOICE_PROFILE asks for the other profile', () => {
+  const ready = () => true
+  assert.equal(needsPrepare(null, { isReady: ready }), true)
+  assert.equal(needsPrepare({ profile: 'gpu' }, { isReady: () => false }), true)
+  assert.equal(needsPrepare({ profile: 'gpu' }, { isReady: ready }), false)
+  assert.equal(needsPrepare({ profile: 'gpu' }, { isReady: ready, override: 'light' }), true)
+  assert.equal(needsPrepare({ profile: 'light' }, { isReady: ready, override: 'gpu' }), true)
+  assert.equal(needsPrepare({ profile: 'light' }, { isReady: ready, override: 'light' }), false)
+  assert.equal(needsPrepare({ profile: 'gpu' }, { isReady: ready, override: 'turbo' }), false)
+})
+
+test('without Chrome, the default browser gets the whole URL (on Windows not through cmd, which cuts it at "&")', () => {
+  const url = 'http://127.0.0.1:4860/?k=abc&call=1'
+  const [cmd, args] = windowCommand(url, { chrome: null, platform: 'win32' })
+  assert.equal(cmd, 'rundll32')
+  assert.deepEqual(args, ['url.dll,FileProtocolHandler', url])
+  assert.deepEqual(windowCommand(url, { chrome: null, platform: 'darwin' }), ['open', [url]])
+  assert.deepEqual(windowCommand(url, { chrome: null, platform: 'linux' }), ['xdg-open', [url]])
+  assert.equal(windowCommand(url, { chrome: 'C:/chrome.exe', platform: 'win32', profile: 'P' })[1][0], `--app=${url}`)
 })

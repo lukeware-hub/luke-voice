@@ -91,13 +91,20 @@ export function parseDevices(text) {
   return devices
 }
 
-// gpu when this platform has a build and a device with enough memory; light otherwise.
+// Devices that report memory but would not keep up with the natural voice: a CPU posing as a
+// Vulkan device (Mesa's llvmpipe on a Linux box without GPU drivers reports the system RAM), and
+// Intel's integrated graphics, whose "memory" is shared RAM.
+const WEAK_DEVICE = /llvmpipe|lavapipe|swiftshader|microsoft basic render|intel.*\b(uhd|hd graphics|iris)\b/i
+
+// gpu when this platform has a build and a dedicated device with enough memory; light otherwise.
 // LUKE_VOICE_PROFILE=gpu|light overrides the choice.
 export function pickProfile({ key, devices = [], override = '' }) {
   if (override === 'light') return { profile: 'light', reason: 'chosen' }
   if (!key) return { profile: 'light', reason: 'no native build for this platform' }
-  const best = [...devices].sort((a, b) => b.mib - a.mib)[0]
-  if (override === 'gpu') return { profile: 'gpu', reason: 'chosen', device: best?.name ?? null }
+  const usable = devices.filter(d => !WEAK_DEVICE.test(d.name))
+  const best = [...usable].sort((a, b) => b.mib - a.mib)[0]
+  if (override === 'gpu') return { profile: 'gpu', reason: 'chosen', device: (best ?? devices[0])?.name ?? null }
+  if (!best && devices.length) return { profile: 'light', reason: `only an integrated or software GPU (${devices[0].name})`, device: devices[0].name }
   if (!best) return { profile: 'light', reason: 'no GPU found' }
   if (best.mib < MIN_VRAM_MIB) return { profile: 'light', reason: `GPU with ${best.mib} MiB (needs ${MIN_VRAM_MIB})`, device: best.name }
   return { profile: 'gpu', reason: `${best.name}, ${best.mib} MiB`, device: best.name }
@@ -166,17 +173,18 @@ export function profileReady(profile, { models = modelsDir() } = {}) {
 
 // Everything a profile needs, downloaded and checked: the build and the profile decision, then the
 // models of that profile. onProgress(loaded, total, label) reports bytes over all model files.
-// Returns the profile.
-export async function prepareEngine({ dir = engineDir(), models = modelsDir(), request, onProgress = () => {}, run = runFile, override = process.env.LUKE_VOICE_PROFILE ?? '' } = {}) {
+// Returns the profile. `devices` already listed and a `reason` come with a fallback to the light
+// profile (setup.mjs, when the natural voice fails its test).
+export async function prepareEngine({ dir = engineDir(), models = modelsDir(), request, onProgress = () => {}, run = runFile, override = process.env.LUKE_VOICE_PROFILE ?? '', devices: known = null, reason = '' } = {}) {
   const key = platformKey()
   let exe = null
-  let devices = []
+  let devices = known ?? []
   if (key && override !== 'light') {
     exe = await ensureBinaries({ dir, key, request, run, onProgress: (loaded, total) => onProgress(loaded, total, 'llama.cpp') })
     devices = await listDevices(exe, run)
   }
   const choice = pickProfile({ key, devices, override })
-  const profile = { ...choice, build: LLAMA_BUILD, exe, devices, at: new Date().toISOString() }
+  const profile = { ...choice, ...(reason ? { reason } : {}), build: LLAMA_BUILD, exe, devices, at: new Date().toISOString() }
   mkdirSync(dir, { recursive: true })
   writeFileSync(profileFile(dir), JSON.stringify(profile, null, 2))
   const groups = profileGroups(profile.profile, devices)

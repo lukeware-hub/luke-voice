@@ -1,6 +1,6 @@
 {
   "name": "luke-voice",
-  "version": "0.9.5",
+  "version": "0.9.6",
   "description": "Ceci, a voice assistant beside your Claude Code session: talk it through, and it sends the work to Claude. Free local voice by default, ElevenLabs optional. On/off button above the prompt.",
   "author": {
     "name": "lukeware-hub"

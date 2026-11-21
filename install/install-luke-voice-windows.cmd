@@ -1,7 +1,9 @@
 <# : batch part. Double-click this file to install luke-voice. The rest of the file is PowerShell.
 @echo off
 setlocal
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$s = [IO.File]::ReadAllText('%~f0'); Invoke-Expression $s"
+rem The path goes through the environment: a quote in it (C:\Users\O'Brien) would end a PowerShell string.
+set "LUKE_VOICE_SELF=%~f0"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$s = [IO.File]::ReadAllText($env:LUKE_VOICE_SELF); Invoke-Expression $s"
 echo.
 pause
 exit /b
