@@ -36,6 +36,14 @@ $NodeSha256 = @{
   'win-x64'   = 'e612af99f626ab415ea225af6bce5c971feb448cb5cae250bb1c3fa50c5f7d9f'
   'win-arm64' = 'b3cc74a295b39d4f273271e96f58c06dd2b35757ca12abec64c7d0598b434f14'
 }
+# Git, when it is missing: Claude Code clones the luke-voice marketplace with it. MinGit, Git for
+# Windows' own portable build, pinned by sha256, the same way.
+$GitVersion = '2.56.1'
+$GitTag = 'v2.56.1.windows.1'
+$GitSha256 = @{
+  '64-bit' = '4a92850b6e917da4fd010669b614b55dccf5b0ec333a534cc4be4700dfefdafd'
+  'arm64'  = '96571e442e90523a90e5fd8661b4c4e43bc192910f3c6db938816e6955b4cc8c'
+}
 
 function Pause-IfAsked { if ($env:LUKE_VOICE_PAUSE -eq '1') { Write-Host ''; Read-Host '  Aperte Enter para fechar' | Out-Null } }
 function Say($text) { Write-Host $text }
@@ -70,43 +78,62 @@ function Node-Major {
   if (-not (Get-Command node -ErrorAction SilentlyContinue)) { return 0 }
   try { return [int](& node -p "process.versions.node.split('.')[0]") } catch { return 0 }
 }
-# Downloads Node.js into $LvHome\node and puts it on this user's PATH, now and for new windows.
-function Install-Node {
-  $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'win-arm64' } else { 'win-x64' }
-  $name = "node-$NodeVersion-$arch"
-  $dir = Join-Path $LvHome 'node'
-  $zip = Join-Path $env:TEMP "$name.zip"
+function Has-Git {
+  if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return $false }
+  $ErrorActionPreference = 'Continue'
+  & git --version 2>&1 | Out-Null
+  return $LASTEXITCODE -eq 0
+}
+# Downloads a zip, checks its sha256 and unpacks it into $dir (replacing it). $inner is the folder
+# inside the zip that becomes $dir, or '' when the zip's root does.
+function Get-Portable($label, $url, $sha256, $inner, $dir, $help) {
+  $zip = Join-Path $env:TEMP ([IO.Path]::GetFileName($url))
   try {
-    Invoke-WebRequest "https://nodejs.org/dist/$NodeVersion/$name.zip" -OutFile $zip -UseBasicParsing
+    Invoke-WebRequest $url -OutFile $zip -UseBasicParsing
   } catch {
-    Fail 'não consegui baixar o Node.js.' 'Confira a internet. Ou instale a versão LTS em https://nodejs.org.'
+    Fail "não consegui baixar o $label." "Confira a internet. $help"
   }
-  if ((Get-Sha256 $zip) -ne $NodeSha256[$arch]) {
+  if ((Get-Sha256 $zip) -ne $sha256) {
     Remove-Item -Force $zip
-    Fail 'o Node.js baixado não passou na conferência de segurança.' 'Rode o instalador de novo. Se repetir, instale a versão LTS em https://nodejs.org.'
+    Fail "o $label baixado não passou na conferência de segurança." "Rode o instalador de novo. Se repetir: $help"
   }
-  $unpack = Join-Path $LvHome 'node-unpack'
+  $unpack = "$dir-unpack"
   Remove-Item -Recurse -Force $unpack, $dir -ErrorAction SilentlyContinue
   New-Item -ItemType Directory -Force $unpack | Out-Null
-  # tar.exe (Windows 10 and 11) is much faster than Expand-Archive on Node's thousands of files.
+  # tar.exe (Windows 10 and 11) is much faster than Expand-Archive on thousands of files.
   $ErrorActionPreference = 'Continue'
   & tar.exe -xf $zip -C $unpack 2>&1 | Out-Null
   $isUnpacked = $LASTEXITCODE -eq 0
   $ErrorActionPreference = 'Stop'
   if (-not $isUnpacked) { Expand-Archive $zip -DestinationPath $unpack -Force }
-  Move-Item (Join-Path $unpack $name) $dir
-  Remove-Item -Recurse -Force $unpack, $zip -ErrorAction SilentlyContinue
-  # This user's PATH, kept as written (%VARIABLES% stay unexpanded), with Node.js added.
-  $key = Get-Item 'HKCU:\Environment'
-  $userPath = [string]$key.GetValue('Path', '', 'DoNotExpandEnvironmentNames')
+  if ($inner) { Move-Item (Join-Path $unpack $inner) $dir; Remove-Item -Recurse -Force $unpack } else { Move-Item $unpack $dir }
+  Remove-Item -Force $zip -ErrorAction SilentlyContinue
+}
+# Puts $dir first on this user's PATH, now and for windows opened from now on. The PATH is kept as
+# written (%VARIABLES% stay unexpanded).
+function Add-UserPath($dir) {
+  $userPath = [string](Get-Item 'HKCU:\Environment').GetValue('Path', '', 'DoNotExpandEnvironmentNames')
   if (($userPath -split ';') -notcontains $dir) {
     $next = if ($userPath) { "$dir;$userPath" } else { $dir }
     Set-ItemProperty 'HKCU:\Environment' -Name Path -Value $next -Type ExpandString
-    # Tells Windows the environment changed, so windows opened from now on see Node.js.
+    # Tells Windows the environment changed, so programs opened from now on see it.
     [Environment]::SetEnvironmentVariable('LUKE_VOICE_PATH_CHANGED', '1', 'User')
     [Environment]::SetEnvironmentVariable('LUKE_VOICE_PATH_CHANGED', $null, 'User')
   }
   $env:Path = "$dir;$env:Path"
+}
+function Install-Node {
+  $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'win-arm64' } else { 'win-x64' }
+  $name = "node-$NodeVersion-$arch"
+  $dir = Join-Path $LvHome 'node'
+  Get-Portable 'Node.js' "https://nodejs.org/dist/$NodeVersion/$name.zip" $NodeSha256[$arch] $name $dir 'instale a versão LTS em https://nodejs.org.'
+  Add-UserPath $dir
+}
+function Install-Git {
+  $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { '64-bit' }
+  $dir = Join-Path $LvHome 'git'
+  Get-Portable 'Git' "https://github.com/git-for-windows/git/releases/download/$GitTag/MinGit-$GitVersion-$arch.zip" $GitSha256[$arch] '' $dir 'instale o Git em https://git-scm.com.'
+  Add-UserPath (Join-Path $dir 'cmd')
 }
 # Anything unexpected still ends with a message a person can act on, not a red stack trace.
 trap { Fail "algo inesperado aconteceu: $($_.Exception.Message)" 'Rode o instalador de novo. Se repetir, tire uma foto desta tela e abra um aviso em https://github.com/lukeware-hub/luke-voice/issues.' }
@@ -121,22 +148,31 @@ if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
 }
 Ok 'Claude Code encontrado.'
 
-Step 2 'Procurando o Node.js'
-$installedNode = $false
-# A Node.js this installer put here before is used even if this window does not see it yet.
+Step 2 'Preparando o Node.js e o Git'
+$installedTools = $false
+# Ones this installer put here before are used even if this window does not see them yet.
 $ownNode = Join-Path $LvHome 'node'
 if ((Node-Major) -lt 20 -and (Test-Path (Join-Path $ownNode 'node.exe'))) { $env:Path = "$ownNode;$env:Path" }
+$ownGit = Join-Path $LvHome 'git\cmd'
+if (-not (Has-Git) -and (Test-Path (Join-Path $ownGit 'git.exe'))) { $env:Path = "$ownGit;$env:Path" }
 $major = Node-Major
 if ($major -eq 0) {
   Say "      O Node.js não está instalado. Instalando o Node.js $NodeVersion só para você (cerca de 30 MB)..."
   Install-Node
-  $installedNode = $true
+  $installedTools = $true
 } elseif ($major -lt 20) {
   Fail "o Node.js $major é antigo demais (o luke-voice precisa do 20 ou mais novo)." 'Atualize para a versão LTS em https://nodejs.org.'
 }
 $major = Node-Major
 if ($major -lt 20) { Fail 'o Node.js não funcionou depois de instalado.' 'Instale a versão LTS em https://nodejs.org.' }
 Ok "Node.js $major pronto."
+if (-not (Has-Git)) {
+  Say "      O Git não está instalado (o Claude Code usa para baixar o luke-voice). Instalando o Git $GitVersion só para você (cerca de 40 MB)..."
+  Install-Git
+  $installedTools = $true
+  if (-not (Has-Git)) { Fail 'o Git não funcionou depois de instalado.' 'Instale o Git em https://git-scm.com.' }
+}
+Ok 'Git pronto.'
 
 Step 3 'Instalando o luke-voice no Claude Code'
 # Claude Code keeps one source per marketplace: switching between main and a branch replaces it.
@@ -256,9 +292,9 @@ Write-Host "   Instalação concluída: luke-voice $($entry.version)$(if ($Ref) 
 Write-Host "  ======================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "  Agora:"
-if ($installedNode) {
+if ($installedTools) {
   Write-Host "   1. Feche o Claude Code, se estiver aberto, e também a janela do terminal onde ele roda."
-  Write-Host "      Depois abra o Claude Code de novo (o Node.js acabou de ser instalado)."
+  Write-Host "      Depois abra o Claude Code de novo (o Node.js ou o Git acabou de ser instalado)."
 } else {
   Write-Host "   1. Feche o Claude Code, se estiver aberto, e abra de novo."
 }

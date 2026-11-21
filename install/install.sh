@@ -50,6 +50,12 @@ run_claude() {
 json() { node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const v=(new Function("j","return "+process.argv[1]))(JSON.parse(s));console.log(v??"")})' "$1"; }
 can_ask() { [ "${LUKE_VOICE_NO_PROMPT:-}" != "1" ] && [ -r /dev/tty ]; }
 node_major() { command -v node >/dev/null 2>&1 && node -p "process.versions.node.split('.')[0]" 2>/dev/null || echo 0; }
+# On a Mac without Apple's developer tools, /usr/bin/git is a stub that opens an install window:
+# xcode-select -p says first whether the real one is there.
+has_git() {
+  if [ "$(uname -s)" = Darwin ] && ! xcode-select -p >/dev/null 2>&1; then return 1; fi
+  command -v git >/dev/null 2>&1 && git --version >/dev/null 2>&1
+}
 sha256_of() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi; }
 
 # Downloads Node.js into $LV_HOME/node and links node next to claude, which is on the PATH.
@@ -96,6 +102,18 @@ major=$(node_major)
 ok "Node.js $major pronto."
 
 step 3 'Instalando o luke-voice no Claude Code'
+# Claude Code clones a GitHub marketplace with git. Without git (a new Mac asks to install Apple's
+# developer tools; some Linux desktops lack it), luke-voice comes as a GitHub archive instead, and
+# Claude Code reads it from a folder; running the installer again updates it.
+if ! has_git; then
+  echo '      O git não está instalado: baixando o luke-voice direto do GitHub.'
+  src="$LV_HOME/plugin"
+  archive="$(mktemp -d)/luke-voice.tar.gz"
+  curl -fsSL "https://codeload.github.com/$REPO/tar.gz/${REF:-main}" -o "$archive" || fail 'não consegui baixar o luke-voice.' 'Confira a internet.'
+  rm -rf "$src" && mkdir -p "$src" && tar -xzf "$archive" -C "$src" --strip-components 1 || fail 'não consegui abrir o luke-voice baixado.'
+  rm -f "$archive"
+  SOURCE="$src"
+fi
 # Claude Code keeps one source per marketplace: switching between main and a branch replaces it.
 out=$(claude plugin marketplace add "$SOURCE" 2>&1)
 if [ $? -ne 0 ] || printf '%s' "$out" | grep -q 'Failed to add'; then
