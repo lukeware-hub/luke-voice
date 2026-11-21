@@ -19,6 +19,9 @@ let setupStdout = ''
 let envPort: string | undefined
 // What store.get answers for the next engine(), given the event (the key is in it).
 let storeGet: (e: unknown) => unknown = () => undefined
+// The installer's first-call marker: its text, or null when there is none. Reset by engine().
+let firstCall: string | null = null
+const markerWrites: Array<{ path: string; text: string }> = []
 // The engine's clock; a test may move it, from inside a handler, to stand for time passing.
 let clockNow = 1_700_000_000_000
 // When set, the direct model call throws this, after the clock moved by `brainThrowsAfterMs`.
@@ -45,6 +48,10 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
   const get = storeGet
   storeGet = () => undefined
   on('store.get', (_, e) => ({ value: get(e) }))
+  const marker = firstCall
+  firstCall = null
+  on('fs.exists', (_, e) => ({ value: marker !== null && /[\\/]first-call$/.test(String(e.path)) }))
+  on('fs.write', (_, e) => (markerWrites.push({ path: String(e.path), text: String(e.text) }), { value: undefined }))
   on('ui.close', () => ({ value: undefined }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('model.complete', (_, e) => {
@@ -414,6 +421,34 @@ test('a stopped task is not reported; its later, finished run is reported once',
   expect(done[0]).toContain('Achei dois pontos.')
 })
 
+test('the first Claude Code opened after installing turns luke-voice on and starts the call, once', async ($, on) => {
+  firstCall = 'pending'
+  markerWrites.length = 0
+  const { calls, stored } = engine(on)
+  on('fs.read', (_, e) => ({ value: /[\\/]first-call$/.test(String(e.path)) ? 'pending\n' : '{"version":"0.9.7"}' }))
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await until(() => calls.some(c => c.path === '/show'))
+
+  expect(stored).toContain(true)
+  expect(calls.find(c => c.path === '/show')?.body.call).toBe(true)
+  expect(markerWrites).toEqual([{ path: expect.stringMatching(/\.luke-voice[\\/]first-call$/), text: 'done' }])
+  await $.command.run(run('off'))
+})
+
+test('a claude -p run never takes the first call, and with no marker nothing starts', async ($, on) => {
+  firstCall = 'pending'
+  markerWrites.length = 0
+  const { calls } = engine(on)
+  on('fs.read', () => ({ value: 'pending' }))
+
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  for (let i = 0; i < 2000; i++) await Promise.resolve()
+
+  expect(calls.some(c => c.path === '/show' || c.path === '/subscribe')).toBe(false)
+  expect(markerWrites).toEqual([])
+})
+
 test('subscribe says which luke-voice this session runs, so the hub never asks an older one to think', async ($, on) => {
   const { calls } = engine(on)
   on('fs.read', () => ({ value: '{"version":"0.9.6"}' }))
@@ -720,8 +755,8 @@ test('/luke-voice setup with luke-voice off runs the setup here and says how it 
   const argv = (launches.at(-1) as { argv: string[] }).argv
   expect(String(argv[1]).endsWith('hub/setup.mjs')).toBe(true)
   expect(argv.slice(2)).toEqual(['--json'])
-  setupStdout = '{"ok":true,"profile":"light","reason":"no GPU found","problems":[]}\n'
-  expect((await $.command.run(run('setup'))).text).toContain('Voz leve pronta, no navegador (no GPU found)')
+  setupStdout = '{"ok":true,"profile":"light","reason":"nenhuma placa de vídeo encontrada","problems":[]}\n'
+  expect((await $.command.run(run('setup'))).text).toContain('Voz leve pronta, no navegador (nenhuma placa de vídeo encontrada)')
   setupStdout = '{"ok":false,"error":"Download failed (404)"}\n'
   expect((await $.command.run(run('setup'))).text).toContain('Não consegui preparar a voz: Download failed (404)')
 })

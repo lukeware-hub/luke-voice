@@ -327,6 +327,22 @@ let voice: VoiceProvider | '' = ''
 // The voice chosen with /luke-voice voz, from the store (shared by every Claude session).
 let storedVoice: VoiceProvider | '' = ''
 
+// The installer leaves `first-call` in luke-voice's home: the first Claude Code a person opens
+// after installing turns luke-voice on and starts the call, with no button and no command. Only
+// once, and only with a person at the prompt (never a `claude -p` run).
+async function isFirstCall($: EngineInterface, isInteractive: boolean) {
+  if (!isInteractive) return false
+  const home = (await $.env.get('LUKE_VOICE_HOME')) || `${(await $.env.get('USERPROFILE')) || (await $.env.get('HOME')) || ''}/.luke-voice`
+  const marker = `${home}/first-call`
+  try {
+    if (!(await $.fs.exists(marker)) || (await $.fs.read(marker)).trim() !== 'pending') return false
+    await $.fs.write(marker, 'done')
+    return true
+  } catch {
+    return false
+  }
+}
+
 // Read again before each subscribe: another session may have changed the voice since this one
 // started, and an old choice sent on subscribe would undo it in the hub.
 async function loadStoredVoice($: EngineInterface) {
@@ -759,7 +775,8 @@ export const register: Register = (on, options) => {
         .catch(() => undefined)
     })
     const started = await next(e)
-    if (await read($, isOn)) await turnOn($, opts)
+    if (await isFirstCall($, e.isInteractive)) await toggle($, opts, true)
+    else if (await read($, isOn)) await turnOn($, opts)
     return started
   })
 

@@ -227,7 +227,7 @@ test('a CPU posing as a GPU (llvmpipe) or Intel integrated graphics gets the lig
     [[{ id: 'Vulkan0', name: 'Intel(R) UHD Graphics', mib: 16000 }, { id: 'Vulkan1', name: 'NVIDIA GeForce RTX 4060 Laptop GPU', mib: 8188 }], 'gpu'],
   ]
   for (const [devices, profile] of cases) assert.equal(pickProfile({ key, devices }).profile, profile, devices.map(d => d.name).join(' + '))
-  assert.match(pickProfile({ key, devices: cases[0][0] }).reason, /integrated or software GPU \(llvmpipe/)
+  assert.match(pickProfile({ key, devices: cases[0][0] }).reason, /integrada ou por software \(llvmpipe/)
   assert.equal(pickProfile({ key, devices: cases[3 - 2][0], override: 'gpu' }).profile, 'gpu', 'forced, it is still allowed')
   assert.equal(pickProfile({ key, devices: cases[6][0] }).device, 'NVIDIA GeForce RTX 4060 Laptop GPU')
 })
