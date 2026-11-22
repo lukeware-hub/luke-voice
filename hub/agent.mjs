@@ -7,6 +7,8 @@ import { join } from 'node:path'
 import { stateFile } from './paths.mjs'
 
 const API = 'https://api.elevenlabs.io/v1'
+// An ElevenLabs request past this fails, instead of holding a call (or the agent sync) forever.
+const REQUEST_TIMEOUT_MS = 20_000
 
 export async function readDefinition(root) {
   const def = JSON.parse(await readFile(join(root, 'agent', 'agent.json'), 'utf8'))
@@ -20,6 +22,7 @@ async function call(apiKey, method, path, body) {
     method,
     headers: { 'xi-api-key': apiKey, 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   })
   const text = await res.text()
   if (!res.ok) {

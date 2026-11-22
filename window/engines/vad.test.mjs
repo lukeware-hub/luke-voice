@@ -129,3 +129,71 @@ test('without a turn model there are no candidates, as before', () => {
   const events = feed(createVad(), [...Array(20).fill(0).map(() => tone(0.1)), ...Array(45).fill(0).map(silence)])
   assert.deepEqual(events.map(e => e.type), ['start', 'end'])
 })
+
+// What a VAD makes of a list of frames: each event with the frame it came on and its audio length.
+function trace(vad, frames, options) {
+  return frames.flatMap((frame, i) => {
+    const event = vad.push(frame, options)
+    return event ? [{ type: event.type, at: i, samples: event.audio?.length ?? 0 }] : []
+  })
+}
+
+// Speech as it comes: syllables with quiet dips, words, breaths, and a long sentence with no dip at all.
+function speechFixture() {
+  const out = Array.from({ length: 30 }, silence)
+  const syllables = n => Array.from({ length: n }, (_, i) => (i % 4 === 3 ? tone(0.004) : tone(0.08 + 0.04 * Math.sin(i))))
+  for (const length of [40, 90, 25, 150]) out.push(...syllables(length), ...Array.from({ length: 20 }, silence))
+  // ~5 s with every frame loud (a fast speaker in a reverberant room), then the end of the turn.
+  out.push(...Array.from({ length: 160 }, (_, i) => tone(0.06 + 0.03 * Math.sin(i / 2))), ...Array.from({ length: 70 }, silence))
+  return out
+}
+
+test('the room creeping up changes nothing in how speech starts and ends', () => {
+  for (const options of [{}, { candidateFrames: 22, endFrames: 62 }]) {
+    const frames = speechFixture()
+    const now = trace(createVad(options), frames)
+    const before = trace(createVad({ ...options, creepFrames: 0 }), frames)
+    assert.deepEqual(now, before)
+    assert.ok(now.some(e => e.type === 'end'))
+  }
+})
+
+test('a noise that switches on above the bar is absorbed in about 10 s, and speech over it still counts', () => {
+  const frames = [...Array.from({ length: 30 }, silence), ...Array.from({ length: 625 }, () => noise(0.05))]
+  const vad = createVad()
+  const events = trace(vad, frames)
+  // It looks like speech at first, then the floor catches up and the "utterance" ends (the speech
+  // check drops it: no words in it).
+  assert.equal(events[0].type, 'start')
+  const end = events.find(e => e.type === 'end' || e.type === 'drop')
+  const seconds = ((end.at - 30) * FRAME) / 16_000
+  assert.ok(seconds >= 5 && seconds <= 20, `ended after ${seconds.toFixed(1)} s`)
+  assert.equal(events.length, 2, 'nothing after: the noise is the room now')
+  assert.ok(vad.floor * 3 > 0.05)
+  // The user speaking over that noise still starts and ends a turn.
+  const speech = trace(vad, [...Array.from({ length: 30 }, () => tone(0.3)), ...Array.from({ length: 45 }, () => noise(0.05))])
+  assert.deepEqual(speech.map(e => e.type), ['start', 'end'])
+  // Without the creep (as before 0.10.3) the same noise ran to the 30 s cap.
+  const old = trace(createVad({ creepFrames: 0 }), frames)
+  assert.deepEqual(old.map(e => e.type), ['start'])
+})
+
+test('the room is not learned from Ceci\'s own voice, even when it never pauses', () => {
+  const vad = createVad()
+  const floor = vad.floor
+  feed(vad, Array.from({ length: 400 }, () => tone(0.05)), { isSpeaking: true })
+  assert.equal(vad.floor, floor)
+})
+
+test('a pause hands the turn model only the last 8 s of a long utterance', () => {
+  const vad = createVad({ candidateFrames: 12, endFrames: 38 })
+  const talk = Array.from({ length: 400 }, (_, i) => (i % 5 === 4 ? silence() : tone(0.1)))
+  const events = feed(vad, [...talk, ...Array.from({ length: 12 }, silence)])
+  const candidate = events.find(e => e.type === 'candidate')
+  assert.equal(candidate.audio.length, 8 * 16_000)
+  // The tail: it ends with the 12 silent frames of the pause.
+  assert.ok(candidate.audio.subarray(-12 * FRAME).every(v => v === 0))
+  // The end still carries the whole utterance.
+  const end = vad.endNow(candidate.id)
+  assert.ok(end.audio.length > 8 * 16_000)
+})

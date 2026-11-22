@@ -123,14 +123,14 @@ It starts **off**, and remembers your choice. When Claude Code opens with it alr
 Ceci's brain is Claude Haiku 5.5, called directly through the mod engine's `$.model.complete` at effort low, with the prompt cached. The `claude -p` call remains only as a fallback. Measured brain turns take 0.9 to 2.8 s (they took 6 to 28 s before).
 
 Some things need no model call at all:
-- "pare" or "para" stops Claude.
+- "pare" or "para" stops Claude, with or without her name and as many times as you say it ("Para, Ceci, para!", "chega, Ceci").
 - When Ceci asks "posso?", a plain "sim" runs the pending action at once, and a plain "não" cancels it.
-- When the brain takes more than 600 ms, Ceci says a short acknowledgement ("Certo.", "Deixa eu ver.").
+- When the brain takes more than 600 ms, Ceci says a short acknowledgement ("Certo.", "Deixa eu ver."). They are made once per window, only while nobody is talking, so they never delay her first answer.
 - On the gpu profile, a local router answers small talk (greetings, thanks, goodbyes, "who are you", her age, who created her) in about 0.3 s, with lines written in `hub/router.mjs`, so it never invents anything. Anything else, and any request, goes to Claude Haiku. A word check on top of the small model makes sure a request is never answered locally (0 of 49 test requests were).
 
 ### Knowing when you finished talking
 
-Silero VAD (MIT) drops sounds without speech. Pipecat Smart Turn v3.2 (BSD-2-Clause) decides when you finished talking: it is asked after a 0.7 s pause, and only a clear "done" ends your turn. 2 s of silence always ends it (1.3 s without the model). A breath in the middle of a sentence lasts up to about 1 s, so it does not cut you off. If you go on talking before Ceci starts answering, both parts are joined into one request.
+Silero VAD (MIT) drops sounds without speech. Pipecat Smart Turn v3.2 (BSD-2-Clause) decides when you finished talking: it is asked after a 0.7 s pause, and only a clear "done" ends your turn. 2 s of silence always ends it (1.3 s without the model). A breath in the middle of a sentence lasts up to about 1 s, so it does not cut you off. If you go on talking before Ceci starts answering, both parts are joined into one request. A noise that starts and stays (a TV, an air conditioner) is learned as the room in about 10 s, so your turns still end on time.
 
 ### How fast it is
 
@@ -153,6 +153,8 @@ Since 0.10.0 the voice is the 1.7B model, which the owner heard as clearly bette
 She sounded robotic at first, because her pitch barely moved. An automatic panel (pitch spread and synthetic-speech detectors, anchored on real pt-BR recordings = 10 and Kokoro = 3) rated her pitch spread 2.9 of 10. Sampling at temperature 0.9 instead of 0.75 gives her melody back (6.2 of 10; the panel's score went from 7.6 to 8.8), and the owner's rating went from 6 to 8.5.
 
 English tech words: the voice speaks Portuguese, so it reads some of them with Portuguese rules ("changelog" as "chão geloso", "cache" as "caixa"). `speech-text.js` gives it its own spelling for 11 of them. 34 words got several spellings each, said in three sentences and judged by the ears, then checked on four new sentences. A spelling is kept only when it brought the English word back at least twice more over the seven sentences. Over 5 seeds on 10 sentences, the ears heard 79 of 125 English terms right with the spellings, against 63 without. No spelling helped "main", "README", "branch", "commit", "push" or "lint", so they stay as written.
+
+Numbers and text: `speech-text.js` cuts sentences only at a period followed by a space, never inside "5.5", "1.500", "app.js" or after "Sr.". It writes out what the voice misread, each change checked by her ears against the old text: money ("R$ 1.500,00" as "mil e quinhentos reais"), the feminine of hours ("21h" as "vinte e uma horas"), durations ("1h30" as "uma hora e 30 minutos"), dates ("22/11/2026" as "22 de novembro de 2026"), versions ("Opus 5.5" as "5 ponto 5"), "Prof." and "p.ex.", and "2 * 3" as "2 vezes 3". It drops emoji and reads "site.com.br" as "site ponto com ponto bê erre". Plain numbers stay as digits, which she reads well. Everyday sentences are cut and spelled exactly as before (a test checks 52 of them on both voices).
 
 Questions: a Brazilian yes/no question rises at the end, and one with a question word ("o que", "quando") falls, like a statement. The voice usually ends both flat. Raising the pitch after synthesis (0.9.3 to 0.9.9) sounded robotic to the owner. About 1 in 4 takes of the model itself ends with a natural rise, and the owner rated the best of 4 takes 8.5 of 10. A take costs about 1 s and the engine makes one at a time, so the hub (`hub/question-pick.mjs`) only makes more takes in time nobody waits for:
 - while the line before the question still plays (the window says how long);
@@ -261,7 +263,7 @@ Claude session ── luke-voice mod ── events, long-poll ──┤
 - `window/` is the call window. `window/engines/elevenlabs.js` drives the ElevenLabs client. `window/engines/local.js` drives the free voice, on the native engine when it runs and in the browser otherwise:
   - **Listening:** Silero VAD and Pipecat Smart Turn find the end of the turn. Then Qwen3-ASR (native) or Whisper base in `voice-worker.js` (browser) transcribes.
   - **Speaking:** Qwen3-TTS (native), or Kokoro-82M with pt-BR phonemes from espeak-ng (browser). Piper `pt_BR-faber` is the fallback on slow computers.
-  - **Speech text:** `speech-text.js` strips markdown and code and respells English tech words.
+  - **Speech text:** `speech-text.js` strips markdown and code, respells English tech words, and writes out money, hours, dates and versions the way a Brazilian says them.
 - `hub/vendor.mjs` lists the third-party browser code for the light voice (transformers.js, onnxruntime-web, espeak-ng): each file is pinned by version and sha384, downloaded once by the hub and served from `/vendor/`.
 
 ## Security

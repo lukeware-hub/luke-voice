@@ -4,7 +4,7 @@
 // It gives the window the same session the ElevenLabs engine does.
 import { isConfirm, isDeny, isStopClaude, isStopOnly } from '/engines/fast-path.js'
 import { speechChunks } from '/engines/speech-text.js'
-import { createTurnJoiner } from '/engines/turn-join.js'
+import { createTurnJoiner, createTurnLog } from '/engines/turn-join.js'
 import { risingPercent } from '/engines/progress.js'
 import { FRAME, RATE, createVad, rms } from '/engines/vad.js'
 
@@ -38,6 +38,10 @@ const TURN_DONE = 0.7
 const PENDING_TTL_MS = 90_000
 // Tool answers that mean it worked; anything else goes back to the brain to explain.
 const TOOL_OK = /^(Started|Claude started|Added as a note|Queued|Stopped|Sent)/i
+
+// The acknowledgements, made once per voice and kept for the page: a second call in the same window
+// plays them with no new synthesis. voice ('native', or the browser model) -> text -> audio.
+const ackCache = new Map()
 
 // One worker for the whole page: the models stay loaded between calls.
 let worker = null
@@ -280,7 +284,7 @@ export async function startSession({
 
   const vad = createVad(voiceInfo?.turn ? { candidateFrames: TURN_CANDIDATE_FRAMES, endFrames: TURN_END_FRAMES } : {})
   const context = []
-  const turns = []
+  const turns = createTurnLog()
   let isMuted = false
   let isEnded = false
   let mode = 'listening'
@@ -298,19 +302,26 @@ export async function startSession({
   const joiner = createTurnJoiner()
   let turnNow = null
   const isStale = () => turnNow !== null && !joiner.isCurrent(turnNow)
-  const ackAudio = new Map()
+  const ackVoice = isNative ? 'native' : `browser:${voiceInfo?.tts ?? ''}`
+  if (!ackCache.has(ackVoice)) ackCache.set(ackVoice, new Map())
+  const ackAudio = ackCache.get(ackVoice)
   let nextAck = 0
+  // Jobs in the turn queue (user turns and notices), and the acknowledgement being made now.
+  let jobs = 0
+  let ackWarm = null
 
   // Aborts the native voice's stream when Ceci is cut off.
   let nativeStop = null
 
   // The native voice for one piece of text, whole (the acknowledgements).
-  async function nativeSynth(text) {
+  async function nativeSynth(text, signal = null) {
     const started = performance.now()
-    const response = await fetch('/tts', { method: 'POST', headers: { 'content-type': 'application/json', 'x-luke-key': KEY }, body: JSON.stringify({ text }), signal: AbortSignal.timeout(TTS_TIMEOUT_MS) }).catch(() => null)
+    const timeout = AbortSignal.timeout(TTS_TIMEOUT_MS)
+    const response = await fetch('/tts', { method: 'POST', headers: { 'content-type': 'application/json', 'x-luke-key': KEY }, body: JSON.stringify({ text }), signal: signal ? AbortSignal.any([signal, timeout]) : timeout }).catch(() => null)
     if (!response?.ok) return { audio: new Float32Array(0), sampleRate: 24_000, isBroken: true, ms: 0 }
     const pieces = []
-    const sampleRate = await readWavStream(response, piece => pieces.push(piece), () => false)
+    const sampleRate = await readWavStream(response, piece => pieces.push(piece), () => Boolean(signal?.aborted))
+    if (sampleRate === null) return { audio: new Float32Array(0), sampleRate: 24_000, isBroken: true, ms: 0 }
     const audio = new Float32Array(pieces.reduce((n, p) => n + p.length, 0))
     let at = 0
     for (const piece of pieces) {
@@ -498,18 +509,39 @@ export async function startSession({
     }
   }
 
-  // The short acknowledgements, made once so they play with no wait.
+  // Nothing is being heard, answered or made: the voice is free for background work.
+  const isIdle = () => !isEnded && jobs === 0 && saying === 0 && !vad.inSpeech
+
+  // The short acknowledgements, made once per voice (kept for the page) so they play with no wait.
+  // Only while the call is idle: on the native engine they would take the voice's single slot from
+  // the first reply, and in the browser they would share the worker with it. A user turn that
+  // starts meanwhile cancels the one being made; what is missing is made at the next idle moment.
+  let isWarming = false
   async function warmAcks() {
-    for (const text of ACKS) {
-      if (isEnded) return
-      try {
-        const made = await synth(speechChunks(text, { isNative })[0] ?? text)
-        if (!made.isBroken && made.audio.length) ackAudio.set(text, made)
-      } catch {
-        // No acknowledgement for that line; the turn still works.
+    if (isWarming) return
+    isWarming = true
+    try {
+      for (const text of ACKS) {
+        if (ackAudio.has(text)) continue
+        if (!isIdle()) return
+        const stop = new AbortController()
+        ackWarm = stop
+        try {
+          const line = speechChunks(text, { isNative })[0] ?? text
+          const made = await (isNative ? nativeSynth(line, stop.signal) : synth(line))
+          if (!made.isBroken && made.audio.length) ackAudio.set(text, made)
+        } catch {
+          // No acknowledgement for that line; the turn still works.
+        } finally {
+          if (ackWarm === stop) ackWarm = null
+        }
+        if (stop.signal.aborted) return
       }
+    } finally {
+      isWarming = false
     }
   }
+  const cancelAckWarm = () => ackWarm?.abort()
 
   // "Certo." while the brain thinks. Not over Ceci's own voice, and never added to the conversation.
   function sayAck() {
@@ -532,7 +564,7 @@ export async function startSession({
   async function askBrain(request) {
     const started = performance.now()
     try {
-      const reply = await brain({ ...request, context: [...context], turns: turns.slice(-12) })
+      const reply = await brain({ ...request, context: [...context], turns: turns.history() })
       timing('brain', Math.round(performance.now() - started))
       return reply ?? { say: '', tool: null, pending: null }
     } catch (error) {
@@ -541,10 +573,17 @@ export async function startSession({
     }
   }
 
+  // The user turn being answered stands from here on: it can no longer be joined, its words enter
+  // the history and the "posso?" it answered is let go (turn-join.js).
+  function commitTurn() {
+    if (turnNow !== null) joiner.commit(turnNow)
+    turns.commit()
+  }
+
   async function say(text) {
     if (!text || isEnded || isStale()) return
-    if (turnNow !== null) joiner.commit(turnNow)
-    turns.push({ role: 'luke', text })
+    commitTurn()
+    turns.said(text)
     await speak(text)
   }
 
@@ -553,7 +592,7 @@ export async function startSession({
   async function runTool(tool, said) {
     if (isStale()) return
     if (typeof clientTools[tool.name] !== 'function') return say(said)
-    if (turnNow !== null) joiner.commit(turnNow)
+    commitTurn()
     const result = String(await clientTools[tool.name](tool.args ?? {}))
     remember(`[tool ${tool.name}] ${result}`)
     // The brain sometimes acts without a word; the user still needs to hear that it worked.
@@ -569,7 +608,10 @@ export async function startSession({
     const reply = await askBrain(request)
     clearTimeout(ack)
     if (isEnded || isStale()) return
-    if (request.kind === 'user') pendingAction = reply.pending ? { tool: reply.pending, at: Date.now() } : null
+    if (request.kind === 'user') {
+      commitTurn()
+      pendingAction = reply.pending ? { tool: reply.pending, at: Date.now() } : null
+    }
     if (!reply.tool) return say(reply.say)
     return runTool(reply.tool, reply.say)
   }
@@ -581,13 +623,21 @@ export async function startSession({
 
   // Turns run one at a time, in order. `turn` marks a user turn, so its steps can be dropped when
   // the user goes on talking (see turn-join.js); other jobs (notices) are never dropped.
-  const queue = (job, turn = null) =>
-    (busy = busy
+  // A job waiting here also stops an acknowledgement being made, and the queue running dry lets
+  // the missing ones be made.
+  const queue = (job, turn = null) => {
+    jobs++
+    cancelAckWarm()
+    return (busy = busy
       .then(() => {
         turnNow = turn
         return job()
       })
-      .catch(error => onError(String(error?.message ?? error))))
+      .catch(error => onError(String(error?.message ?? error)))
+      .finally(() => {
+        if (--jobs === 0) void warmAcks()
+      }))
+  }
 
   // A turn ended (or a carried part came back): transcribe and answer it.
   function onTurnEnd(ended, wasInterruption = false) {
@@ -606,12 +656,16 @@ export async function startSession({
     }
     timing('transcribe', ms, `for ${seconds} s of speech`)
     if (!text || isEnded || isStale() || /^\W*$/.test(text)) return
-    turns.push({ role: 'user', text })
+    // The window's voice gate and quiet mode hear the user now, before the brain is asked: a notice
+    // that arrives while the brain thinks must not pass for the user's word.
     onMessage({ source: 'user', message: text })
     // Any words answer the last "posso?": a plain yes runs it, a plain no drops it, anything else
-    // goes to the brain, which may ask again.
+    // goes to the brain, which may ask again. It is let go only once this turn stands: a turn
+    // joined with what the user says next ("é..." then "sim, pode") still answers it.
     const action = pendingAction && Date.now() - pendingAction.at < PENDING_TTL_MS ? pendingAction : null
-    pendingAction = null
+    turns.hold(text, () => {
+      pendingAction = null
+    })
     if (action && isDeny(text)) {
       timing('fast path', 0, 'no to "posso?"')
       return say(DENIED)
@@ -619,7 +673,10 @@ export async function startSession({
     if (isStopOnly(text)) {
       // Said over Ceci, "para" was for her, and she already stopped. Claude's work is stopped only
       // when the user names it ("para o Claude", "cancela a tarefa"), or when Ceci was quiet.
-      if (wasInterruption && !isStopClaude(text)) return timing('fast path', 0, 'stop: Ceci only')
+      if (wasInterruption && !isStopClaude(text)) {
+        turns.commit()
+        return timing('fast path', 0, 'stop: Ceci only')
+      }
       return stopNow()
     }
     if (action && isConfirm(text)) {
@@ -627,7 +684,7 @@ export async function startSession({
       return runTool(action.tool, '')
     }
     if (isNative && router) {
-      const lastSaid = turns.findLast(t => t.role === 'luke')?.text ?? ''
+      const lastSaid = turns.lastSaid
       const routed = await router({ text, lastSaid }).catch(() => null)
       if (isStale()) return
       if (routed?.say) {
@@ -646,6 +703,8 @@ export async function startSession({
     if (isDebug && ++frameCount % 16 === 0) console.info(`[luke-voice] mic ${rms(frame).toFixed(4)} room ${vad.floor.toFixed(4)} ${mode}`)
     if (!event) return
     if (event.type === 'start') isInterruption = false
+    // The user is talking: an acknowledgement being made would compete with their turn.
+    if (event.type === 'start' || event.type === 'barge') cancelAckWarm()
     if (event.type === 'barge') {
       console.info('[luke-voice] barge-in: the user spoke over Ceci')
       cancelSpeech()
@@ -659,7 +718,10 @@ export async function startSession({
       isInterruption = true
     }
     // The user goes on talking before Ceci answered: the last turn waits to be joined.
-    if ((event.type === 'start' || event.type === 'barge') && joiner.resumed()) cancelSpeech()
+    if ((event.type === 'start' || event.type === 'barge') && joiner.resumed()) {
+      turns.drop()
+      cancelSpeech()
+    }
     if (event.type === 'end') onTurnEnd(joiner.ended(event.audio), isInterruption)
     if (event.type === 'drop') onTurnEnd(joiner.dropped())
     // A short pause: the turn model says whether the user is done, so Ceci need not wait 800 ms.
@@ -717,7 +779,10 @@ export async function startSession({
   onConnect()
   // Ceci greets like the ElevenLabs agent does (agent/agent.json first_message), so a call
   // sounds the same with either voice and the user knows she is listening.
-  void say(GREETING).then(warmAcks)
+  // Then, while nobody talks, the acknowledgements. A failed greeting is only logged.
+  void say(GREETING)
+    .catch(error => console.warn(`[luke-voice] the greeting failed: ${error?.message ?? error}`))
+    .then(warmAcks)
   return session
 }
 

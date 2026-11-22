@@ -1,9 +1,17 @@
 // Things the user says that the local voice handles at once, with no brain call (no wait, no tokens).
 
+// The assistant's name as the ears write it: Whisper and Qwen3-ASR sometimes write "Ceci" as
+// "Cecy", "Sessi" or "Cessi".
+const NAMES = ['luke', 'ceci', 'cecy', 'sessi', 'cessi', 'sesi']
+const NAME = `(?:${NAMES.join('|')})`
+const STOP_WORD = '(?:pare|para|parar|cancela|cancelar|chega)'
+const STOP_FILLER = '(?:tudo|agora|o claude|as? tarefas?|isso|por favor|ai)'
+
 // A whole utterance that only asks to stop. "para" inside a longer sentence ("cria uma tarefa para...")
-// is a preposition, so the stop words must be the whole utterance, with at most a few fillers.
-// The assistant's name may come first; Whisper sometimes writes "Ceci" as "Cecy" or "Sessi".
-const STOP_ONLY = /^\W*((luke|ceci|cecy|sessi)\W+)?(pare|para|parar|cancela|cancelar|chega)(\W+(tudo|agora|o claude|as? tarefas?|isso|por favor|ai))*\W*$/i
+// is a preposition, so the utterance must be stop words only: the name may come first, and after
+// the first stop word come only more stop words, the name and a few fillers ("Para, Ceci, para!",
+// "para, para", "Ceci, para, por favor", "chega, Ceci").
+const STOP_ONLY = new RegExp(`^\\W*(${NAME}\\W+)*${STOP_WORD}(\\W+(${STOP_WORD}|${NAME}|${STOP_FILLER}))*\\W*$`, 'i')
 
 const plain = text =>
   String(text ?? '')
@@ -24,7 +32,7 @@ export const isStopClaude = text => isStopOnly(text) && /\b(claude|tarefas?|tudo
 const YES = new Set(['sim', 'pode', 'claro', 'manda', 'bora', 'isso', 'ok', 'okay', 'beleza', 'certo', 'positivo', 'faz', 'faca', 'vai', 'confirmo', 'confirmado', 'perfeito', 'show', 'fechado', 'combinado', 'certeza', 'yes'])
 const NO = new Set(['nao', 'negativo', 'esquece', 'deixa', 'cancela', 'cancelar', 'nem'])
 const FILLER = new Set([
-  'ceci', 'cecy', 'sessi', 'luke', 'por', 'favor', 'pode', 'sim', 'ver', 'ai', 'ja', 'agora', 'mesmo', 'com', 'certeza',
+  ...NAMES, 'por', 'favor', 'pode', 'sim', 'ver', 'ai', 'ja', 'agora', 'mesmo', 'com', 'certeza',
   'fazer', 'mandar', 'ir', 'pra', 'para', 'la', 'precisa', 'obrigado', 'obrigada', 'e', 'o', 'a', 'se', 'ya', 'isso', 'melhor', 'tudo', 'bem',
 ])
 const MAX_ANSWER_WORDS = 7

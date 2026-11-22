@@ -1,0 +1,538 @@
+[
+ {
+  "text": "Oi. Tudo bem? Sim!",
+  "native": [
+   "Oi.",
+   "Tudo bem?",
+   "Sim!"
+  ],
+  "browser": [
+   "Oi.",
+   "Tudo bem?",
+   "Sim!"
+  ]
+ },
+ {
+  "text": "Terminei a tarefa no projeto de autenticação, e todos os testes passaram sem nenhum erro. Pode seguir.",
+  "native": [
+   "Terminei a tarefa no projeto de autenticação,",
+   "e todos os testes passaram sem nenhum erro.",
+   "Pode seguir."
+  ],
+  "browser": [
+   "Terminei a tarefa no projeto de autenticação,",
+   "e todos os testes passaram sem nenhum erro.",
+   "Pode seguir."
+  ]
+ },
+ {
+  "text": "Fiz o commit na branch main.",
+  "native": [
+   "Fiz o commit na branch main."
+  ],
+  "browser": [
+   "Fiz o comít na brentch main."
+  ]
+ },
+ {
+  "text": "O TOKEN fica no cache, e o Backend chama o endpoint.",
+  "native": [
+   "O touken fica no Cache,",
+   "e o Back End chama o end-point."
+  ],
+  "browser": [
+   "O tôquen fica no cache, e o béquend chama o endpoint."
+  ]
+ },
+ {
+  "text": "Abri o pull request da feature e pedi um review.",
+  "native": [
+   "Abri o pull request da Feature e pedi um Riviú."
+  ],
+  "browser": [
+   "Abri o pul riquést da fítcher e pedi um review."
+  ]
+ },
+ {
+  "text": "Rodei os hooks, fiz o rebase e atualizei o changelog.",
+  "native": [
+   "Rodei os ruks,",
+   "fiz o re base e atualizei o tchêindj log."
+  ],
+  "browser": [
+   "Rodei os ruks, fiz o rebase e atualizei o changelog."
+  ]
+ },
+ {
+  "text": "O framework lê o state do store.",
+  "native": [
+   "O Framework lê o State do store."
+  ],
+  "browser": [
+   "O framework lê o state do store."
+  ]
+ },
+ {
+  "text": "Os tokens e o cached ficam no back-end.",
+  "native": [
+   "Os tokens e o cached ficam no back-end."
+  ],
+  "browser": [
+   "Os tôquens e o cached ficam no back-end."
+  ]
+ },
+ {
+  "text": "O hook e o reviewer.",
+  "native": [
+   "O hook e o reviewer."
+  ],
+  "browser": [
+   "O ruk e o reviewer."
+  ]
+ },
+ {
+  "text": "A casa é azul, e o estado é bom.",
+  "native": [
+   "A casa é azul, e o estado é bom."
+  ],
+  "browser": [
+   "A casa é azul, e o estado é bom."
+  ]
+ },
+ {
+  "text": "O caché do cachecol.",
+  "native": [
+   "O caché do cachecol."
+  ],
+  "browser": [
+   "O caché do cachecol."
+  ]
+ },
+ {
+  "text": "Hooks, token.",
+  "native": [
+   "ruks, touken."
+  ],
+  "browser": [
+   "ruks, tôquen."
+  ]
+ },
+ {
+  "text": "Certo, vou verificar os testes de login no repositório api agora.",
+  "native": [
+   "Certo,",
+   "vou verificar os testes de login no repositório api agora."
+  ],
+  "browser": [
+   "Certo, vou verificar os testes de lóguin no repositório a pê i agora."
+  ]
+ },
+ {
+  "text": "Você quer que eu verifique os testes de login no repositório api? Posso?",
+  "native": [
+   "Você quer que eu verifique os testes de login no repositório api?",
+   "Posso?"
+  ],
+  "browser": [
+   "Você quer que eu verifique os testes de lóguin no repositório a pê i?",
+   "Posso?"
+  ]
+ },
+ {
+  "text": "Certo, quer que eu rode os testes de login no repositório api agora?",
+  "native": [
+   "Certo, quer que eu rode os testes de login no repositório api agora?"
+  ],
+  "browser": [
+   "Certo, quer que eu rode os testes de lóguin no repositório a pê i agora?"
+  ]
+ },
+ {
+  "text": "Abri a API e corrigi os BUGS na branch do Claude.",
+  "native": [
+   "Abri a API e corrigi os BUGS na branch do Claude."
+  ],
+  "browser": [
+   "Abri a a pê i e corrigi os bâgs na brentch do clód."
+  ]
+ },
+ {
+  "text": "A casa é azul",
+  "native": [
+   "A casa é azul"
+  ],
+  "browser": [
+   "A casa é azul"
+  ]
+ },
+ {
+  "text": "Oi! Eu sou a Ceci. O que vamos fazer hoje?",
+  "native": [
+   "Oi!",
+   "Eu sou a Ceci.",
+   "O que vamos fazer hoje?"
+  ],
+  "browser": [
+   "Oi!",
+   "Eu sou a Ceci.",
+   "O que vamos fazer hoje?"
+  ]
+ },
+ {
+  "text": "Não consegui pensar numa resposta agora. Tente de novo.",
+  "native": [
+   "Não consegui pensar numa resposta agora.",
+   "Tente de novo."
+  ],
+  "browser": [
+   "Não consegui pensar numa resposta agora.",
+   "Tente de novo."
+  ]
+ },
+ {
+  "text": "Parei o Claude.",
+  "native": [
+   "Parei o Claude."
+  ],
+  "browser": [
+   "Parei o clód."
+  ]
+ },
+ {
+  "text": "O Claude não está trabalhando agora.",
+  "native": [
+   "O Claude não está trabalhando agora."
+  ],
+  "browser": [
+   "O clód não está trabalhando agora."
+  ]
+ },
+ {
+  "text": "Comecei, te aviso quando terminar.",
+  "native": [
+   "Comecei, te aviso quando terminar."
+  ],
+  "browser": [
+   "Comecei, te aviso quando terminar."
+  ]
+ },
+ {
+  "text": "Mandei para o Claude.",
+  "native": [
+   "Mandei para o Claude."
+  ],
+  "browser": [
+   "Mandei para o clód."
+  ]
+ },
+ {
+  "text": "Tá bom, deixei pra lá.",
+  "native": [
+   "Tá bom, deixei pra lá."
+  ],
+  "browser": [
+   "Tá bom, deixei pra lá."
+  ]
+ },
+ {
+  "text": "Certo.",
+  "native": [
+   "Certo."
+  ],
+  "browser": [
+   "Certo."
+  ]
+ },
+ {
+  "text": "Deixa eu ver.",
+  "native": [
+   "Deixa eu ver."
+  ],
+  "browser": [
+   "Deixa eu ver."
+  ]
+ },
+ {
+  "text": "Hum, tá bom.",
+  "native": [
+   "Hum, tá bom."
+  ],
+  "browser": [
+   "Hum, tá bom."
+  ]
+ },
+ {
+  "text": "Pronto, os testes da API passaram e eu já abri o pull request para você revisar.",
+  "native": [
+   "Pronto,",
+   "os testes da API passaram e eu já abri o pull request para você revisar."
+  ],
+  "browser": [
+   "Pronto,",
+   "os testes da a pê i passaram e eu já abri o pul riquést para você revisar."
+  ]
+ },
+ {
+  "text": "A Lagoa de Alcaçuz, em Natal, se encaixa nos requisitos.",
+  "native": [
+   "A Lagoa de Alcaçuz,",
+   "em Natal, se encaixa nos requisitos."
+  ],
+  "browser": [
+   "A Lagoa de Alcaçuz, em Natal, se encaixa nos requisitos."
+  ]
+ },
+ {
+  "text": "Verifica os testes da API e me fala o resultado, por favor.",
+  "native": [
+   "Verifica os testes da API e me fala o resultado,",
+   "por favor."
+  ],
+  "browser": [
+   "Verifica os testes da a pê i e me fala o resultado, por favor."
+  ]
+ },
+ {
+  "text": "Posso começar?",
+  "native": [
+   "Posso começar?"
+  ],
+  "browser": [
+   "Posso começar?"
+  ]
+ },
+ {
+  "text": "Quer que eu faça mais alguma coisa?",
+  "native": [
+   "Quer que eu faça mais alguma coisa?"
+  ],
+  "browser": [
+   "Quer que eu faça mais alguma coisa?"
+  ]
+ },
+ {
+  "text": "Mais alguma coisa? Estou aqui se precisar.",
+  "native": [
+   "Mais alguma coisa?",
+   "Estou aqui se precisar."
+  ],
+  "browser": [
+   "Mais alguma coisa?",
+   "Estou aqui se precisar."
+  ]
+ },
+ {
+  "text": "Tudo bem? Pode ser?",
+  "native": [
+   "Tudo bem?",
+   "Pode ser?"
+  ],
+  "browser": [
+   "Tudo bem?",
+   "Pode ser?"
+  ]
+ },
+ {
+  "text": "Quer que eu continue? Ainda faltam alguns arquivos.",
+  "native": [
+   "Quer que eu continue?",
+   "Ainda faltam alguns arquivos."
+  ],
+  "browser": [
+   "Quer que eu continue?",
+   "Ainda faltam alguns arquivos."
+  ]
+ },
+ {
+  "text": "O Claude ainda está trabalhando na sessão do site, e deve terminar logo.",
+  "native": [
+   "O Claude ainda está trabalhando na sessão do site,",
+   "e deve terminar logo."
+  ],
+  "browser": [
+   "O clód ainda está trabalhando na sessão do sáite,",
+   "e deve terminar logo."
+  ]
+ },
+ {
+  "text": "Nenhuma sessão do Claude está ligada. Ligue o luke-voice no Claude Code e me chame de novo.",
+  "native": [
+   "Nenhuma sessão do Claude está ligada.",
+   "Ligue o luke-voice no Claude Code e me chame de novo."
+  ],
+  "browser": [
+   "Nenhuma sessão do clód está ligada.",
+   "Ligue o luque-voice no clód Code e me chame de novo."
+  ]
+ },
+ {
+  "text": "Achei o problema: o servidor não lia a variável de ambiente certa. Já corrigi e os testes voltaram a passar.",
+  "native": [
+   "Achei o problema: o servidor não lia a variável de ambiente certa.",
+   "Já corrigi e os testes voltaram a passar."
+  ],
+  "browser": [
+   "Achei o problema: o servidor não lia a variável de ambiente certa.",
+   "Já corrigi e os testes voltaram a passar."
+  ]
+ },
+ {
+  "text": "Hum… deixa eu pensar. Acho que o melhor é começar pelo backend.",
+  "native": [
+   "Hum…",
+   "deixa eu pensar.",
+   "Acho que o melhor é começar pelo Back End."
+  ],
+  "browser": [
+   "Hum…",
+   "deixa eu pensar.",
+   "Acho que o melhor é começar pelo béquend."
+  ]
+ },
+ {
+  "text": "Que bom! Então vou mandar para o Claude agora mesmo.",
+  "native": [
+   "Que bom!",
+   "Então vou mandar para o Claude agora mesmo."
+  ],
+  "browser": [
+   "Que bom!",
+   "Então vou mandar para o clód agora mesmo."
+  ]
+ },
+ {
+  "text": "Olha, isso pode demorar um pouco, porque o projeto é grande e tem muitas dependências antigas que precisam ser atualizadas com cuidado, uma por uma, sem quebrar nada do que já funciona hoje em produção para os usuários.",
+  "native": [
+   "Olha,",
+   "isso pode demorar um pouco, porque o projeto é grande e tem muitas dependências antigas que precisam ser atualizadas com cuidado, uma por uma, sem quebrar nada do que já funciona hoje em produção para os usuários."
+  ],
+  "browser": [
+   "Olha,",
+   "isso pode demorar um pouco, porque o projeto é grande e tem muitas dependências antigas que precisam ser atualizadas com cuidado, uma por uma, sem quebrar nada do que já funciona hoje em produção para os usuários."
+  ]
+ },
+ {
+  "text": "Ele perguntou se pode apagar a pasta antiga. Eu disse que sim, mas só depois de fazer um backup completo de tudo. Tudo certo?",
+  "native": [
+   "Ele perguntou se pode apagar a pasta antiga.",
+   "Eu disse que sim, mas só depois de fazer um backup completo de tudo.",
+   "Tudo certo?"
+  ],
+  "browser": [
+   "Ele perguntou se pode apagar a pasta antiga.",
+   "Eu disse que sim, mas só depois de fazer um backup completo de tudo.",
+   "Tudo certo?"
+  ]
+ },
+ {
+  "text": "Revisei o código, deixei alguns comentários e aprovei o pull request. Agora falta só o deploy, que eu posso fazer quando você quiser.",
+  "native": [
+   "Revisei o código,",
+   "deixei alguns comentários e aprovei o pull request.",
+   "Agora falta só o deploy, que eu posso fazer quando você quiser."
+  ],
+  "browser": [
+   "Revisei o código, deixei alguns comentários e aprovei o pul riquést.",
+   "Agora falta só o diplói, que eu posso fazer quando você quiser."
+  ]
+ },
+ {
+  "text": "Infelizmente o build falhou de novo. O erro parece estar no script de testes, que não encontra o arquivo de configuração.",
+  "native": [
+   "Infelizmente o build falhou de novo.",
+   "O erro parece estar no script de testes, que não encontra o arquivo de configuração."
+  ],
+  "browser": [
+   "Infelizmente o bild falhou de novo.",
+   "O erro parece estar no iscrípt de testes, que não encontra o arquivo de configuração."
+  ]
+ },
+ {
+  "text": "Bom dia! Hoje temos três tarefas abertas, duas revisões pendentes e uma reunião à tarde.",
+  "native": [
+   "Bom dia!",
+   "Hoje temos três tarefas abertas, duas revisões pendentes e uma reunião à tarde."
+  ],
+  "browser": [
+   "Bom dia!",
+   "Hoje temos três tarefas abertas, duas revisões pendentes e uma reunião à tarde."
+  ]
+ },
+ {
+  "text": "Não entendi direito. Você pode repetir, por favor?",
+  "native": [
+   "Não entendi direito.",
+   "Você pode repetir, por favor?"
+  ],
+  "browser": [
+   "Não entendi direito.",
+   "Você pode repetir, por favor?"
+  ]
+ },
+ {
+  "text": "Claro, posso fazer isso. Quer que eu comece pela parte do login ou pela página inicial?",
+  "native": [
+   "Claro, posso fazer isso.",
+   "Quer que eu comece pela parte do login ou pela página inicial?"
+  ],
+  "browser": [
+   "Claro, posso fazer isso.",
+   "Quer que eu comece pela parte do lóguin ou pela página inicial?"
+  ]
+ },
+ {
+  "text": "Entendi. Vou pedir para o Claude criar um plano antes de mexer no código, assim você revisa primeiro.",
+  "native": [
+   "Entendi.",
+   "Vou pedir para o Claude criar um plano antes de mexer no código, assim você revisa primeiro."
+  ],
+  "browser": [
+   "Entendi.",
+   "Vou pedir para o clód criar um plano antes de mexer no código, assim você revisa primeiro."
+  ]
+ },
+ {
+  "text": "Pronto! Terminei.",
+  "native": [
+   "Pronto!",
+   "Terminei."
+  ],
+  "browser": [
+   "Pronto!",
+   "Terminei."
+  ]
+ },
+ {
+  "text": "O GitHub está fora do ar agora, então o push vai ter que esperar um pouco.",
+  "native": [
+   "O GitHub está fora do ar agora,",
+   "então o push vai ter que esperar um pouco."
+  ],
+  "browser": [
+   "O guít rãb está fora do ar agora,",
+   "então o puch vai ter que esperar um pouco."
+  ]
+ },
+ {
+  "text": "Sinceramente, eu não recomendo mexer nisso agora; é melhor esperar a próxima versão.",
+  "native": [
+   "Sinceramente,",
+   "eu não recomendo mexer nisso agora; é melhor esperar a próxima versão."
+  ],
+  "browser": [
+   "Sinceramente,",
+   "eu não recomendo mexer nisso agora; é melhor esperar a próxima versão."
+  ]
+ },
+ {
+  "text": "Está tudo funcionando, inclusive o email de confirmação e o login com o Google.",
+  "native": [
+   "Está tudo funcionando,",
+   "inclusive o email de confirmação e o login com o Google."
+  ],
+  "browser": [
+   "Está tudo funcionando,",
+   "inclusive o imêiu de confirmação e o lóguin com o Google."
+  ]
+ }
+]

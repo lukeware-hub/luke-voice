@@ -1,5 +1,6 @@
 // A small voice activity detector on audio level: no model to download, a few lines of math per frame.
-// Frames are 512 samples at 16 kHz (32 ms). The noise floor follows the room while nobody speaks.
+// Frames are 512 samples at 16 kHz (32 ms). The noise floor follows the room while nobody speaks,
+// and creeps up when the room itself gets louder (a TV, an air conditioner switching on).
 // While Ceci talks, the bar to interrupt is higher, so her own voice leaking into the mic does not cut it off.
 
 export const FRAME = 512
@@ -21,6 +22,16 @@ const DEFAULTS = {
   bargePrerollFrames: 50,
   maxFrames: 940, // ~30 s at most per utterance
   minSpeechFrames: 8, // shorter blips (a cough, a click) are dropped
+  // A noise that switches on above the bar never has a quiet frame, so the floor, learned from quiet
+  // frames only, would never reach it: every turn would run to the 30 s cap. After ~3 s with every
+  // frame above the bar, the floor creeps toward the quietest of those frames, slowly (a step-up is
+  // absorbed in ~10 s). Speech always dips below the bar between words and phrases, which starts the
+  // count over; even speech with no dip at all would need ~11 s more before its quietest frames fell
+  // under the bar. 0 turns it off.
+  creepFrames: 94,
+  creepRate: 0.0015,
+  // The turn model reads the last 8 s: a pause hands it only that much of the utterance.
+  candidateSamples: 8 * 16_000,
 }
 
 export function rms(frame) {
@@ -45,11 +56,21 @@ export function createVad(options = {}) {
   // Bumped on every new pause and every resumed speech, so a late answer about an old pause is ignored.
   let pause = 0
   let asked = false
+  // Frames in a row above the bar, and the quietest of them (the creep of the floor).
+  let above = 0
+  let aboveMin = Infinity
+
+  // The utterance so far, or only its last `samples`, as one array.
+  function audioOf(samples = Infinity) {
+    const count = Math.min(frames.length, Math.ceil(samples / FRAME))
+    const audio = new Float32Array(count * FRAME)
+    for (let i = 0; i < count; i++) audio.set(frames[frames.length - count + i], i * FRAME)
+    return audio
+  }
 
   function finish() {
     const enough = voiced >= o.minSpeechFrames
-    const audio = new Float32Array(frames.length * FRAME)
-    frames.forEach((f, i) => audio.set(f, i * FRAME))
+    const audio = audioOf()
     inSpeech = false
     frames = []
     preroll = []
@@ -71,6 +92,17 @@ export function createVad(options = {}) {
       const normalBar = Math.max(o.minLevel, floor * o.ratio)
       const bar = normalBar * (isSpeaking ? o.bargeRatio : 1)
       const isLoud = level >= bar
+
+      // The room got louder: every frame above the bar for creepFrames, and Ceci quiet (her voice
+      // in the mic is not the room). The bar to compare with is the normal one, in or out of speech.
+      if (o.creepFrames && !isSpeaking && level >= normalBar) {
+        above++
+        aboveMin = Math.min(aboveMin, level)
+        if (above >= o.creepFrames && aboveMin > floor) floor += (aboveMin - floor) * o.creepRate
+      } else {
+        above = 0
+        aboveMin = Infinity
+      }
 
       if (!inSpeech) {
         preroll.push(frame)
@@ -108,9 +140,7 @@ export function createVad(options = {}) {
       if (quiet >= o.endFrames || frames.length >= o.maxFrames) return finish()
       if (o.candidateFrames && !asked && quiet >= o.candidateFrames && voiced >= o.minSpeechFrames) {
         asked = true
-        const audio = new Float32Array(frames.length * FRAME)
-        frames.forEach((f, i) => audio.set(f, i * FRAME))
-        return { type: 'candidate', audio, id: pause }
+        return { type: 'candidate', audio: audioOf(o.candidateSamples), id: pause }
       }
       return null
     },

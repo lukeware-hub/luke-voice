@@ -70,3 +70,19 @@ test('both voices are Ceci: same name, age and creator, told only when asked, an
   const local = await readFile(join(root, 'window/engines/local.js'), 'utf8')
   assert.ok(local.includes(`const GREETING = '${def.conversation_config.agent.first_message}'`))
 })
+
+test('every ElevenLabs request carries a timeout, so a hung API never holds a call', async () => {
+  const { conversationToken } = await import('./agent.mjs')
+  const saved = globalThis.fetch
+  let seen = null
+  globalThis.fetch = async (url, init) => {
+    seen = init
+    return new Response(JSON.stringify({ token: 't' }), { status: 200 })
+  }
+  try {
+    assert.equal(await conversationToken('key', 'agent'), 't')
+    assert.ok(seen.signal instanceof AbortSignal)
+  } finally {
+    globalThis.fetch = saved
+  }
+})

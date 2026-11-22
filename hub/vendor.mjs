@@ -4,8 +4,9 @@
 // that was not verified. Model weights are data, not code: the window fetches them from
 // Hugging Face and the browser caches them.
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { createReadStream, mkdirSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { pipeline } from 'node:stream/promises'
 
 import { stateDir } from './paths.mjs'
 
@@ -35,17 +36,43 @@ export const contentType = path => TYPES[path.slice(path.lastIndexOf('.'))] ?? '
 
 const sha384 = bytes => createHash('sha384').update(bytes).digest('base64')
 
+// The hash of a file on disk, read as a stream: a 20 MB wasm never sits whole in memory, and the
+// event loop keeps serving other requests between its chunks.
+async function sha384Of(file) {
+  const hash = createHash('sha384')
+  await pipeline(createReadStream(file), hash)
+  return hash.digest('base64')
+}
+
+// Files this process already checked, by path, size and modification time: each is hashed once
+// per process, not on every request. A file changed on disk since (another size or time) is
+// checked again.
+const verified = new Set()
+const stamp = (file, info) => `${file}\n${info.size}\n${info.mtimeMs}`
+const statOf = file => {
+  try {
+    return statSync(file)
+  } catch {
+    return null
+  }
+}
+
 // One download per file at a time, shared by every request that asks for it meanwhile.
 const inFlight = new Map()
 
-// The verified bytes of a vendored file, downloading it on first use. Null for an unknown path.
+// The path of a verified vendored file, downloading it on first use (the hub streams it from
+// disk). Null for an unknown path.
 export async function vendorFile(path, { dir = join(stateDir(), 'vendor'), request = fetch } = {}) {
   const entry = VENDOR[path]
   if (!entry) return null
   const file = join(dir, ...path.split('/'))
-  if (existsSync(file)) {
-    const bytes = readFileSync(file)
-    if (sha384(bytes) === entry.sha384) return bytes
+  const info = statOf(file)
+  if (info) {
+    if (verified.has(stamp(file, info))) return file
+    if ((await sha384Of(file)) === entry.sha384) {
+      verified.add(stamp(file, info))
+      return file
+    }
   }
   if (!inFlight.has(file)) {
     const job = (async () => {
@@ -56,7 +83,8 @@ export async function vendorFile(path, { dir = join(stateDir(), 'vendor'), reque
       mkdirSync(dirname(file), { recursive: true })
       writeFileSync(`${file}.part`, bytes)
       renameSync(`${file}.part`, file)
-      return bytes
+      verified.add(stamp(file, statSync(file)))
+      return file
     })().finally(() => inFlight.delete(file))
     inFlight.set(file, job)
   }

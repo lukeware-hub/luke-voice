@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -31,8 +31,9 @@ test('a vendored file is downloaded once, verified, and then read from disk', ()
     const dir = fresh()
     let calls = 0
     const request = async () => (calls++, ok(Buffer.from('export const V = 1'))())
-    assert.equal(String(await vendorFile(PATH, { dir, request })), 'export const V = 1')
-    assert.equal(String(await vendorFile(PATH, { dir, request })), 'export const V = 1')
+    const file = await vendorFile(PATH, { dir, request })
+    assert.equal(String(readFileSync(file)), 'export const V = 1')
+    assert.equal(await vendorFile(PATH, { dir, request }), file)
     assert.equal(calls, 1)
     assert.equal(String(readFileSync(join(dir, 'espeak', 'dist', 'version.mjs'))), 'export const V = 1')
   }))
@@ -49,7 +50,27 @@ test('a tampered file on disk is downloaded again', () =>
     const dir = fresh()
     mkdirSync(join(dir, 'espeak', 'dist'), { recursive: true })
     writeFileSync(join(dir, 'espeak', 'dist', 'version.mjs'), 'tampered')
-    assert.equal(String(await vendorFile(PATH, { dir, request: ok(Buffer.from('good')) })), 'good')
+    assert.equal(String(readFileSync(await vendorFile(PATH, { dir, request: ok(Buffer.from('good')) }))), 'good')
+  }))
+
+test('a file is hashed once per process, and again once it changed on disk', () =>
+  withEntry(Buffer.from('good'), async () => {
+    const dir = fresh()
+    const file = join(dir, 'espeak', 'dist', 'version.mjs')
+    mkdirSync(join(dir, 'espeak', 'dist'), { recursive: true })
+    writeFileSync(file, 'good')
+    const refuse = async () => {
+      throw new Error('no download expected')
+    }
+    assert.equal(await vendorFile(PATH, { dir, request: refuse }), file)
+    // Verified: the same file (path, size, time) is not read again. A file swapped behind the
+    // hub's back with the same size but a new time is hashed again and replaced.
+    writeFileSync(file, 'evil')
+    utimesSync(file, new Date(), new Date(Date.now() + 60_000))
+    let calls = 0
+    const request = async () => (calls++, ok(Buffer.from('good'))())
+    assert.equal(String(readFileSync(await vendorFile(PATH, { dir, request }))), 'good')
+    assert.equal(calls, 1)
   }))
 
 test('an unknown path is not served, and types follow the extension', async () => {
