@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url'
 import { conversationToken, credits, ensureAgent, outOfCreditsMessage } from './agent.mjs'
 import { PORT, isMainModule, stateDir, stateFile } from './paths.mjs'
 import { ASR_GLOSSARY, SERVICES, VOICE_SETTINGS, createEngine, maxFrames, prepareEngine, profileReady, readProfile } from './engine.mjs'
+import { pickMacVoice, sayWav } from './mac-voice.mjs'
 import { MODELS, ensureModel } from './models.mjs'
 import { COMMON_QUESTIONS, MAX_PICK_CHARS, createQuestionTakes, isYesNoQuestion } from './question-pick.mjs'
 import { route as routeUtterance } from './router.mjs'
@@ -324,7 +325,7 @@ export function createEngineRunner({ engine, setDownload, warmQuestions = () => 
   }
 }
 
-export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, engine = null, profile = () => null, voiceRef = null, onLocalVoice = () => {}, onSetup = () => ({ started: false }), engineState = () => 'off', log = () => {}, onShutdown = () => process.exit(0), questionsDir = join(stateDir(), 'cache', 'questions'), staleMs = STALE_SESSION_MS, sweepMs = 10_000, sttWaitMs = STT_WAIT_MS, clock = Date.now }) {
+export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, engine = null, profile = () => null, voiceRef = null, onLocalVoice = () => {}, onSetup = () => ({ started: false }), engineState = () => 'off', macVoice = () => null, macSay = sayWav, platform = process.platform, log = () => {}, onShutdown = () => process.exit(0), questionsDir = join(stateDir(), 'cache', 'questions'), staleMs = STALE_SESSION_MS, sweepMs = 10_000, sttWaitMs = STT_WAIT_MS, clock = Date.now }) {
   const sessions = new Map() // token -> session
   const launches = new Map() // one-time launch code -> when it expires
   const replaced = new Set() // tokens a newer subscription of the same Claude session took over
@@ -554,7 +555,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       const provider = voiceProvider()
       // The free voice is about to be used: get the native engine ready (once; it is a no-op after).
       if (provider === 'local') onLocalVoice()
-      return [200, { provider, profile: profile()?.profile ?? null, engine: engineState(), native: engine ? engine.status() : {}, download: engineDownload }]
+      return [200, { provider, profile: profile()?.profile ?? null, engine: engineState(), native: engine ? engine.status() : {}, download: engineDownload, macVoice: macVoiceNow(), macVoiceHint: macVoiceHint() }]
     },
     // The native engine: the profile chosen for this machine, which servers are up, the download.
     'GET /engine': () => [200, { profile: profile(), native: engine ? engine.status() : {}, download: engineDownload }],
@@ -726,7 +727,30 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     })
     return questions
   }
+  // The Mac's own Premium voice speaks when the natural voice does not run here (mac-voice.mjs).
+  const macVoiceNow = () => (profile()?.profile === 'gpu' ? null : macVoice() || null)
+  // A Mac with no natural voice and no Premium voice yet: the window says where to download one.
+  const macVoiceHint = () => platform === 'darwin' && profile()?.profile === 'light' && !macVoiceNow() && process.env.LUKE_VOICE_MAC_VOICE !== 'off'
+  async function macTts(voice, req, res) {
+    const body = await readBody(req)
+    const text = String(body.text ?? '').slice(0, MAX_TTS_CHARS).trim()
+    if (!text) return send(res, 400, { error: 'Nothing to say.' })
+    noteSaid(text)
+    // The window hangs up when the user talks over Ceci: stop `say` with it.
+    const stop = new AbortController()
+    res.on('close', () => stop.abort())
+    const wav = await macSay(voice, text, stop.signal).catch(error => {
+      if (!stop.signal.aborted) log(`mac voice: ${error.message}`)
+      return null
+    })
+    if (stop.signal.aborted) return res.end()
+    if (!wav) return send(res, 502, { error: 'mac voice failed' })
+    res.writeHead(200, { 'content-type': 'audio/wav', 'cache-control': 'no-store' })
+    return res.end(wav)
+  }
   async function nativeTts(req, res) {
+    const mac = macVoiceNow()
+    if (mac) return macTts(mac, req, res)
     const url = engine?.url('tts')
     if (!url) return send(res, 503, { error: 'The native voice engine is not running.' })
     const body = await readBody(req)
@@ -819,7 +843,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       const bearer = (req.headers.authorization ?? '').replace(/^Bearer /, '')
 
       if (route === 'GET /health') {
-        return send(res, 200, { app: 'luke-voice', version: VERSION, sessions: sessions.size, isWindowOpen: streams.size > 0, call, hasKey: Boolean(key), provider: voiceProvider(), keyStatus: !key ? 'missing' : isKeyRejected ? 'rejected' : 'set', keyId: keyId(key), profile: profile()?.profile ?? null, native: engine ? engine.status() : {}, download: engineDownload })
+        return send(res, 200, { app: 'luke-voice', version: VERSION, sessions: sessions.size, isWindowOpen: streams.size > 0, call, hasKey: Boolean(key), provider: voiceProvider(), keyStatus: !key ? 'missing' : isKeyRejected ? 'rejected' : 'set', keyId: keyId(key), profile: profile()?.profile ?? null, native: engine ? engine.status() : {}, download: engineDownload, macVoice: macVoiceNow() })
       }
 
       if (route === 'POST /subscribe') {
@@ -992,6 +1016,19 @@ if (isMainModule(import.meta.url, process.argv[1])) {
   const log = line => console.log(line)
   const engine = createEngine({ log })
   const runner = createEngineRunner({ engine, log, setDownload: next => hub.setEngineDownload(next), warmQuestions: () => hub.warmQuestions() })
+  // Looked for again at most once a minute: a voice downloaded, or a new Spoken Content system
+  // voice (Siri Voz 1 to Voz 2), counts from the next call, with no hub restart.
+  let macVoice = null
+  let macLooked = 0
+  const lookForMacVoice = () => {
+    if (Date.now() - macLooked < 60_000) return
+    macLooked = Date.now()
+    pickMacVoice().then(voice => {
+      if (voice && voice !== macVoice) log(`mac voice: ${voice}`)
+      macVoice = voice
+    })
+  }
+  lookForMacVoice()
   const hub = createHub({
     serviceToken,
     windowKey,
@@ -1002,6 +1039,10 @@ if (isMainModule(import.meta.url, process.argv[1])) {
     voiceRef: join(ROOT, 'agent', 'ceci-voice.wav'),
     onLocalVoice: runner.startOnce,
     engineState: runner.state,
+    macVoice: () => {
+      lookForMacVoice()
+      return macVoice
+    },
     onSetup: runner.setup,
     log,
   })

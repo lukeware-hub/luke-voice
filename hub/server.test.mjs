@@ -791,6 +791,46 @@ test('with no native engine, /stt and /tts answer 503 so the window keeps its ow
   }
 })
 
+test('with a Mac Premium voice and no natural voice, /tts speaks with say and /config names the voice', async () => {
+  const said = []
+  let profileNow = { profile: 'light' }
+  const hub4 = createHub({
+    serviceToken: SERVICE,
+    windowKey: WINDOW,
+    open: () => {},
+    profile: () => profileNow,
+    platform: 'darwin',
+    macVoice: () => 'Luciana (Premium)',
+    macSay: async (voice, text) => (said.push([voice, text]), Buffer.from('RIFFfake')),
+  })
+  await new Promise(resolve => hub4.listen(0, '127.0.0.1', resolve))
+  const p = hub4.address().port
+  const call = (method, path, body) =>
+    new Promise((resolve, reject) => {
+      const req = request({ host: '127.0.0.1', port: p, method, path, headers: { host: `127.0.0.1:${p}`, 'x-luke-key': WINDOW, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' } }, res => {
+        const chunks = []
+        res.on('data', chunk => chunks.push(chunk))
+        res.on('end', () => resolve({ status: res.statusCode, type: res.headers['content-type'], body: Buffer.concat(chunks).toString() }))
+      })
+      req.on('error', reject)
+      req.end(body)
+    })
+  try {
+    const tts = await call('POST', '/tts', '{"text":"Oi, eu sou a Ceci."}')
+    assert.equal(tts.status, 200)
+    assert.equal(tts.type, 'audio/wav')
+    assert.deepEqual(said, [['Luciana (Premium)', 'Oi, eu sou a Ceci.']])
+    assert.equal(JSON.parse((await call('GET', '/config')).body).macVoice, 'Luciana (Premium)')
+    // The natural voice runs here: the Mac voice stays out of it.
+    profileNow = { profile: 'gpu' }
+    assert.equal(JSON.parse((await call('GET', '/config')).body).macVoice, null)
+    assert.equal((await call('POST', '/tts', '{"text":"oi"}')).status, 503)
+  } finally {
+    hub4.closeAllConnections()
+    hub4.close()
+  }
+})
+
 test('loadSecrets keeps the window key across hub restarts', () => {
   const first = loadSecrets()
   const second = loadSecrets()
