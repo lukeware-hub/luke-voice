@@ -47,6 +47,9 @@ test('the gpu profile is tested; a failed test says the light voice will be used
   assert.equal(asked[1].override, 'light')
   assert.deepEqual(asked[1].devices, gpu.devices)
   assert.match(asked[1].reason, /falhou no teste: o servidor tts não iniciou/)
+  // Setup may try the natural voice again; its fallback remembers the failure for later preparations.
+  assert.equal(asked[0].retryNatural, true)
+  assert.equal(asked[1].failed, true)
   assert.equal(bad.fallback.profile, 'light')
   // With no internet for the light voice either, setup still ends and says so.
   const offline = sink()
