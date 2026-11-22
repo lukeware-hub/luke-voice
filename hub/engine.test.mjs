@@ -303,3 +303,104 @@ test('a gpu profile saved by another llama.cpp build is not ready, so it is prep
     paths.forEach((path, i) => (MODELS[path].size = sizes[i]))
   }
 })
+
+test('models download up to three at a time, with one progress total over all of them', async () => {
+  const { downloadModels } = await import('./engine.mjs')
+  const paths = Object.keys(MODELS).filter(p => MODELS[p].group === 'light').slice(0, 5)
+  const total = paths.reduce((n, p) => n + MODELS[p].size, 0)
+  let running = 0
+  let most = 0
+  const seen = []
+  const ensure = async (path, { onProgress }) => {
+    running++
+    most = Math.max(most, running)
+    const size = MODELS[path].size
+    for (const part of [0.25, 0.5, 1]) {
+      await new Promise(resolve => setTimeout(resolve, 5))
+      onProgress(Math.round(size * part), size)
+    }
+    running--
+    return path
+  }
+  assert.equal(await downloadModels(paths, { ensure, onProgress: (loaded, all) => seen.push([loaded, all]) }), total)
+  assert.equal(most, 3)
+  assert.ok(seen.every(([, all]) => all === total))
+  // The sum never goes back and ends at the total.
+  assert.ok(seen.every(([loaded], i) => i === 0 || loaded >= seen[i - 1][0]))
+  assert.deepEqual(seen.at(-1), [total, total])
+})
+
+test('a failed model download still rejects, and no new download starts after it', async () => {
+  const { downloadModels } = await import('./engine.mjs')
+  const paths = Object.keys(MODELS).filter(p => MODELS[p].group === 'light').slice(0, 6)
+  const started = []
+  const ensure = async path => {
+    started.push(path)
+    await new Promise(resolve => setTimeout(resolve, path === paths[1] ? 5 : 30))
+    if (path === paths[1]) throw new Error('Integrity check failed: x')
+    return path
+  }
+  await assert.rejects(downloadModels(paths, { ensure }), /Integrity check failed/)
+  assert.deepEqual(started, paths.slice(0, 3))
+})
+
+test('prepare downloads the profile models in parallel, reports them as one total, and prunes old llama.cpp builds', async () => {
+  const { prepareEngine } = await import('./engine.mjs')
+  const dir = fresh()
+  // An old build, its archive and a half download of another, and the build a previous profile ran.
+  for (const build of ['b1000', 'b2000', LLAMA_BUILD]) mkdirSync(join(dir, build), { recursive: true })
+  writeFileSync(join(dir, LLAMA_BUILD, '.unpacked'), LLAMA_BUILD)
+  mkdirSync(join(dir, 'downloads'))
+  for (const name of ['llama-b1000-bin-win-vulkan-x64.zip', 'llama-b1500-bin-win-vulkan-x64.zip.part', `llama-${LLAMA_BUILD}-bin-win-vulkan-x64.zip`, 'llama-b1800-bin-win-vulkan-x64.zip', 'llama-b1800-bin-win-vulkan-x64.zip.lock']) writeFileSync(join(dir, 'downloads', name), 'x')
+  writeFileSync(join(dir, 'profile.json'), JSON.stringify({ profile: 'gpu', build: 'b2000', exe: join(dir, 'b2000', 'llama-server.exe') }))
+  const totals = new Set()
+  const done = []
+  const profile = await prepareEngine({
+    dir,
+    models: fresh(),
+    override: 'light',
+    ensure: async (path, { onProgress }) => {
+      onProgress(MODELS[path].size, MODELS[path].size)
+      done.push(path)
+    },
+    onProgress: (loaded, total, label) => label === 'modelos' && totals.add(total),
+  })
+  assert.equal(profile.profile, 'light')
+  assert.equal(totals.size, 1)
+  assert.equal([...totals][0], groupBytes(profileGroups('light', [])))
+  assert.equal(done.length, Object.values(MODELS).filter(m => ['turn', 'light', 'light-cpu'].includes(m.group)).length)
+  // Pruned: the old build and archives. Kept: this build, the build the previous profile ran, and
+  // an archive another process is still downloading.
+  assert.equal(existsSync(join(dir, 'b1000')), false)
+  assert.equal(existsSync(join(dir, 'b2000')), true)
+  assert.equal(existsSync(join(dir, LLAMA_BUILD)), true)
+  assert.equal(existsSync(join(dir, 'downloads', 'llama-b1000-bin-win-vulkan-x64.zip')), false)
+  assert.equal(existsSync(join(dir, 'downloads', 'llama-b1500-bin-win-vulkan-x64.zip.part')), false)
+  assert.equal(existsSync(join(dir, 'downloads', `llama-${LLAMA_BUILD}-bin-win-vulkan-x64.zip`)), false)
+  assert.equal(existsSync(join(dir, 'downloads', 'llama-b1800-bin-win-vulkan-x64.zip')), true)
+})
+
+test('the archive of this build stays until it is unpacked', async () => {
+  const { pruneEngine } = await import('./engine.mjs')
+  const dir = fresh()
+  mkdirSync(join(dir, 'downloads'), { recursive: true })
+  const archive = join(dir, 'downloads', `llama-${LLAMA_BUILD}-bin-win-vulkan-x64.zip`)
+  writeFileSync(archive, 'x')
+  assert.deepEqual(pruneEngine({ dir }), [])
+  assert.equal(existsSync(archive), true)
+})
+
+test('a server log past the limit is moved to .old.log when the server starts, replacing the previous one', async () => {
+  const { rotateLog } = await import('./engine.mjs')
+  const { readFileSync } = await import('node:fs')
+  const dir = fresh()
+  const log = join(dir, 'tts.log')
+  assert.equal(rotateLog(log, 10), false, 'no log yet')
+  writeFileSync(log, 'small')
+  assert.equal(rotateLog(log, 10), false)
+  writeFileSync(join(dir, 'tts.old.log'), 'older')
+  writeFileSync(log, 'x'.repeat(11))
+  assert.equal(rotateLog(log, 10), true)
+  assert.equal(existsSync(log), false)
+  assert.equal(readFileSync(join(dir, 'tts.old.log'), 'utf8'), 'x'.repeat(11))
+})

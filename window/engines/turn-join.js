@@ -61,3 +61,56 @@ export function createTurnJoiner({ now = () => Date.now(), windowMs = JOIN_WINDO
     },
   }
 }
+
+// How many turns of the call the brain reads (the hub keeps the last 12 too): older ones are let go,
+// so a long call does not keep or send an ever-growing history.
+export const MAX_TURNS = 12
+
+// The call as the brain reads it. The user's words of a turn are held until that turn is committed
+// (Ceci answers it, or a tool starts for it): a turn that is joined with what the user said next
+// is dropped instead, so the brain never reads the first part twice, and what it was waiting on
+// (the "posso?" a "sim" answers) is only let go once the turn stands. history() includes the held
+// words, so the brain reading the turn it answers sees them, as before.
+export function createTurnLog({ max = MAX_TURNS } = {}) {
+  const turns = []
+  let held = null // { text, onCommit }
+  let lastSaid = ''
+  const add = turn => {
+    turns.push(turn)
+    if (turns.length > max) turns.splice(0, turns.length - max)
+  }
+  return {
+    // The user's words of the turn being answered; a turn still held (it was joined) is replaced.
+    hold(text, onCommit = () => {}) {
+      held = { text, onCommit }
+    },
+    // The held turn stands: it enters the history, and its effects run once.
+    commit() {
+      if (!held) return
+      const { text, onCommit } = held
+      held = null
+      add({ role: 'user', text })
+      onCommit()
+    },
+    // The held turn will be joined with the next one: forget it, with no effect.
+    drop() {
+      held = null
+    },
+    // Ceci said this.
+    said(text) {
+      add({ role: 'luke', text })
+      lastSaid = text
+    },
+    // What the brain reads: the last `max` turns, the held one included.
+    history() {
+      return (held ? [...turns, { role: 'user', text: held.text }] : [...turns]).slice(-max)
+    },
+    // Ceci's last line, however many turns ago (the router reads it).
+    get lastSaid() {
+      return lastSaid
+    },
+    get size() {
+      return turns.length
+    },
+  }
+}

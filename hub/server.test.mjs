@@ -93,14 +93,15 @@ test('show opens the window once with the window key, and the page needs that ke
   await call('POST', '/unsubscribe', { auth: s.token })
 })
 
-test('every external script on the page carries an integrity hash, and the page scripts import nothing remote', async () => {
+test('the page loads no remote script; the ElevenLabs client is loaded on demand, pinned, with an integrity hash', async () => {
   const page = (await call('GET', `/?k=${WINDOW}`)).body
-  const external = [...page.matchAll(/<script\b[^>]*\bsrc="https?:\/\/[^"]*"[^>]*>/g)].map(m => m[0])
-  assert.ok(external.length > 0)
-  for (const tag of external) {
-    assert.match(tag, /\bintegrity="sha(256|384|512)-[A-Za-z0-9+/=]+"/)
-    assert.match(tag, /\bcrossorigin="anonymous"/)
-  }
+  // The free voice must never wait on a CDN: no remote script on the page itself.
+  assert.doesNotMatch(page, /<script\b[^>]*\bsrc="https?:/)
+  const eleven = (await call('GET', '/engines/elevenlabs.js')).body
+  assert.match(eleven, /CLIENT_URL = 'https:\/\/cdn\.jsdelivr\.net\/npm\/@elevenlabs\/client@\d+\.\d+\.\d+\/dist\/lib\.iife\.js'/)
+  assert.match(eleven, /CLIENT_INTEGRITY = 'sha384-[A-Za-z0-9+/=]{64}'/)
+  assert.match(eleven, /script\.integrity = CLIENT_INTEGRITY/)
+  assert.match(eleven, /script\.crossOrigin = 'anonymous'/)
   for (const path of ['/app.js', '/guard.js', '/engines/elevenlabs.js', '/engines/local.js', '/engines/speech-text.js', '/engines/fast-path.js', '/engines/turn-join.js', '/engines/progress.js', '/engines/vad.js', '/engines/piper-ids.js', '/engines/mic-worklet.js', '/engines/voice-worker.js']) {
     const res = await call('GET', path)
     assert.equal(res.status, 200)
@@ -308,12 +309,14 @@ test('an explicit provider wins over the key', async () => {
 test('vendored files are served from the hub, unknown ones are 404, and the page is cross-origin isolated', async () => {
   const modelFile = join(mkdtempSync(join(tmpdir(), 'luke-model-')), 'm.onnx')
   writeFileSync(modelFile, 'ONNXBYTES')
+  const vendored = join(mkdtempSync(join(tmpdir(), 'luke-vendor-')), 'version.mjs')
+  writeFileSync(vendored, 'export const V = 1')
   const asked = []
   const served = createHub({
     serviceToken: SERVICE,
     windowKey: WINDOW,
     open: () => {},
-    vendor: async path => (path === 'espeak/dist/version.mjs' ? Buffer.from('export const V = 1') : null),
+    vendor: async path => (path === 'espeak/dist/version.mjs' ? vendored : null),
     models: async path => {
       asked.push(path)
       return path === 'turn/silero-vad.onnx' ? modelFile : null
@@ -336,6 +339,7 @@ test('vendored files are served from the hub, unknown ones are 404, and the page
     assert.equal(file.status, 200)
     assert.equal(file.text, 'export const V = 1')
     assert.equal(file.headers['content-type'], 'text/javascript; charset=utf-8')
+    assert.equal(file.headers['content-length'], '18')
     assert.equal((await fetchRaw('/vendor/../../hub.json')).status, 404)
     const model = await fetchRaw('/models/turn/silero-vad.onnx')
     assert.equal(model.status, 200)
@@ -882,4 +886,75 @@ console.log(JSON.stringify(loadSecrets(${JSON.stringify(file)})))`
   const seen = await Promise.all(runs)
   const onDisk = JSON.stringify(JSON.parse(readFileSync(file, 'utf8')))
   for (const line of seen) assert.equal(line, onDisk)
+})
+
+test('a hung speech engine times /stt out, and a window that hangs up stops the transcription', async () => {
+  const aborted = []
+  const fake = createHttpServer((req, res) => {
+    // Never answers; notes when the hub gives up on it.
+    req.resume()
+    res.on('close', () => aborted.push(req.url))
+  })
+  await new Promise(resolve => fake.listen(0, '127.0.0.1', resolve))
+  const base = `http://127.0.0.1:${fake.address().port}`
+  const engine = { url: () => base, status: () => ({ tts: true, asr: true, router: false }) }
+  const hub2 = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {}, engine, profile: () => ({ profile: 'gpu' }), sttWaitMs: 300 })
+  await new Promise(resolve => hub2.listen(0, '127.0.0.1', resolve))
+  const p = hub2.address().port
+  const stt = () => request({ host: '127.0.0.1', port: p, method: 'POST', path: '/stt', headers: { host: `127.0.0.1:${p}`, 'content-type': 'audio/wav', 'x-luke-key': WINDOW } })
+  try {
+    const timedOut = await new Promise((resolve, reject) => {
+      const req = stt()
+      req.on('response', res => (res.resume(), resolve(res.statusCode)))
+      req.on('error', reject)
+      req.end(Buffer.from('RIFFWAV'))
+    })
+    assert.equal(timedOut, 504)
+    await new Promise(resolve => setTimeout(resolve, 100))
+    assert.equal(aborted.length, 1, 'the engine request was dropped with it')
+    // The window hangs up before the answer: the engine request is dropped at once, not at the timeout.
+    const hub3 = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {}, engine, profile: () => ({ profile: 'gpu' }), sttWaitMs: 60_000 })
+    await new Promise(resolve => hub3.listen(0, '127.0.0.1', resolve))
+    const q = hub3.address().port
+    const req = request({ host: '127.0.0.1', port: q, method: 'POST', path: '/stt', headers: { host: `127.0.0.1:${q}`, 'content-type': 'audio/wav', 'x-luke-key': WINDOW } })
+    req.on('error', () => {})
+    req.end(Buffer.from('RIFFWAV'))
+    await new Promise(resolve => setTimeout(resolve, 200))
+    req.destroy()
+    await new Promise(resolve => setTimeout(resolve, 200))
+    assert.equal(aborted.length, 2)
+    hub3.closeAllConnections()
+    hub3.close()
+  } finally {
+    hub2.closeAllConnections()
+    hub2.close()
+    fake.closeAllConnections()
+    fake.close()
+  }
+})
+
+test('the /tts body is the same JSON as before, with the reference fragment made once', async () => {
+  const { ttsBody } = await import('./server.mjs')
+  const { VOICE_SETTINGS, maxFrames } = await import('./engine.mjs')
+  const ref = { speaker_ref_b64: Buffer.from('CECIVOICE "aspas" \\ e ç').toString('base64'), speaker_ref_text: 'Oi, eu sou a "Ceci".\n' }
+  const fragment = JSON.stringify(ref).slice(1, -1)
+  for (const [text, seed] of [['Comecei, te aviso.', undefined], ['Posso? "sim"', 103]]) {
+    const before = JSON.stringify({ input: text, lang: 'pt', stream: true, response_format: 'wav', ...VOICE_SETTINGS, ...(seed === undefined ? {} : { seed }), n_predict: maxFrames(text), ...ref })
+    assert.equal(ttsBody(text, seed, fragment), before)
+  }
+})
+
+test('a kept question take belongs to the voice model files by content, not only by name', async () => {
+  const { voiceKey } = await import('./server.mjs')
+  const { MODELS } = await import('./models.mjs')
+  const { SERVICES } = await import('./engine.mjs')
+  const key = voiceKey('UkVG', 'Oi.')
+  for (const path of SERVICES.tts.models) assert.ok(key.includes(MODELS[path].sha256), path)
+  const saved = MODELS[SERVICES.tts.models[0]].sha256
+  try {
+    MODELS[SERVICES.tts.models[0]].sha256 = '0'.repeat(64)
+    assert.notEqual(voiceKey('UkVG', 'Oi.'), key)
+  } finally {
+    MODELS[SERVICES.tts.models[0]].sha256 = saved
+  }
 })

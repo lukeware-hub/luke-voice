@@ -85,3 +85,41 @@ test('a part handed to a worker (transferred) is still joined whole', () => {
   assert.equal(joined.audio.length, 10 + 4800 + 5)
   assert.equal(joined.audio[0], 1)
 })
+
+test('a held user turn reaches the history once, when committed, and a joined one never does', async () => {
+  const { createTurnLog } = await import('./turn-join.js')
+  const log = createTurnLog()
+  const effects = []
+  log.said('Posso começar?')
+  // "é..." ended a turn, then the user went on: that turn is dropped and its words replaced.
+  log.hold('é', () => effects.push('é'))
+  assert.deepEqual(log.history().map(t => t.text), ['Posso começar?', 'é'], 'the brain answering it reads the held words')
+  log.drop()
+  log.hold('é, sim, pode', () => effects.push('é, sim, pode'))
+  log.commit()
+  log.commit()
+  assert.deepEqual(log.history(), [{ role: 'luke', text: 'Posso começar?' }, { role: 'user', text: 'é, sim, pode' }])
+  assert.deepEqual(effects, ['é, sim, pode'], 'the effects of a turn (letting go of the "posso?") run once, only for the turn that stands')
+  // A new hold replaces one that was never committed (it was joined), with no effect.
+  log.hold('a', () => effects.push('a'))
+  log.hold('a b', () => effects.push('a b'))
+  log.commit()
+  assert.deepEqual(effects, ['é, sim, pode', 'a b'])
+})
+
+test('the turn log keeps only what the brain reads, and remembers Ceci\'s last line', async () => {
+  const { MAX_TURNS, createTurnLog } = await import('./turn-join.js')
+  const log = createTurnLog()
+  log.said('primeira')
+  for (let i = 0; i < 50; i++) {
+    log.hold(`u${i}`)
+    log.commit()
+  }
+  assert.equal(log.size, MAX_TURNS)
+  assert.equal(log.history().length, MAX_TURNS)
+  assert.equal(log.history().at(-1).text, 'u49')
+  assert.equal(log.lastSaid, 'primeira')
+  log.hold('agora')
+  assert.equal(log.history().length, MAX_TURNS)
+  assert.equal(log.history().at(-1).text, 'agora')
+})

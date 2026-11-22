@@ -48,3 +48,17 @@ test('a stop that names Claude or the task stops Claude; a bare one may be meant
   // Still a request, not a stop.
   assert.equal(isStopClaude('Cria uma tarefa para o Claude revisar os testes.'), false)
 })
+
+test('the name and repeated stop words may come anywhere among the stop words, as people say it', () => {
+  for (const said of ['Para, Ceci, para!', 'Para Ceci, para', 'para, para', 'Para, para, para.', 'Ceci, para, por favor', 'chega, Ceci', 'Ceci, Ceci, para!', 'Cessi, chega, chega.', 'Pare agora, Ceci, por favor.', 'Para, Ceci, para o Claude.']) {
+    assert.equal(isStopOnly(said), true, said)
+  }
+  // Only stop words, the name and fillers: anything else is a request.
+  for (const said of ['Cria uma tarefa para revisar os testes.', 'Ceci, cria uma tarefa para o Claude.', 'Para, Ceci, e depois roda os testes.', 'Ceci, não para', 'Ceci para que serve isso?', 'Ceci', 'por favor, Ceci']) {
+    assert.equal(isStopOnly(said), false, said)
+  }
+  // Whether Claude's work stops is unchanged: only when the stop names it.
+  assert.equal(isStopClaude('Para, Ceci, para!'), false)
+  assert.equal(isStopClaude('Para, Ceci, para o Claude.'), true)
+  assert.equal(isStopClaude('chega, Ceci, para tudo'), true)
+})

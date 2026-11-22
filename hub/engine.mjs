@@ -4,9 +4,9 @@
 // official release builds (Vulkan on Windows and Linux, Metal on macOS), pinned by sha256; the
 // models are in hub/models.mjs. No Python, no PyTorch.
 import { execFile, execFileSync, spawn as nodeSpawn } from 'node:child_process'
-import { createWriteStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
-import { join } from 'node:path'
+import { isAbsolute, join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { MODELS, ensureFile, ensureModel, modelsDir, pruneModels } from './models.mjs'
@@ -199,13 +199,95 @@ export function profileReady(profile, { models = modelsDir() } = {}) {
   })
 }
 
+// Model files downloaded and checked, up to `parallel` at a time (one file at a time left most of
+// the bandwidth unused on a fast line). Each file keeps its own lock, resume and sha256 check
+// (models.mjs). onProgress(loaded, total) counts bytes over all of them. If one fails, no new one
+// starts, the ones under way finish (their files stay good for the next try), and the first error
+// is thrown.
+export async function downloadModels(paths, { dir = modelsDir(), request, ensure = ensureModel, parallel = 3, onProgress = () => {} } = {}) {
+  const total = paths.reduce((n, path) => n + MODELS[path].size, 0)
+  const loaded = new Map()
+  const report = () => onProgress([...loaded.values()].reduce((a, b) => a + b, 0), total)
+  const waiting = [...paths]
+  let failure = null
+  const worker = async () => {
+    while (waiting.length && !failure) {
+      const path = waiting.shift()
+      const size = MODELS[path].size
+      try {
+        await ensure(path, {
+          dir,
+          request,
+          onProgress: bytes => {
+            loaded.set(path, Math.min(bytes, size))
+            report()
+          },
+        })
+        loaded.set(path, size)
+        report()
+      } catch (error) {
+        failure ??= error
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(parallel, paths.length)) }, worker))
+  if (failure) throw failure
+  return total
+}
+
+// After a prepare: llama.cpp builds and archives nobody runs any more (~40 MB each, one per update
+// that moved the build). Kept: this build, and the one the previous profile ran (a hub may still
+// be running it until it restarts). A build's archive goes once the build is unpacked; an archive
+// whose download is locked by another process stays. Anything in use (Windows) stays for a later
+// prepare. Returns the removed names.
+export function pruneEngine({ dir = engineDir(), keep = [] } = {}) {
+  const kept = new Set([LLAMA_BUILD, ...keep.filter(Boolean)])
+  const removed = []
+  const remove = (path, name) => {
+    try {
+      rmSync(path, { recursive: true, force: true })
+      removed.push(name)
+    } catch {
+      // In use: removed on a later prepare.
+    }
+  }
+  const list = folder => {
+    try {
+      return readdirSync(folder, { withFileTypes: true })
+    } catch {
+      return []
+    }
+  }
+  for (const entry of list(dir)) {
+    if (entry.isDirectory() && /^b\d+$/.test(entry.name) && !kept.has(entry.name)) remove(join(dir, entry.name), entry.name)
+  }
+  const downloads = join(dir, 'downloads')
+  const names = list(downloads).map(entry => entry.name)
+  for (const name of names) {
+    const archive = name.match(/^(llama-(b\d+)-bin-.+?\.(?:zip|tar\.gz))(\.part)?$/)
+    if (!archive || names.includes(`${archive[1]}.lock`)) continue
+    const isCurrent = archive[2] === LLAMA_BUILD
+    if (isCurrent && !existsSync(join(dir, LLAMA_BUILD, '.unpacked'))) continue
+    remove(join(downloads, name), `downloads/${name}`)
+  }
+  return removed
+}
+
+// The build folder a profile runs: its "build", or the folder its exe is in under the engine folder.
+function profileBuild(profile, dir) {
+  if (profile?.build) return profile.build
+  if (!profile?.exe) return null
+  const inside = relative(dir, profile.exe)
+  return inside && !inside.startsWith('..') && !isAbsolute(inside) ? inside.split(sep)[0] : null
+}
+
 // Everything a profile needs, downloaded and checked: the build and the profile decision, then the
 // models of that profile. onProgress(loaded, total, label) reports bytes over all model files.
 // Returns the profile. `devices` already listed and a `reason` come with a fallback to the light
 // profile (setup.mjs, when the natural voice fails its test). checkSpace({ paths, dir }) runs once
 // the profile is known, before its models are downloaded (setup.mjs fails early on a full disk).
-export async function prepareEngine({ dir = engineDir(), models = modelsDir(), request, onProgress = () => {}, run = runFile, override = process.env.LUKE_VOICE_PROFILE ?? '', devices: known = null, reason = '', checkSpace = null } = {}) {
-  const key = platformKey()
+export async function prepareEngine({ dir = engineDir(), models = modelsDir(), request, onProgress = () => {}, run = runFile, override = process.env.LUKE_VOICE_PROFILE ?? '', devices: known = null, reason = '', checkSpace = null, key = platformKey(), ensure = ensureModel, parallel = 3 } = {}) {
+  const previous = readProfile(dir)
   let exe = null
   let devices = known ?? []
   if (key && override !== 'light') {
@@ -217,15 +299,11 @@ export async function prepareEngine({ dir = engineDir(), models = modelsDir(), r
   mkdirSync(dir, { recursive: true })
   writeFileSync(profileFile(dir), JSON.stringify(profile, null, 2))
   const groups = profileGroups(profile.profile, devices)
-  const total = groupBytes(groups)
   await checkSpace?.({ paths: groupPaths(groups), dir: models })
-  let done = 0
-  for (const path of groupPaths(groups)) {
-    await ensureModel(path, { dir: models, request, onProgress: loaded => onProgress(done + loaded, total, 'modelos') })
-    done += MODELS[path].size
-  }
+  const total = await downloadModels(groupPaths(groups), { dir: models, request, ensure, parallel, onProgress: (loaded, all) => onProgress(loaded, all, 'modelos') })
   onProgress(total, total, 'modelos')
   if (profile.profile === 'gpu') pruneModels({ dir: models })
+  pruneEngine({ dir, keep: [profileBuild(previous, dir)] })
   return profile
 }
 
@@ -264,7 +342,22 @@ function startGuard(log) {
   }
 }
 
-export function createEngine({ dir = engineDir(), models = modelsDir(), spawn = nodeSpawn, request = fetch, log = () => {}, command = null, readyTimeoutMs = 90_000, latePollMs = 2000, guard = null } = {}) {
+// A server's log past this size is moved to <name>.old.log when the server starts (replacing the
+// previous one), so the logs never grow without bound (~0.7 MB a day in use).
+export const MAX_LOG_BYTES = 5 * 1024 * 1024
+
+export function rotateLog(file, maxBytes = MAX_LOG_BYTES) {
+  try {
+    if (statSync(file).size <= maxBytes) return false
+    renameSync(file, file.replace(/\.log$/, '.old.log'))
+    return true
+  } catch {
+    // No log yet, or it is still open by a server that is exiting (Windows): append to it this time.
+    return false
+  }
+}
+
+export function createEngine({ dir = engineDir(), models = modelsDir(), spawn = nodeSpawn, request = fetch, log = () => {}, command = null, readyTimeoutMs = 90_000, latePollMs = 2000, guard = null, maxLogBytes = MAX_LOG_BYTES } = {}) {
   const services = new Map() // name -> { port, child, isReady, restarts: number[], isStopping, hasExited, firstWait }
   let isStopped = false
   let guarded = guard
@@ -298,6 +391,7 @@ export function createEngine({ dir = engineDir(), models = modelsDir(), spawn = 
     const base = command ?? [exe]
     const args = [...base.slice(1), ...spec.args(files), '--host', '127.0.0.1', '--port', String(port)]
     mkdirSync(dir, { recursive: true })
+    rotateLog(join(dir, `${name}.log`), maxLogBytes)
     const out = createWriteStream(join(dir, `${name}.log`), { flags: 'a' })
     // Never two servers for one service: one left over (a start that timed out) is stopped first,
     // or it would keep its GPU memory with nothing tracking it.

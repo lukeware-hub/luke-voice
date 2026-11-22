@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url'
 import { conversationToken, credits, ensureAgent, outOfCreditsMessage } from './agent.mjs'
 import { PORT, isMainModule, stateDir, stateFile } from './paths.mjs'
 import { ASR_GLOSSARY, SERVICES, VOICE_SETTINGS, createEngine, maxFrames, prepareEngine, profileReady, readProfile } from './engine.mjs'
-import { ensureModel } from './models.mjs'
+import { MODELS, ensureModel } from './models.mjs'
 import { COMMON_QUESTIONS, MAX_PICK_CHARS, createQuestionTakes, isYesNoQuestion } from './question-pick.mjs'
 import { route as routeUtterance } from './router.mjs'
 import { contentType, vendorFile } from './vendor.mjs'
@@ -27,6 +27,8 @@ const MAX_ACTIVITY = 60
 const ACK_WAIT_MS = 15_000
 // The router answers in ~0.3 s; past this, the utterance goes to the brain instead.
 const ROUTER_WAIT_MS = 1500
+// Qwen3-ASR transcribes a turn in ~0.2 s; a hung engine must not hold the request (the window gives up at 20 s).
+const STT_WAIT_MS = 20_000
 // A brain turn is one short Claude Haiku call (~2.5 s); a cold start can take longer.
 const BRAIN_WAIT_MS = 40_000
 const NO_SESSION_SAY = 'Nenhuma sessão do Claude está ligada. Ligue o luke-voice no Claude Code e me chame de novo.'
@@ -63,6 +65,19 @@ const ISOLATION = {
 const PROVIDERS = ['local', 'elevenlabs']
 
 const newSecret = () => randomBytes(24).toString('base64url')
+
+// One /tts request body for Ceci's voice: the settings, then the reference as a pre-made JSON
+// fragment (`"speaker_ref_b64":"...","speaker_ref_text":"..."`). Byte for byte what
+// JSON.stringify of the whole object gave.
+export function ttsBody(text, seed, refJson) {
+  const head = JSON.stringify({ input: text, lang: 'pt', stream: true, response_format: 'wav', ...VOICE_SETTINGS, ...(seed === undefined ? {} : { seed }), n_predict: maxFrames(text) })
+  return `${head.slice(0, -1)},${refJson}}`
+}
+
+// What a kept question take belongs to: the voice model files by content (their sha256, so a
+// republished model never replays old takes), the sampling and the reference clip.
+export const voiceKey = (refB64, refText) =>
+  [...SERVICES.tts.models.map(path => `${path}@${MODELS[path]?.sha256 ?? ''}`), JSON.stringify(VOICE_SETTINGS), createHash('sha1').update(refB64 + refText).digest('hex')].join('\n')
 // A short, one-way tag of the key so health can show which key is in use without exposing it.
 const keyId = key => (key ? createHash('sha256').update(key).digest('hex').slice(0, 8) : null)
 
@@ -230,7 +245,7 @@ export function needsPrepare(chosen, { isReady, override = '' }) {
   return ['gpu', 'light'].includes(override) && chosen.profile !== override
 }
 
-export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, engine = null, profile = () => null, voiceRef = null, onLocalVoice = () => {}, onSetup = () => ({ started: false }), engineState = () => 'off', log = () => {}, onShutdown = () => process.exit(0), questionsDir = join(stateDir(), 'cache', 'questions'), staleMs = STALE_SESSION_MS, sweepMs = 10_000 }) {
+export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, engine = null, profile = () => null, voiceRef = null, onLocalVoice = () => {}, onSetup = () => ({ started: false }), engineState = () => 'off', log = () => {}, onShutdown = () => process.exit(0), questionsDir = join(stateDir(), 'cache', 'questions'), staleMs = STALE_SESSION_MS, sweepMs = 10_000, sttWaitMs = STT_WAIT_MS }) {
   const sessions = new Map() // token -> session
   const replaced = new Set() // tokens a newer subscription of the same Claude session took over
   const streams = new Set() // window SSE responses
@@ -530,9 +545,22 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     form.append('language', 'pt')
     form.append('prompt', names ? `${ASR_GLOSSARY} Sessões: ${names}.` : ASR_GLOSSARY)
     const started = Date.now()
-    const answer = await fetch(`${url}/v1/audio/transcriptions`, { method: 'POST', body: form })
-    if (!answer.ok) return send(res, 502, { error: `speech engine ${answer.status}` })
-    const { text = '' } = await answer.json()
+    // The window gone (it hung up, or gave up waiting) or a hung engine: stop the transcription,
+    // so the engine's single slot is free for the next turn. The request closes once its body is
+    // read, so it is the response that tells.
+    const stop = new AbortController()
+    res.on('close', () => stop.abort())
+    const signal = AbortSignal.any([stop.signal, AbortSignal.timeout(sttWaitMs)])
+    let text = ''
+    try {
+      const answer = await fetch(`${url}/v1/audio/transcriptions`, { method: 'POST', body: form, signal })
+      if (!answer.ok) return send(res, 502, { error: `speech engine ${answer.status}` })
+      ;({ text = '' } = await answer.json())
+    } catch (error) {
+      if (stop.signal.aborted) return res.end()
+      if (error?.name === 'TimeoutError') return send(res, 504, { error: 'The speech engine did not answer in time.' })
+      throw error
+    }
     // Qwen3-ASR starts its text with "language Portuguese<asr_text>".
     return send(res, 200, { text: String(text).replace(/^[\s\S]*<asr_text>/, '').trim(), ms: Date.now() - started })
   }
@@ -541,6 +569,9 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
   // question is served from its kept takes when one rises naturally (question-pick.mjs).
   let voiceRefB64 = null
   let voiceRefText = null
+  // The reference as the JSON that ends every /tts body, made once: it is ~0.5 MB of base64, and
+  // serializing it again for every chunk Ceci says cost time on the hub's single thread.
+  let voiceRefJson = null
   let questions = null
   // Whether Ceci's reference clip and its transcript are both loaded. Without them the engine speaks
   // in some other voice, with its accent drifting to European Portuguese: nothing is said then, and
@@ -551,31 +582,27 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     voiceRefB64 = voiceRef && existsSync(voiceRef) ? readFileSync(voiceRef).toString('base64') : null
     // The transcript of the reference: with it, llama.cpp clones Ceci from the reference codes (ICL).
     voiceRefText = transcript && existsSync(transcript) ? readFileSync(transcript, 'utf8').trim() || null : null
-    return Boolean(voiceRefB64 && voiceRefText)
+    voiceRefJson = voiceRefB64 && voiceRefText ? JSON.stringify({ speaker_ref_b64: voiceRefB64, speaker_ref_text: voiceRefText }).slice(1, -1) : null
+    return Boolean(voiceRefJson)
   }
-  // /tts streams with stream:true (on /v1/audio/speech it would need stream_format).
-  const speak = (url, text, signal, seed) =>
-    fetch(`${url}/tts`, {
+  // /tts streams with stream:true (on /v1/audio/speech it would need stream_format). The body is
+  // the same JSON as before, with the reference's fragment appended as text. Never without the
+  // reference: her voice would come out in some other accent.
+  const speak = (url, text, signal, seed) => {
+    if (!voiceRefJson) return Promise.resolve(null)
+    return fetch(`${url}/tts`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        input: text,
-        lang: 'pt',
-        stream: true,
-        response_format: 'wav',
-        ...VOICE_SETTINGS,
-        ...(seed === undefined ? {} : { seed }),
-        n_predict: maxFrames(text),
-        ...(voiceRefB64 ? { speaker_ref_b64: voiceRefB64, ...(voiceRefText ? { speaker_ref_text: voiceRefText } : {}) } : {}),
-      }),
+      body: ttsBody(text, seed, voiceRefJson),
       signal,
     }).catch(() => null)
+  }
   // Made only once the voice reference is loaded (the callers check it): a take belongs to it.
   const questionTakes = () => {
     questions ??= createQuestionTakes({
       dir: questionsDir,
       // A take belongs to one voice: the model, the sampling and the reference clip.
-      voiceKey: [...SERVICES.tts.models, JSON.stringify(VOICE_SETTINGS), createHash('sha1').update(voiceRefB64 + voiceRefText).digest('hex')].join('\n'),
+      voiceKey: voiceKey(voiceRefB64, voiceRefText),
       log,
       say: async (text, seed, signal) => {
         const url = engine?.url('tts')
@@ -749,11 +776,12 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
 
       if (req.method === 'GET' && url.pathname.startsWith('/vendor/')) {
         const path = url.pathname.slice('/vendor/'.length)
-        const content = await vendor(path)
-        if (!content) return send(res, 404, { error: 'not found' })
+        const file = await vendor(path)
+        if (!file) return send(res, 404, { error: 'not found' })
         // Pinned by hash: the bytes for a path never change, so the browser may keep them.
-        res.writeHead(200, { 'content-type': contentType(path), 'cache-control': 'public, max-age=31536000, immutable', ...ISOLATION })
-        return res.end(content)
+        res.writeHead(200, { 'content-type': contentType(path), 'content-length': String(statSync(file).size), 'cache-control': 'public, max-age=31536000, immutable', ...ISOLATION })
+        // Streamed from disk, checked once per process (hub/vendor.mjs).
+        return pipeline(createReadStream(file), res).catch(() => res.destroy())
       }
 
       // Voice model files, verified by sha256 (hub/models.mjs); downloaded here if setup did not.

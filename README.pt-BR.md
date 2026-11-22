@@ -123,14 +123,14 @@ O `/luke-voice setup` faz o mesmo que a etapa 6 do instalador, de dentro do Clau
 O cérebro da Ceci é o Claude Haiku 5.5, chamado direto pelo `$.model.complete` do motor de mods, com esforço baixo e prompt em cache. A chamada `claude -p` ficou só como plano B. Os turnos do cérebro medidos levam de 0,9 a 2,8 s (levavam de 6 a 28 s).
 
 Algumas coisas não precisam de chamada ao modelo:
-- "pare" ou "para" para o Claude.
+- "pare" ou "para" para o Claude, com ou sem o nome dela e quantas vezes você disser ("Para, Ceci, para!", "chega, Ceci").
 - Quando a Ceci pergunta "posso?", um "sim" simples roda a ação pendente na hora, e um "não" simples cancela.
-- Quando o cérebro demora mais de 600 ms, a Ceci diz um reconhecimento curto ("Certo.", "Deixa eu ver.").
+- Quando o cérebro demora mais de 600 ms, a Ceci diz um reconhecimento curto ("Certo.", "Deixa eu ver."). Eles são gerados uma vez por janela, só enquanto ninguém fala, então nunca atrasam a primeira resposta dela.
 - No perfil gpu, um roteador local responde conversa rápida (cumprimentos, agradecimentos, despedidas, "quem é você", a idade dela, quem a criou) em cerca de 0,3 s, com frases escritas em `hub/router.mjs`, então ele nunca inventa nada. Todo o resto, e qualquer pedido, vai para o Claude Haiku. Uma checagem de palavras por cima do modelo pequeno garante que um pedido nunca seja respondido localmente (0 de 49 pedidos de teste foram).
 
 ### Saber quando você terminou de falar
 
-O Silero VAD (MIT) descarta sons sem fala. O Pipecat Smart Turn v3.2 (BSD-2-Clause) decide quando você terminou de falar: ele é consultado depois de uma pausa de 0,7 s, e só um "terminou" claro encerra a sua vez. 2 s de silêncio sempre encerram (1,3 s sem o modelo). Uma respiração no meio da frase dura até cerca de 1 s, então não te corta. Se você continuar falando antes de a Ceci começar a responder, as duas partes viram um pedido só.
+O Silero VAD (MIT) descarta sons sem fala. O Pipecat Smart Turn v3.2 (BSD-2-Clause) decide quando você terminou de falar: ele é consultado depois de uma pausa de 0,7 s, e só um "terminou" claro encerra a sua vez. 2 s de silêncio sempre encerram (1,3 s sem o modelo). Uma respiração no meio da frase dura até cerca de 1 s, então não te corta. Se você continuar falando antes de a Ceci começar a responder, as duas partes viram um pedido só. Um barulho que começa e continua (uma TV, um ar-condicionado) vira o som da sala em cerca de 10 s, então a sua vez continua terminando na hora.
 
 ### Quão rápido é
 
@@ -153,6 +153,8 @@ Desde a 0.10.0 a voz é o modelo 1.7B, que o dono ouviu como claramente melhor q
 No começo ela soava robótica, porque o tom quase não variava. Um painel automático (variação de tom e detectores de voz sintética, com gravações reais em pt-BR = 10 e o Kokoro = 3) deu 2,9 de 10 para a variação de tom dela. Com temperatura 0,9 em vez de 0,75, a melodia volta (6,2 de 10; a nota do painel foi de 7,6 para 8,8), e a nota do dono foi de 6 para 8,5.
 
 Palavras técnicas em inglês: a voz fala português, então lê algumas delas com regras do português ("changelog" vira "chão geloso", "cache" vira "caixa"). O `speech-text.js` dá a ela uma grafia própria para 11 delas. 34 palavras ganharam várias grafias cada, ditas em três frases e julgadas pelos ouvidos, depois conferidas em quatro frases novas. Uma grafia só fica quando trouxe a palavra em inglês de volta pelo menos duas vezes a mais nas sete frases. Com 5 sementes em 10 frases, os ouvidos acertaram 79 de 125 termos em inglês com as grafias, contra 63 sem elas. Nenhuma grafia ajudou "main", "README", "branch", "commit", "push" ou "lint", então elas ficam como estão.
+
+Números e texto: o `speech-text.js` só corta frases num ponto seguido de espaço, nunca dentro de "5.5", "1.500", "app.js" ou depois de "Sr.". Ele escreve por extenso o que a voz lia errado, cada mudança conferida pelos ouvidos dela contra o texto antigo: dinheiro ("R$ 1.500,00" vira "mil e quinhentos reais"), o feminino das horas ("21h" vira "vinte e uma horas"), durações ("1h30" vira "uma hora e 30 minutos"), datas ("22/11/2026" vira "22 de novembro de 2026"), versões ("Opus 5.5" vira "5 ponto 5"), "Prof." e "p.ex.", e "2 * 3" vira "2 vezes 3". Ele tira emoji e lê "site.com.br" como "site ponto com ponto bê erre". Números comuns ficam em algarismos, que ela lê bem. Frases do dia a dia são cortadas e escritas exatamente como antes (um teste confere 52 delas nas duas vozes).
 
 Perguntas: no português do Brasil, a pergunta de sim ou não sobe no fim, e a pergunta com palavra interrogativa ("o que", "quando") desce, como uma afirmação. A voz costuma terminar as duas retas. Subir o tom depois da geração (da 0.9.3 à 0.9.9) soou robótico para o dono. Cerca de 1 em 4 gerações do próprio modelo termina com a subida natural, e o dono deu 8,5 de 10 para a melhor entre 4 gerações. Cada geração leva cerca de 1 s e o motor faz uma por vez, então o hub (`hub/question-pick.mjs`) só faz gerações extras num tempo em que ninguém espera:
 - enquanto a frase antes da pergunta ainda toca (a janela diz quanto falta);
