@@ -3,3 +3,7 @@
 *.cmd -text
 *.ps1 text eol=crlf
 *.sh text eol=lf
+# Ceci's voice: the reference clip and its transcript are cloned on every machine exactly as stored,
+# never converted, so every install speaks with the same voice (hub/agent.test.mjs pins their sha256).
+*.wav binary
+agent/ceci-voice.txt -text
