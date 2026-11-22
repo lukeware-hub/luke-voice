@@ -34,5 +34,12 @@
       ["A Ceci", "O Luke"],
       ["Ceci", "Luke"]
     ]
+  },
+  "nara": {
+    "name": "Nara",
+    "gender": "female",
+    "replace": [
+      ["Ceci", "Nara"]
+    ]
   }
 }

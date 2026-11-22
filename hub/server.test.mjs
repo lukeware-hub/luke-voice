@@ -795,6 +795,7 @@ test('with a Mac Premium voice and no natural voice, /tts speaks with say and /c
   const said = []
   let profileNow = { profile: 'light' }
   let genderNow = 'female'
+  let siriNow = null
   const hub4 = createHub({
     serviceToken: SERVICE,
     windowKey: WINDOW,
@@ -803,6 +804,7 @@ test('with a Mac Premium voice and no natural voice, /tts speaks with say and /c
     platform: 'darwin',
     macVoice: () => 'Luciana (Premium)',
     macVoiceGender: () => genderNow,
+    macVoiceSiri: () => siriNow,
     macSay: async (voice, text) => (said.push([voice, text]), Buffer.from('RIFFfake')),
   })
   await new Promise(resolve => hub4.listen(0, '127.0.0.1', resolve))
@@ -827,6 +829,10 @@ test('with a Mac Premium voice and no natural voice, /tts speaks with say and /c
     assert.deepEqual(JSON.parse((await call('GET', '/config')).body).persona, { key: 'ceci', name: 'Ceci', gender: 'female' })
     genderNow = 'male'
     assert.deepEqual(JSON.parse((await call('GET', '/config')).body).persona, { key: 'luke', name: 'Luke', gender: 'male' })
+    // Siri Voz 2 (sandra) is Nara.
+    siriNow = 'sandra'
+    genderNow = 'female'
+    assert.deepEqual(JSON.parse((await call('GET', '/config')).body).persona, { key: 'nara', name: 'Nara', gender: 'female' })
     // The natural voice runs here: the Mac voice stays out of it.
     profileNow = { profile: 'gpu' }
     assert.equal(JSON.parse((await call('GET', '/config')).body).macVoice, null)

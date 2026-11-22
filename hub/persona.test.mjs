@@ -16,6 +16,12 @@ test('Luke only on a Mac with a male voice; Ceci everywhere else', () => {
   // No Mac voice speaks (the natural voice, ElevenLabs, the browser voice): Ceci.
   assert.equal(personaFor({ platform: 'darwin', voice: null, gender: 'male' }), 'ceci')
   for (const platform of ['win32', 'linux']) assert.equal(personaFor({ platform, voice: 'system', gender: 'male' }), 'ceci')
+  // Siri Voz 2 (sandra) is Nara; Siri Voz 1 (nando) is Luke.
+  assert.equal(personaFor({ platform: 'darwin', voice: 'system', gender: 'female', siri: 'sandra' }), 'nara')
+  assert.equal(personaFor({ platform: 'darwin', voice: 'system', gender: 'male', siri: 'nando' }), 'luke')
+  assert.equal(personaFor({ platform: 'win32', voice: 'system', gender: 'female', siri: 'sandra' }), 'ceci')
+  assert.equal(personaFor({ platform: 'darwin', voice: null, gender: 'female', siri: 'sandra' }), 'ceci')
+  assert.deepEqual(personaInfo('nara'), { key: 'nara', name: 'Nara', gender: 'female' })
   assert.deepEqual(personaInfo('luke'), { key: 'luke', name: 'Luke', gender: 'male' })
   assert.deepEqual(personaInfo('ceci'), { key: 'ceci', name: 'Ceci', gender: 'female' })
 })
@@ -45,4 +51,14 @@ test("Luke's small talk and router prompt", () => {
   const router = asPersona(ROUTER_SYSTEM, 'luke')
   assert.match(router, /um assistente de voz chamado Luke/)
   assert.doesNotMatch(router, /Ceci/)
+})
+
+test("Nara's brain prompt is Ceci's with her name: still a woman, in the feminine", async () => {
+  const prompt = asPersona(await readFile(join(root, 'agent', 'brain-prompt.md'), 'utf8'), 'nara')
+  assert.match(prompt, /^Você é a Nara, a assistente de voz/)
+  assert.match(prompt, /Seu nome é Nara\. Você é uma mulher de 22 anos, e linda\./)
+  assert.match(prompt, /Fale de si no feminino/)
+  assert.doesNotMatch(prompt, /Ceci/)
+  assert.match(prompt, /"ceci:"/)
+  assert.match(asPersona(JSON.stringify(REPLIES), 'nara'), /Eu sou a Nara!/)
 })

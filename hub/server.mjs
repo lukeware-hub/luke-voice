@@ -326,7 +326,7 @@ export function createEngineRunner({ engine, setDownload, warmQuestions = () => 
   }
 }
 
-export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, engine = null, profile = () => null, voiceRef = null, onLocalVoice = () => {}, onSetup = () => ({ started: false }), engineState = () => 'off', macVoice = () => null, macVoiceGender = () => null, macSay = sayWav, platform = process.platform, log = () => {}, onShutdown = () => process.exit(0), questionsDir = join(stateDir(), 'cache', 'questions'), staleMs = STALE_SESSION_MS, sweepMs = 10_000, sttWaitMs = STT_WAIT_MS, clock = Date.now }) {
+export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, engine = null, profile = () => null, voiceRef = null, onLocalVoice = () => {}, onSetup = () => ({ started: false }), engineState = () => 'off', macVoice = () => null, macVoiceGender = () => null, macVoiceSiri = () => null, macSay = sayWav, platform = process.platform, log = () => {}, onShutdown = () => process.exit(0), questionsDir = join(stateDir(), 'cache', 'questions'), staleMs = STALE_SESSION_MS, sweepMs = 10_000, sttWaitMs = STT_WAIT_MS, clock = Date.now }) {
   const sessions = new Map() // token -> session
   const launches = new Map() // one-time launch code -> when it expires
   const replaced = new Set() // tokens a newer subscription of the same Claude session took over
@@ -732,8 +732,8 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
   // The Mac's own Premium voice speaks when the natural voice does not run here (mac-voice.mjs).
   const macVoiceNow = () => (profile()?.profile === 'gpu' ? null : macVoice() || null)
   // A Mac with no natural voice and no Premium voice yet: the window says where to download one.
-  // Ceci, or Luke when the free voice speaks with a male Mac voice (persona.mjs).
-  const personaNow = () => (voiceProvider() === 'local' ? personaFor({ platform, voice: macVoiceNow(), gender: macVoiceGender() }) : 'ceci')
+  // Ceci, or Nara or Luke when the free voice speaks with the Mac's own voice (persona.mjs).
+  const personaNow = () => (voiceProvider() === 'local' ? personaFor({ platform, voice: macVoiceNow(), gender: macVoiceGender(), siri: macVoiceSiri() }) : 'ceci')
   const macVoiceHint = () => platform === 'darwin' && profile()?.profile === 'light' && !macVoiceNow() && process.env.LUKE_VOICE_MAC_VOICE !== 'off'
   async function macTts(voice, req, res) {
     const body = await readBody(req)
@@ -1022,14 +1022,14 @@ if (isMainModule(import.meta.url, process.argv[1])) {
   const runner = createEngineRunner({ engine, log, setDownload: next => hub.setEngineDownload(next), warmQuestions: () => hub.warmQuestions() })
   // Looked for again at most once a minute: a voice downloaded, or a new Spoken Content system
   // voice (Siri Voz 1 to Voz 2), counts from the next call, with no hub restart.
-  // { voice, gender } or null (mac-voice.mjs).
+  // { voice, gender, siri } or null (mac-voice.mjs).
   let macVoice = null
   let macLooked = 0
   const lookForMacVoice = () => {
     if (Date.now() - macLooked < 60_000) return
     macLooked = Date.now()
     pickMacVoice().then(found => {
-      if (found && (found.voice !== macVoice?.voice || found.gender !== macVoice?.gender)) log(`mac voice: ${found.voice} (${found.gender ?? 'gender unknown'})`)
+      if (found && (found.voice !== macVoice?.voice || found.gender !== macVoice?.gender || found.siri !== macVoice?.siri)) log(`mac voice: ${found.voice}${found.siri ? ` ${found.siri}` : ''} (${found.gender ?? 'gender unknown'})`)
       macVoice = found
     })
   }
@@ -1049,6 +1049,7 @@ if (isMainModule(import.meta.url, process.argv[1])) {
       return macVoice?.voice ?? null
     },
     macVoiceGender: () => macVoice?.gender ?? null,
+    macVoiceSiri: () => macVoice?.siri ?? null,
     onSetup: runner.setup,
     log,
   })

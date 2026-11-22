@@ -89,19 +89,22 @@ async function readSiriCatalogs() {
   return texts.join('\n')
 }
 
-// The voice to use on this machine and its gender: { voice, gender }, with gender 'male',
-// 'female' or null. A Siri system voice first, then the best Premium/Enhanced pt-BR voice; null
+// The voice to use on this machine: { voice, gender, siri }, with gender 'male', 'female' or null,
+// and siri the Siri voice's name ('nando', 'sandra') when the system voice is a Siri voice. A Siri system voice first, then the best Premium/Enhanced pt-BR voice; null
 // off macOS or with neither.
 export async function pickMacVoice({ platform = process.platform, env = process.env, list = () => run('osascript', ['-l', 'JavaScript', '-e', LIST_VOICES], { timeoutMs: 10_000 }), prefs = () => run('defaults', ['read', 'com.apple.Accessibility', 'SpokenContentDefaultVoiceSelectionsByLanguage'], { timeoutMs: 5000 }), catalogs = readSiriCatalogs } = {}) {
   if (platform !== 'darwin' || env.LUKE_VOICE_MAC_VOICE === 'off') return null
   const override = env.LUKE_VOICE_MAC_VOICE ?? ''
   if (!override) {
     const chosen = await prefs().catch(() => '')
-    if (isSiriSystemVoice(chosen)) return { voice: SYSTEM, gender: siriGender(siriVoiceName(chosen), await catalogs().catch(() => '')) }
+    if (isSiriSystemVoice(chosen)) {
+      const siri = siriVoiceName(chosen)
+      return { voice: SYSTEM, gender: siriGender(siri, await catalogs().catch(() => '')), siri }
+    }
   }
   const voices = parseVoices(await list().catch(() => ''))
   const voice = bestVoice(voices, override)
-  return voice ? { voice, gender: voices.find(found => found.id === voice)?.gender ?? null } : null
+  return voice ? { voice, gender: voices.find(found => found.id === voice)?.gender ?? null, siri: null } : null
 }
 
 // One line spoken with `say`, as 24 kHz mono PCM16 WAV. The signal stops it (Ceci cut off).

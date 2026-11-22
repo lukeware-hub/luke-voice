@@ -37,7 +37,7 @@ export type BrainRequest = {
   turns: Array<{ role: 'user' | 'luke'; text: string }>
   sessions: Array<{ name: string; isBusy: boolean }>
   focused: string | null
-  // 'luke' when the Mac speaks with a male voice (hub/persona.mjs); Ceci otherwise.
+  // 'luke' or 'nara' when the Mac speaks with its own voice (hub/persona.mjs); Ceci otherwise.
   persona?: string
 }
 
@@ -62,7 +62,7 @@ const PENDABLE_TOOLS = ['luke_run_task', 'luke_send_to_claude']
 
 // The fallback brain, for an engine without $.model.complete: one short `claude -p` per turn.
 // No tools, MCP servers, settings, skills or session history.
-// Luke's prompt is not a file: it is passed as text.
+// Luke's and Nara's prompts are not files: they are passed as text.
 export function brainArgs(root: string, prompt: string | null = null): string[] {
   return [
     'claude', '-p',
@@ -135,7 +135,7 @@ export function asPersona(text: string, key: string | undefined, personas: Perso
 }
 
 async function promptFor($: EngineInterface, persona: string | undefined): Promise<string> {
-  const key = persona === 'luke' ? 'luke' : 'ceci'
+  const key = persona === 'luke' || persona === 'nara' ? persona : 'ceci'
   const known = brainPrompts.get(key)
   if (known) return known
   const base = await $.fs.read(`${$.plugin.root}/agent/brain-prompt.md`)
@@ -172,7 +172,7 @@ async function askBrain($: EngineInterface, request: BrainRequest): Promise<Brai
   // A slow or failed direct call (a timeout, say) leaves too little time for a second, paid call.
   const left = BRAIN_BUDGET_MS - ((await $.clock.now()) - startedAt)
   if (left < MIN_FALLBACK_MS) throw new Error(`the brain did not answer in time: ${failure || 'no reply'}`)
-  const out = await $.process.run(brainArgs($.plugin.root, request.persona === 'luke' ? brainPrompt : null), { timeoutMs: left, stdin: brainInput(request) })
+  const out = await $.process.run(brainArgs($.plugin.root, request.persona === 'luke' || request.persona === 'nara' ? brainPrompt : null), { timeoutMs: left, stdin: brainInput(request) })
   if (out.exitCode !== 0 && !out.stdout.trim()) throw new Error(out.stderr.trim() || `claude exited with ${out.exitCode}`)
   return parseBrain(out.stdout)
 }
@@ -417,8 +417,9 @@ function chosenProvider(options: Record<string, unknown>): VoiceProvider | '' {
   return PROVIDERS.includes(configured as VoiceProvider) ? (configured as VoiceProvider) : ''
 }
 
-// The free voice is Luke when the Mac speaks with a male voice (the hub's persona), Ceci otherwise.
-const voiceName = (provider: string, name: unknown = 'Ceci') => (provider === 'elevenlabs' ? 'ElevenLabs' : `gratuita (${name === 'Luke' ? 'Luke' : 'Ceci'}, no seu computador)`)
+// The free voice is Luke or Nara when the Mac speaks with its own voice (the hub's persona), Ceci otherwise.
+const personaName = (name: unknown) => (name === 'Luke' || name === 'Nara' ? name : 'Ceci')
+const voiceName = (provider: string, name: unknown = 'Ceci') => (provider === 'elevenlabs' ? 'ElevenLabs' : `gratuita (${personaName(name)}, no seu computador)`)
 
 async function apiKey($: EngineInterface, options: Record<string, unknown>) {
   const configured = typeof options.api_key === 'string' ? options.api_key.trim() : ''
@@ -653,7 +654,7 @@ async function show($: EngineInterface, options: Record<string, unknown>, withCa
   if (res.json.isOpened === false) return `Não consegui abrir a janela da chamada. Abra este endereço no Chrome ou no Edge: ${String(res.json.url ?? '')}`
   const keyNote = l.reason === NO_KEY ? ' Falta a chave da ElevenLabs: salve com /plugin configure luke-voice@luke-voice, ou use /luke-voice voz local.' : ''
   const who = withCall ? (await hubFetch($, 'GET', '/health', undefined, null).catch(() => null))?.json?.persona?.name : null
-  return `${withCall ? (who === 'Luke' ? 'Chamando o Luke' : 'Chamando a Ceci') : 'Janela da chamada'} na sessão "${l.name}".${res.json.isWindowOpen ? '' : ' A janela da chamada está abrindo.'}${keyNote}`
+  return `${withCall ? (who === 'Luke' ? 'Chamando o Luke' : `Chamando a ${personaName(who)}`) : 'Janela da chamada'} na sessão "${l.name}".${res.json.isWindowOpen ? '' : ' A janela da chamada está abrindo.'}${keyNote}`
 }
 
 // /luke-voice voz [local|elevenlabs]: shows the voice, or switches it for the next call.
@@ -805,7 +806,7 @@ async function helpText($: EngineInterface) {
     'Seu status agora:',
     ...checks.map(line => `  ${line}`),
     '',
-    'O que é: a Ceci (ou o Luke, quando a voz do Mac é masculina), uma assistente de voz em português ao lado do Claude Code. Você fala o que quer, ela repete e pergunta "posso?", e depois do seu "sim" um subagente do Claude faz a tarefa no seu computador. Quando termina, ela conta o resultado.',
+    'O que é: a Ceci (no Mac com a Siri Voz 1, o Luke; com a Siri Voz 2, a Nara), uma assistente de voz em português ao lado do Claude Code. Você fala o que quer, ela repete e pergunta "posso?", e depois do seu "sim" um subagente do Claude faz a tarefa no seu computador. Quando termina, ela conta o resultado.',
     '',
     'Antes de usar (uma vez só):',
     '  1. Tenha o Node.js 20 ou mais novo (nodejs.org, versão LTS) e o Google Chrome.',

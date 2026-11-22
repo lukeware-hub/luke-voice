@@ -788,6 +788,26 @@ test("a think command for Luke sends Luke's prompt, made from Ceci's with agent/
   expect(sent.systemBlocks?.[0]?.text).toBe('Você é o Luke.')
 })
 
+test("a think command for Nara sends Nara's prompt", async ($, on) => {
+  brainComplete = { isAnswered: true, text: '{"say":"Oi!","tool":null}' }
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => (release = resolve))
+  const personas = { ceci: { name: 'Ceci', gender: 'female' }, nara: { name: 'Nara', gender: 'female', replace: [['Ceci', 'Nara']] } }
+  on('fs.read', (_, e) => ({ value: /persona\.json$/.test(String(e.path)) ? JSON.stringify(personas) : 'Você é a Ceci.' }))
+  const { calls, completes } = engine(on, [
+    async () => ({ status: 200, body: { commands: [{ id: 'n1', type: 'think', request: { ...REQUEST, persona: 'nara' } }] } }),
+    async () => (await held, { status: 410, body: {} }),
+  ])
+
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/ack'))
+  await $.command.run(run('off'))
+  release()
+
+  const sent = completes[0] as { systemBlocks?: Array<{ text: string }> }
+  expect(sent.systemBlocks?.[0]?.text).toBe('Você é a Nara.')
+})
+
 test('a brain that fails acks the think command as failed, with the reason', async ($, on) => {
   brainComplete = { isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded' }
   let release: () => void = () => undefined

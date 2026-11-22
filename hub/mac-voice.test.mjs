@@ -43,8 +43,8 @@ test('bestVoice takes Premium over Enhanced, and never a compact voice', () => {
 test('pickMacVoice is null off macOS, when turned off, or when the listing fails', async () => {
   const list = async () => PREMIUM
   const prefs = async () => '{ SystemTTSLanguage = pt; }'
-  assert.deepEqual(await pickMacVoice({ platform: 'darwin', env: {}, list, prefs }), { voice: 'com.apple.voice.premium.pt-BR.Felipe', gender: 'male' })
-  assert.deepEqual(await pickMacVoice({ platform: 'darwin', env: {}, list: async () => ENHANCED, prefs }), { voice: 'com.apple.voice.enhanced.pt-BR.Luciana', gender: 'female' })
+  assert.deepEqual(await pickMacVoice({ platform: 'darwin', env: {}, list, prefs }), { voice: 'com.apple.voice.premium.pt-BR.Felipe', gender: 'male', siri: null })
+  assert.deepEqual(await pickMacVoice({ platform: 'darwin', env: {}, list: async () => ENHANCED, prefs }), { voice: 'com.apple.voice.enhanced.pt-BR.Luciana', gender: 'female', siri: null })
   assert.equal(await pickMacVoice({ platform: 'win32', env: {}, list }), null)
   assert.equal(await pickMacVoice({ platform: 'darwin', env: { LUKE_VOICE_MAC_VOICE: 'off' }, list }), null)
   assert.equal(await pickMacVoice({ platform: 'darwin', env: {}, list: async () => Promise.reject(new Error('no osascript')), prefs }), null)
@@ -68,11 +68,11 @@ test('a Siri system voice wins: say speaks with no -v', async () => {
   assert.equal(isSiriSystemVoice(SIRI.replace('com.apple.siri.natural.Nando', 'com.apple.voice.enhanced.pt-BR.Luciana')), false)
   assert.equal(isSiriSystemVoice('{ SystemTTSLanguage = pt; }'), false)
   assert.equal(siriVoiceName(SIRI), 'nando')
-  assert.deepEqual(await pickMacVoice({ platform: 'darwin', env: {}, list: async () => PREMIUM, prefs: siri, catalogs: async () => CATALOG }), { voice: SYSTEM, gender: 'male' })
+  assert.deepEqual(await pickMacVoice({ platform: 'darwin', env: {}, list: async () => PREMIUM, prefs: siri, catalogs: async () => CATALOG }), { voice: SYSTEM, gender: 'male', siri: 'nando' })
   const sandra = async () => SIRI.replace('Nando', 'Sandra')
-  assert.deepEqual(await pickMacVoice({ platform: 'darwin', env: {}, list: async () => PREMIUM, prefs: sandra, catalogs: async () => CATALOG }), { voice: SYSTEM, gender: 'female' })
+  assert.deepEqual(await pickMacVoice({ platform: 'darwin', env: {}, list: async () => PREMIUM, prefs: sandra, catalogs: async () => CATALOG }), { voice: SYSTEM, gender: 'female', siri: 'sandra' })
   // A voice picked by name still wins over the system voice.
-  assert.deepEqual(await pickMacVoice({ platform: 'darwin', env: { LUKE_VOICE_MAC_VOICE: 'com.apple.voice.enhanced.pt-BR.Luciana' }, list: async () => PREMIUM, prefs: siri }), { voice: 'com.apple.voice.enhanced.pt-BR.Luciana', gender: 'female' })
+  assert.deepEqual(await pickMacVoice({ platform: 'darwin', env: { LUKE_VOICE_MAC_VOICE: 'com.apple.voice.enhanced.pt-BR.Luciana' }, list: async () => PREMIUM, prefs: siri }), { voice: 'com.apple.voice.enhanced.pt-BR.Luciana', gender: 'female', siri: null })
 })
 
 test('siriGender reads the catalog, and knows the pt-BR Siri voices without it', () => {

@@ -409,7 +409,7 @@ function voiceFacts(health) {
         : `processador (${info.threads} threads)`
       : 'carrega na primeira chamada'
   return [
-    ['Voz', `${health.persona?.name === 'Luke' ? 'Luke' : 'Ceci'}, gratuita, no seu computador`, 'ok'],
+    ['Voz', `${['Luke', 'Nara'].includes(health.persona?.name) ? health.persona.name : 'Ceci'}, gratuita, no seu computador`, 'ok'],
     ['Perfil', ...profile],
     ...(model ? [['Modelos', model, '']] : []),
     ['Roda em', runsOn, ''],
@@ -519,17 +519,17 @@ async function microphone() {
   for (const track of stream.getTracks()) track.stop()
 }
 
-// Who answers: Ceci, or Luke when the Mac speaks with a male voice (the hub's persona).
+// Who answers: Ceci, or Luke or Nara when the Mac speaks with its own voice (the hub's persona).
 function applyPersona(who) {
   const isLuke = who?.name === 'Luke'
-  const name = isLuke ? 'Luke' : 'Ceci'
+  const name = isLuke || who?.name === 'Nara' ? who.name : 'Ceci'
   document.title = name
   const title = document.querySelector('h1.title')
   if (title) title.textContent = name
-  const [to, he] = isLuke ? ['ao Luke', 'ele'] : ['à Ceci', 'ela']
+  const [to, he] = isLuke ? ['ao Luke', 'ele'] : [`à ${name}`, 'ela']
   STATES.live.banner[2] = `Peça algo ${to}. Antes de agir no computador, ${he} confirma com você.`
   const intro = document.getElementById('helpIntro')
-  if (intro) intro.textContent = `Fale com ${isLuke ? 'o Luke' : 'a Ceci'} como falaria com uma pessoa. Antes de mexer no seu computador, ${he} repete o pedido e espera o seu "sim".`
+  if (intro) intro.textContent = `Fale com ${isLuke ? 'o Luke' : `a ${name}`} como falaria com uma pessoa. Antes de mexer no seu computador, ${he} repete o pedido e espera o seu "sim".`
 }
 
 // The voice engine the hub picked: the free local voice, or ElevenLabs. Loaded once per page.
