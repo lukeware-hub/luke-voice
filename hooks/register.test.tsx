@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Args, On } from 'claude-code'
 
-import { brainArgs, brainInput, classifyTask, NO_NODE, parseBrain, parseBrainText, preview, TIERS } from './register'
+import { asPersona, brainArgs, brainInput, classifyTask, NO_NODE, parseBrain, parseBrainText, preview, TIERS } from './register'
 import type { BrainRequest } from './register'
 
 const FOOTER = { plugin: 'luke-voice', component: 'SessionMode', props: { modes: [] } } as const
@@ -692,6 +692,20 @@ test('the fallback brain call is one lean Claude Haiku 5.5 run at low effort: no
   expect(argv[argv.indexOf('--system-prompt-file') + 1]).toBe('/plugin/agent/brain-prompt.md')
 })
 
+test("Luke's fallback brain call passes his prompt as text; Ceci's still reads the file", () => {
+  const argv = brainArgs('/plugin', 'Você é o Luke.')
+  expect(argv[argv.indexOf('--system-prompt') + 1]).toBe('Você é o Luke.')
+  expect(argv).not.toContain('--system-prompt-file')
+  expect(brainArgs('/plugin')).not.toContain('--system-prompt')
+})
+
+test("asPersona turns Ceci's words into Luke's, in order, and leaves Ceci's as they are", () => {
+  const personas = { ceci: { name: 'Ceci', gender: 'female' }, luke: { name: 'Luke', gender: 'male', replace: [['Eu sou a Ceci!', 'Eu sou o Luke!'], ['a Ceci', 'o Luke'], ['Ceci', 'Luke']] as Array<[string, string]> } }
+  expect(asPersona('Eu sou a Ceci! Fale com a Ceci. Ceci.', 'luke', personas)).toBe('Eu sou o Luke! Fale com o Luke. Luke.')
+  expect(asPersona('Eu sou a Ceci!', 'ceci', personas)).toBe('Eu sou a Ceci!')
+  expect(asPersona('Eu sou a Ceci!', undefined, personas)).toBe('Eu sou a Ceci!')
+})
+
 test('the brain reads the sessions, the quoted context, the conversation and what the user just said', () => {
   const input = brainInput(REQUEST)
   expect(input).toContain('[sessões] api (ocupada, em foco), site (livre)')
@@ -752,6 +766,26 @@ test('a think command runs the brain as one direct Haiku call at low effort, wit
     tool: null,
     pending: { name: 'luke_run_task', args: { task: 'verificar os testes de login' } },
   })
+})
+
+test("a think command for Luke sends Luke's prompt, made from Ceci's with agent/persona.json", async ($, on) => {
+  brainComplete = { isAnswered: true, text: '{"say":"Oi!","tool":null}' }
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => (release = resolve))
+  const personas = { ceci: { name: 'Ceci', gender: 'female' }, luke: { name: 'Luke', gender: 'male', replace: [['Você é a Ceci.', 'Você é o Luke.']] } }
+  on('fs.read', (_, e) => ({ value: /persona\.json$/.test(String(e.path)) ? JSON.stringify(personas) : 'Você é a Ceci.' }))
+  const { calls, completes } = engine(on, [
+    async () => ({ status: 200, body: { commands: [{ id: 'l1', type: 'think', request: { ...REQUEST, persona: 'luke' } }] } }),
+    async () => (await held, { status: 410, body: {} }),
+  ])
+
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/ack'))
+  await $.command.run(run('off'))
+  release()
+
+  const sent = completes[0] as { systemBlocks?: Array<{ text: string }> }
+  expect(sent.systemBlocks?.[0]?.text).toBe('Você é o Luke.')
 })
 
 test('a brain that fails acks the think command as failed, with the reason', async ($, on) => {

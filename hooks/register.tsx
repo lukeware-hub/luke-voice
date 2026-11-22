@@ -37,6 +37,8 @@ export type BrainRequest = {
   turns: Array<{ role: 'user' | 'luke'; text: string }>
   sessions: Array<{ name: string; isBusy: boolean }>
   focused: string | null
+  // 'luke' when the Mac speaks with a male voice (hub/persona.mjs); Ceci otherwise.
+  persona?: string
 }
 
 type BrainTool = { name: string; args: Record<string, unknown> }
@@ -60,13 +62,14 @@ const PENDABLE_TOOLS = ['luke_run_task', 'luke_send_to_claude']
 
 // The fallback brain, for an engine without $.model.complete: one short `claude -p` per turn.
 // No tools, MCP servers, settings, skills or session history.
-export function brainArgs(root: string): string[] {
+// Luke's prompt is not a file: it is passed as text.
+export function brainArgs(root: string, prompt: string | null = null): string[] {
   return [
     'claude', '-p',
     '--model', BRAIN_MODEL,
     '--effort', BRAIN_EFFORT,
     '--output-format', 'json',
-    '--system-prompt-file', `${root}/agent/brain-prompt.md`,
+    ...(prompt === null ? ['--system-prompt-file', `${root}/agent/brain-prompt.md`] : ['--system-prompt', prompt]),
     '--tools', '',
     '--strict-mcp-config',
     '--disable-slash-commands',
@@ -118,14 +121,34 @@ export function parseBrain(stdout: string): BrainReply {
   return parseBrainText(envelope.result)
 }
 
-// The brain prompt, read once per mod load.
-let brainPrompt: string | null = null
+// The brain prompt per persona, read once per mod load.
+const brainPrompts = new Map<string, string>()
+
+type Personas = Record<string, { name: string; gender: string; replace?: Array<[string, string]> }>
+
+// Ceci's text in another persona's words: agent/persona.json's replacements, in order (the same
+// as asPersona in hub/persona.mjs). Ceci, or an unknown persona, keeps the text as it is.
+export function asPersona(text: string, key: string | undefined, personas: Personas): string {
+  let out = text
+  for (const [from, to] of (key && personas[key]?.replace) || []) out = out.split(from).join(to)
+  return out
+}
+
+async function promptFor($: EngineInterface, persona: string | undefined): Promise<string> {
+  const key = persona === 'luke' ? 'luke' : 'ceci'
+  const known = brainPrompts.get(key)
+  if (known) return known
+  const base = await $.fs.read(`${$.plugin.root}/agent/brain-prompt.md`)
+  const prompt = key === 'ceci' ? base : asPersona(base, key, JSON.parse(await $.fs.read(`${$.plugin.root}/agent/persona.json`)) as Personas)
+  brainPrompts.set(key, prompt)
+  return prompt
+}
 
 // One brain turn. The engine's direct model call: no process to start, and the prompt is cached
 // between turns. An engine that cannot make the call (an older Claude Code) throws, and the
 // `claude -p` fallback answers instead, in the time left.
 async function askBrain($: EngineInterface, request: BrainRequest): Promise<BrainReply> {
-  brainPrompt ??= await $.fs.read(`${$.plugin.root}/agent/brain-prompt.md`)
+  const brainPrompt = await promptFor($, request.persona)
   const startedAt = await $.clock.now()
   let reply: Awaited<ReturnType<EngineInterface['model']['complete']>> | null = null
   let failure = ''
@@ -149,7 +172,7 @@ async function askBrain($: EngineInterface, request: BrainRequest): Promise<Brai
   // A slow or failed direct call (a timeout, say) leaves too little time for a second, paid call.
   const left = BRAIN_BUDGET_MS - ((await $.clock.now()) - startedAt)
   if (left < MIN_FALLBACK_MS) throw new Error(`the brain did not answer in time: ${failure || 'no reply'}`)
-  const out = await $.process.run(brainArgs($.plugin.root), { timeoutMs: left, stdin: brainInput(request) })
+  const out = await $.process.run(brainArgs($.plugin.root, request.persona === 'luke' ? brainPrompt : null), { timeoutMs: left, stdin: brainInput(request) })
   if (out.exitCode !== 0 && !out.stdout.trim()) throw new Error(out.stderr.trim() || `claude exited with ${out.exitCode}`)
   return parseBrain(out.stdout)
 }
@@ -394,7 +417,8 @@ function chosenProvider(options: Record<string, unknown>): VoiceProvider | '' {
   return PROVIDERS.includes(configured as VoiceProvider) ? (configured as VoiceProvider) : ''
 }
 
-const voiceName = (provider: string) => (provider === 'elevenlabs' ? 'ElevenLabs' : 'gratuita (Ceci, no seu computador)')
+// The free voice is Luke when the Mac speaks with a male voice (the hub's persona), Ceci otherwise.
+const voiceName = (provider: string, name: unknown = 'Ceci') => (provider === 'elevenlabs' ? 'ElevenLabs' : `gratuita (${name === 'Luke' ? 'Luke' : 'Ceci'}, no seu computador)`)
 
 async function apiKey($: EngineInterface, options: Record<string, unknown>) {
   const configured = typeof options.api_key === 'string' ? options.api_key.trim() : ''
@@ -628,7 +652,8 @@ async function show($: EngineInterface, options: Record<string, unknown>, withCa
   // Nothing could open the window (no browser found): the address, to open by hand.
   if (res.json.isOpened === false) return `Não consegui abrir a janela da chamada. Abra este endereço no Chrome ou no Edge: ${String(res.json.url ?? '')}`
   const keyNote = l.reason === NO_KEY ? ' Falta a chave da ElevenLabs: salve com /plugin configure luke-voice@luke-voice, ou use /luke-voice voz local.' : ''
-  return `${withCall ? 'Chamando a Ceci' : 'Janela da chamada'} na sessão "${l.name}".${res.json.isWindowOpen ? '' : ' A janela da chamada está abrindo.'}${keyNote}`
+  const who = withCall ? (await hubFetch($, 'GET', '/health', undefined, null).catch(() => null))?.json?.persona?.name : null
+  return `${withCall ? (who === 'Luke' ? 'Chamando o Luke' : 'Chamando a Ceci') : 'Janela da chamada'} na sessão "${l.name}".${res.json.isWindowOpen ? '' : ' A janela da chamada está abrindo.'}${keyNote}`
 }
 
 // /luke-voice voz [local|elevenlabs]: shows the voice, or switches it for the next call.
@@ -671,7 +696,7 @@ async function statusText($: EngineInterface) {
   return [
     `luke-voice: on (${l.state}${l.name ? `, session "${l.name}"` : ''})`,
     health?.ok ? `hub: up, version ${h.version}, ${h.sessions} session(s), call ${h.call}, window ${h.isWindowOpen ? 'open' : 'closed'}` : 'hub: down',
-    health?.ok ? `voz: ${voiceName(String(h.provider ?? 'elevenlabs'))}` : null,
+    health?.ok ? `voz: ${voiceName(String(h.provider ?? 'elevenlabs'), h.persona?.name)}` : null,
     health?.ok && h.provider === 'local' ? `perfil: ${profileText(h)}` : null,
     health?.ok && (h.provider ?? 'elevenlabs') === 'elevenlabs' && !h.hasKey ? 'missing: ElevenLabs API key' : null,
     queued.length ? `queued prompts: ${queued.length}` : null,
@@ -761,7 +786,7 @@ async function helpText($: EngineInterface) {
   const checks = [
     `${mark(on)} luke-voice ligado${on ? '' : ': clique no botão "✦ luke-voice: off" acima do prompt, ou digite /luke-voice'}`,
     `${mark(Boolean(h))} Servidor local (hub)${h ? ` rodando, versão ${h.version}` : ': não está rodando. Ele sobe sozinho quando você liga o luke-voice'}`,
-    h ? `✓ Voz: ${voiceName(provider)}. Para trocar: /luke-voice voz` : null,
+    h ? `✓ Voz: ${voiceName(provider, h.persona?.name)}. Para trocar: /luke-voice voz` : null,
     h && provider === 'local' ? `${mark(Boolean(h.profile) && !h.download?.error)} Perfil: ${profileText(h)}` : null,
     // Only the ElevenLabs voice needs a key.
     h && isEleven
@@ -780,7 +805,7 @@ async function helpText($: EngineInterface) {
     'Seu status agora:',
     ...checks.map(line => `  ${line}`),
     '',
-    'O que é: a Ceci, uma assistente de voz em português ao lado do Claude Code. Você fala o que quer, ela repete e pergunta "posso?", e depois do seu "sim" um subagente do Claude faz a tarefa no seu computador. Quando termina, ela conta o resultado.',
+    'O que é: a Ceci (ou o Luke, quando a voz do Mac é masculina), uma assistente de voz em português ao lado do Claude Code. Você fala o que quer, ela repete e pergunta "posso?", e depois do seu "sim" um subagente do Claude faz a tarefa no seu computador. Quando termina, ela conta o resultado.',
     '',
     'Antes de usar (uma vez só):',
     '  1. Tenha o Node.js 20 ou mais novo (nodejs.org, versão LTS) e o Google Chrome.',
