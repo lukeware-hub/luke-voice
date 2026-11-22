@@ -241,6 +241,48 @@ test('a voice task runs in a Claude Code subagent, and its answer is reported as
   expect(events.find(e => e.includes('task_done'))).toContain('Achei o login em auth.ts.')
 })
 
+test('a voice task marks the session busy in the hub when it starts, and free when it ends', async ($, on) => {
+  const spawned: string[] = []
+  on('agent.spawn', (_, e) => (spawned.push(e.prompt), { model: 'test', agentId: 'agent-8' }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => (release = resolve))
+  const { calls } = engine(on, [
+    async () => ({ status: 200, body: { commands: [{ id: 't1', type: 'task', task: 'roda os testes' }] } }),
+    async () => (await held, { status: 410, body: {} }),
+  ])
+  const busy = () => calls.filter(c => c.path === '/events').map(c => (c.body as { isBusy?: boolean }).isBusy)
+
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/ack'))
+  await $.turn.start({ text: spawned[0] ?? '', turnId: 'x', agentId: 'agent-8' })
+  await $.turn.complete({ answer: 'Passou.', durationMs: 1, isAborted: false, turnId: 'x', agentId: 'agent-8', reason: 'answer' })
+  await until(() => busy().at(-1) === false)
+  await $.command.run(run('off'))
+  release()
+
+  expect(busy()[0]).toBe(true)
+  expect(busy().at(-1)).toBe(false)
+})
+
+test('a prompt sent from the call marks the session busy in the hub before any tool runs', async ($, on) => {
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => (release = resolve))
+  const { calls } = engine(on, [
+    async () => ({ status: 200, body: { commands: [{ id: 'p1', type: 'send', prompt: 'olá', when: 'now' }] } }),
+    async () => (await held, { status: 410, body: {} }),
+  ])
+  const isBusy = () => calls.some(c => c.path === '/events' && (c.body as { isBusy?: boolean }).isBusy === true)
+
+  await $.command.run(run('on'))
+  await until(isBusy)
+  await $.command.run(run('off'))
+  release()
+
+  expect(isBusy()).toBe(true)
+})
+
 test('"pare" with no main turn running stops the voice tasks, which run as subagents', async ($, on) => {
   const spawned: string[] = []
   const stops: Array<{ tool: string; input: Record<string, unknown> }> = []

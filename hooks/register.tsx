@@ -572,6 +572,7 @@ async function onCommand($: EngineInterface, command: Command) {
         taskEfforts.set(spawned.agentId, tier.effort)
       }
       await startRunning($, spawned.agentId ?? prompt, command.task)
+      report($)
       await addLine($, { kind: 'task', text: command.task })
       return ack($, command.id, true, 'Started. A Claude Code subagent is working on it; the result comes in a [news] update.')
     } catch (error) {
@@ -582,6 +583,7 @@ async function onCommand($: EngineInterface, command: Command) {
   const text = frame(command.prompt)
   if (!isBusy) {
     isBusy = true
+    report($)
     void $.prompt.submit({ text })
     await addLine($, { kind: 'sent', text: command.prompt })
     return ack($, command.id, true, 'Claude started a new turn with it.')
@@ -602,10 +604,16 @@ async function onCommand($: EngineInterface, command: Command) {
   return ack($, command.id, true, 'Queued. Claude gets it when the current turn ends.')
 }
 
-function report($: EngineInterface, event: Activity) {
+// Sends an event, or with none only the session's state. The session is busy while Claude's own
+// turn runs or a voice task (a background subagent) does: the call window shows it "Trabalhando…".
+// Only tasks this module tracks count: a row left from before a reload would never end.
+function report($: EngineInterface, event?: Activity) {
   if (!token) return
-  void read($, isOn)
-    .then(on => (on ? hubFetch($, 'POST', '/events', { events: [event], isBusy }) : undefined))
+  void Promise.all([read($, isOn), read($, running)])
+    .then(([on, list]) => {
+      const hasTask = list.some(r => tasks.has(r.key) || pendingTasks.has(r.key))
+      return on ? hubFetch($, 'POST', '/events', { events: event ? [event] : [], isBusy: isBusy || hasTask }) : undefined
+    })
     .catch(() => undefined)
 }
 
@@ -936,6 +944,7 @@ export const register: Register = (on, options) => {
     if (e.agentId === undefined) {
       isBusy = true
       turnId = e.turnId
+      report($)
       void refreshStatus($)
     }
     return next(e)
@@ -979,6 +988,7 @@ export const register: Register = (on, options) => {
       await stopRunning($, e.agentId)
       if (e.isAborted) {
         // Stopped, not finished: keep tracking it, so a resumed run still reports its answer.
+        report($)
         await addLine($, { kind: 'stop', text: `Tarefa parada: ${task}` })
       } else {
         tasks.delete(e.agentId)
