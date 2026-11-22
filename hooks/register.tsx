@@ -47,11 +47,13 @@ type BrainTool = { name: string; args: Record<string, unknown> }
 // plain yes (Ceci asked "posso?"), so the confirmation needs no second model call.
 export type BrainReply = { say: string; tool: BrainTool | null; pending: BrainTool | null }
 
-export const BRAIN_MODEL = 'claude-haiku-5-5'
-// Low effort: at max, Haiku thought for 6–28 s per spoken turn, far too slow for a voice.
-export const BRAIN_EFFORT = 'low'
+export const BRAIN_MODEL = 'claude-sonnet-5-5'
+// Medium effort: better answers than Haiku at low effort, ~2.1 s per spoken turn against ~1.7 s
+// (measured with claude -p). Higher efforts think far too long for a voice.
+export const BRAIN_EFFORT = 'medium'
 const BRAIN_MAX_TOKENS = 400
-const BRAIN_TIMEOUT_MS = 15_000
+// Sonnet at medium effort may think a few seconds more on a hard turn; the fallback still fits after it.
+const BRAIN_TIMEOUT_MS = 25_000
 // The hub waits 40 s for a think reply (BRAIN_WAIT_MS in hub/server.mjs): the direct call and the
 // fallback together must fit in it, or the answer comes after the window gave up on it.
 const BRAIN_BUDGET_MS = 38_000
@@ -816,7 +818,7 @@ async function helpText($: EngineInterface) {
     'As vozes (troque com /luke-voice voz):',
     '  - Gratuita (padrão): roda no seu computador e é baixada na instalação, uma vez só.',
     '    Com placa de vídeo de 6 GB ou mais: a voz natural da Ceci (cerca de 3,3 GB). Sem ela: a voz leve, no navegador (cerca de 360 MB, ou 520 MB com uma placa de vídeo pequena).',
-    '    O áudio não sai do seu computador; só o texto do que você falou vai para o Claude (Claude Haiku 5.5, da sua conta).',
+    '    O áudio não sai do seu computador; só o texto do que você falou vai para o Claude (Claude Sonnet 5.5, da sua conta).',
     '  - ElevenLabs (opcional, paga por uso): crie uma conta em elevenlabs.io e copie uma chave em elevenlabs.io/app/settings/api-keys.',
     '    Salve a chave com: /plugin configure luke-voice@luke-voice e escolha /luke-voice voz elevenlabs.',
     '    O plano grátis da ElevenLabs dá cerca de 15 minutos de chamada por mês.',
@@ -840,7 +842,7 @@ async function helpText($: EngineInterface) {
     '',
     'Bom saber:',
     '  - A janela usa um Chrome só dela, com o microfone e o som já liberados. O seu Chrome normal não muda.',
-    '  - Voz gratuita: enquanto está ligado, o texto do que você fala e o resumo do que acontece nesta sessão vão para o Claude Haiku. Diga "pare" para parar o Claude na hora.',
+    '  - Voz gratuita: enquanto está ligado, o texto do que você fala e o resumo do que acontece nesta sessão vão para o Claude Sonnet. Diga "pare" para parar o Claude na hora.',
     '  - Voz ElevenLabs: na primeira chamada, o luke-voice cria um agente chamado "luke-voice" e adiciona a voz "Roberta" na sua conta. O que acontece nesta sessão (seus pedidos e as ferramentas do Claude) é enviado a esse agente.',
     '  - Desligado, nada sai do seu computador.',
     '',

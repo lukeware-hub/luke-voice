@@ -1,6 +1,6 @@
 {
   "name": "luke-voice",
-  "version": "0.10.9",
+  "version": "0.10.10",
   "description": "Ceci, a voice assistant beside your Claude Code session: talk it through, and it sends the work to Claude. Free local voice by default, ElevenLabs optional. On/off button above the prompt.",
   "author": {
     "name": "lukeware-hub"
@@ -12,7 +12,7 @@
     "voice_provider": {
       "type": "string",
       "title": "Voice: local (free, default) or elevenlabs",
-      "description": "local: the free voice that runs on your computer (Whisper + Kokoro in the call window; the brain is Claude Haiku on your Claude account). elevenlabs: the ElevenLabs voice agent, which needs the API key below. Empty: ElevenLabs while a key is set, else local. /luke-voice voz switches it too."
+      "description": "local: the free voice that runs on your computer (Whisper + Kokoro in the call window; the brain is Claude Sonnet on your Claude account). elevenlabs: the ElevenLabs voice agent, which needs the API key below. Empty: ElevenLabs while a key is set, else local. /luke-voice voz switches it too."
     },
     "api_key": {
       "type": "string",

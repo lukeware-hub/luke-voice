@@ -680,11 +680,11 @@ const REQUEST: BrainRequest = {
   focused: 'api',
 }
 
-test('the fallback brain call is one lean Claude Haiku 5.5 run at low effort: no tools, MCP servers, settings or saved session', () => {
+test('the fallback brain call is one lean Claude Sonnet 5.5 run at medium effort: no tools, MCP servers, settings or saved session', () => {
   const argv = brainArgs('/plugin')
   expect(argv.slice(0, 2)).toEqual(['claude', '-p'])
-  expect(argv[argv.indexOf('--model') + 1]).toBe('claude-haiku-5-5')
-  expect(argv[argv.indexOf('--effort') + 1]).toBe('low')
+  expect(argv[argv.indexOf('--model') + 1]).toBe('claude-sonnet-5-5')
+  expect(argv[argv.indexOf('--effort') + 1]).toBe('medium')
   expect(argv).toContain('--strict-mcp-config')
   expect(argv).toContain('--no-session-persistence')
   expect(argv[argv.indexOf('--tools') + 1]).toBe('')
@@ -737,7 +737,7 @@ test('a pending action is kept only for a tool that acts, and never next to a to
   expect(both.pending).toBeNull()
 })
 
-test('a think command runs the brain as one direct Haiku call at low effort, with the prompt cached, and acks its reply', async ($, on) => {
+test('a think command runs the brain as one direct Sonnet call at medium effort, with the prompt cached, and acks its reply', async ($, on) => {
   brainComplete = { isAnswered: true, text: '{"say":"Posso verificar os testes de login?","tool":null,"pending":{"name":"luke_run_task","args":{"task":"verificar os testes de login"}}}' }
   let release: () => void = () => undefined
   const held = new Promise<void>(resolve => (release = resolve))
@@ -755,8 +755,8 @@ test('a think command runs the brain as one direct Haiku call at low effort, wit
   // No `claude -p` process: the engine's model call.
   expect(launches.some(l => (l as { argv: string[] }).argv[0] === 'claude')).toBe(false)
   const sent = completes[0] as { model: string; effort: string; prompt: string; systemBlocks?: Array<{ text: string; cache?: boolean }> }
-  expect(sent.model).toBe('claude-haiku-5-5')
-  expect(sent.effort).toBe('low')
+  expect(sent.model).toBe('claude-sonnet-5-5')
+  expect(sent.effort).toBe('medium')
   expect(sent.prompt).toContain('[agora] usuário disse: verifica os testes de login')
   expect(sent.systemBlocks?.[0]?.cache).toBe(true)
   const ack = calls.find(c => c.path === '/ack')?.body
