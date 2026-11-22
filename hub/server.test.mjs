@@ -143,7 +143,7 @@ test('the page loads no remote script; the ElevenLabs client is loaded on demand
   assert.match(eleven, /CLIENT_INTEGRITY = 'sha384-[A-Za-z0-9+/=]{64}'/)
   assert.match(eleven, /script\.integrity = CLIENT_INTEGRITY/)
   assert.match(eleven, /script\.crossOrigin = 'anonymous'/)
-  for (const path of ['/app.js', '/guard.js', '/engines/elevenlabs.js', '/engines/local.js', '/engines/speech-text.js', '/engines/fast-path.js', '/engines/turn-join.js', '/engines/progress.js', '/engines/vad.js', '/engines/piper-ids.js', '/engines/mic-worklet.js', '/engines/voice-worker.js']) {
+  for (const path of ['/app.js', '/guard.js', '/engines/elevenlabs.js', '/engines/local.js', '/engines/speech-text.js', '/engines/fast-path.js', '/engines/turn-join.js', '/engines/progress.js', '/engines/vad.js', '/engines/piper-ids.js', '/engines/transcript.js', '/engines/mic-worklet.js', '/engines/voice-worker.js']) {
     const res = await call('GET', path)
     assert.equal(res.status, 200)
     assert.doesNotMatch(res.body, /\bfrom\s*['"]https?:|import\s*\(\s*['"]https?:/)
@@ -585,6 +585,7 @@ test('the ears hear with what Ceci said in the last minute: newest words first, 
     // Nothing said yet: the glossary alone, with the model names in it.
     assert.equal(await hear(), ASR_GLOSSARY)
     assert.match(ASR_GLOSSARY, /Opus, Sonnet, Haiku, Anthropic, Lukeware/)
+    assert.match(ASR_GLOSSARY, /push, merge, PR, teste, repositório, subagente, npm, luke-voice\.$/)
     // Her answer stays after a short acknowledgement made while the call is idle.
     await say('A Lagoa de Alcaçuz fica em Natal.')
     now += 5_000
