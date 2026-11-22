@@ -409,7 +409,7 @@ function voiceFacts(health) {
         : `processador (${info.threads} threads)`
       : 'carrega na primeira chamada'
   return [
-    ['Voz', 'Ceci, gratuita, no seu computador', 'ok'],
+    ['Voz', `${health.persona?.name === 'Luke' ? 'Luke' : 'Ceci'}, gratuita, no seu computador`, 'ok'],
     ['Perfil', ...profile],
     ...(model ? [['Modelos', model, '']] : []),
     ['Roda em', runsOn, ''],
@@ -519,11 +519,25 @@ async function microphone() {
   for (const track of stream.getTracks()) track.stop()
 }
 
+// Who answers: Ceci, or Luke when the Mac speaks with a male voice (the hub's persona).
+function applyPersona(who) {
+  const isLuke = who?.name === 'Luke'
+  const name = isLuke ? 'Luke' : 'Ceci'
+  document.title = name
+  const title = document.querySelector('h1.title')
+  if (title) title.textContent = name
+  const [to, he] = isLuke ? ['ao Luke', 'ele'] : ['à Ceci', 'ela']
+  STATES.live.banner[2] = `Peça algo ${to}. Antes de agir no computador, ${he} confirma com você.`
+  const intro = document.getElementById('helpIntro')
+  if (intro) intro.textContent = `Fale com ${isLuke ? 'o Luke' : 'a Ceci'} como falaria com uma pessoa. Antes de mexer no seu computador, ${he} repete o pedido e espera o seu "sim".`
+}
+
 // The voice engine the hub picked: the free local voice, or ElevenLabs. Loaded once per page.
 let engine = null
 // Asked on every call: /luke-voice voz can switch the voice while this window stays open.
 async function voiceEngine() {
-  const { provider } = await hub('GET', '/config')
+  const { provider, persona } = await hub('GET', '/config')
+  applyPersona(persona)
   if (engine?.name !== provider) engine = provider === 'elevenlabs' ? await import('/engines/elevenlabs.js') : await import('/engines/local.js')
   return engine
 }
