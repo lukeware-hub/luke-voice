@@ -142,6 +142,7 @@ export async function route(text, { ask, lastSaid = '' }) {
     else if (MUST.greeting.test(t)) intent = 'greeting'
   }
   if (intent !== 'claude' && !confirmed(intent, text)) intent = 'claude'
-  if (intent === 'ack' && /\?\s*$/.test(lastSaid)) intent = 'claude'
+  // A question anywhere ("Posso rodar? Me confirma.") or a "confirma/posso/pode" asks for an answer.
+  if (intent === 'ack' && (/\?/.test(lastSaid) || /\b(confirma|posso|pode)\b/i.test(lastSaid))) intent = 'claude'
   return { intent, say: replyFor(intent) }
 }

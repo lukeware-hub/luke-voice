@@ -90,3 +90,16 @@ test('tools stay closed until the user speaks, and close again after an automati
   gate.userSpoke('sim, pode')
   assert.equal(gate.allows(), true)
 })
+
+test('"sai do modo silêncio" leaves silent mode, and never turns it on', () => {
+  for (const said of ['Sai do modo silêncio.', 'desliga o modo silêncio', 'tira o silêncio', 'chega de silêncio', 'acaba com o silêncio', 'desativa o silêncio']) {
+    assert.equal(asksForSilence(said), false, said)
+  }
+  assert.equal(asksForSilence('chega, silêncio!'), true, '"chega" alone is not leaving it')
+  const quiet = createQuietMode()
+  assert.equal(quiet.userSpoke('sai do modo silêncio'), null, 'off stays off')
+  assert.equal(quiet.on, false)
+  quiet.userSpoke('silenciar')
+  assert.equal(quiet.userSpoke('sai do modo silêncio'), 'off')
+  assert.equal(quiet.on, false)
+})

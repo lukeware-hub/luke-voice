@@ -2,17 +2,17 @@
 // voice detector, Whisper writes down what the user said, the brain decides what to do and say,
 // and Kokoro speaks it. Only the brain leaves the machine (through the hub, to Claude).
 // It gives the window the same session the ElevenLabs engine does.
-import { isConfirm, isDeny, isStopClaude, isStopOnly } from '/engines/fast-path.js'
+import { decide, liveAction } from '/engines/confirm.js'
+import { isConfirm, isDeny, stopTarget } from '/engines/fast-path.js'
 import { speechChunks } from '/engines/speech-text.js'
-import { createTurnJoiner, createTurnLog } from '/engines/turn-join.js'
+import { trimContext } from '/engines/context.js'
+import { createCutReply, createTurnJoiner, createTurnLog } from '/engines/turn-join.js'
 import { risingPercent } from '/engines/progress.js'
+import { isNotSpeech } from '/engines/transcript.js'
 import { FRAME, RATE, createVad, rms } from '/engines/vad.js'
 
 export const name = 'local'
 
-// The brain reads the latest context on every turn: keep it short, it is paid in tokens.
-const MAX_CONTEXT = 8
-const MAX_CONTEXT_CHARS = 3000
 const GREETING = 'Oi! Eu sou a Ceci. O que vamos fazer hoje?'
 const BRAIN_FAILED = 'Não consegui pensar numa resposta agora. Tente de novo.'
 const STOPPED = 'Parei o Claude.'
@@ -34,8 +34,6 @@ const ACK_AFTER_MS = 600
 const TURN_CANDIDATE_FRAMES = 22
 const TURN_END_FRAMES = 62
 const TURN_DONE = 0.7
-// A "posso?" waits this long for its "sim".
-const PENDING_TTL_MS = 90_000
 // Tool answers that mean it worked; anything else goes back to the brain to explain.
 const TOOL_OK = /^(Started|Claude started|Added as a note|Queued|Stopped|Sent)/i
 
@@ -72,6 +70,8 @@ function voiceWorker() {
 }
 
 function ask(type, data = {}, transfer = []) {
+  // The worker crashed and a new one starts empty: load its models again before anything else.
+  if (type !== 'load' && !workerLoad && workerKind) return loadVoice(workerKind).then(() => ask(type, data, transfer))
   const id = nextId++
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject })
@@ -300,8 +300,9 @@ export async function startSession({
   let mode = 'listening'
   let speech = 0 // bumped to cancel what is being said
   let saying = 0 // the speech whose audio is being made now (0: none)
-  // Whether the user's current utterance cut Ceci off (spoken over her, or before her reply played).
-  let isInterruption = false
+  let sayingText = '' // its words
+  // A reply cut off by sound that may be no speech: said again if it was (turn-join.js).
+  const cutReply = createCutReply()
   let playing = new Set()
   let playhead = 0
   let busy = Promise.resolve()
@@ -318,6 +319,8 @@ export async function startSession({
   let nextAck = 0
   // Jobs in the turn queue (user turns and notices), and the acknowledgement being made now.
   let jobs = 0
+  // User turns queued or running: until each is written down and answered, a notice waits (app.js).
+  let userJobs = 0
   let ackWarm = null
 
   // Aborts the native voice's stream when Ceci is cut off.
@@ -491,6 +494,7 @@ export async function startSession({
 
   // Speaks chunk by chunk: the next chunk is synthesized while the current one plays.
   async function speak(text) {
+    sayingText = text
     if (isNative) return speakNative(text)
     const parts = speechChunks(text)
     if (parts.length === 0) return
@@ -568,8 +572,7 @@ export async function startSession({
   }
 
   function remember(text) {
-    context.push(text)
-    while (context.length > MAX_CONTEXT || context.join('\n').length > MAX_CONTEXT_CHARS) context.shift()
+    trimContext(context, text)
   }
 
   // One turn with the brain: what to do (a tool) and what to say.
@@ -620,12 +623,12 @@ export async function startSession({
     const reply = await askBrain(request)
     clearTimeout(ack)
     if (isEnded || isStale()) return
-    if (request.kind === 'user') {
-      commitTurn()
-      pendingAction = reply.pending ? { tool: reply.pending, at: Date.now() } : null
-    }
-    if (!reply.tool) return say(reply.say)
-    return runTool(reply.tool, reply.say)
+    // An acting tool never runs from here: it waits for the user's "sim" (confirm.js).
+    const next = decide({ kind: request.kind, reply, now: Date.now() })
+    if (request.kind === 'user') commitTurn()
+    pendingAction = next.pending
+    if (next.action !== 'run') return say(next.say)
+    return runTool(next.tool, next.say)
   }
 
   async function stopNow() {
@@ -652,29 +655,33 @@ export async function startSession({
   }
 
   // A turn ended (or a carried part came back): transcribe and answer it.
-  function onTurnEnd(ended, wasInterruption = false) {
+  function onTurnEnd(ended) {
     if (!ended) return
     if (ended.isJoined) console.info('[luke-voice] resumed: joined with the previous part')
-    queue(() => onUtterance(ended.audio, wasInterruption), ended.turn)
+    userJobs++
+    queue(() => onUtterance(ended.audio).finally(() => userJobs--), ended.turn)
   }
 
-  async function onUtterance(audio, wasInterruption = false) {
+  async function onUtterance(audio) {
     const seconds = (audio.length / RATE).toFixed(1)
+    // A reply this sound cut off comes back only if the sound was no speech.
+    const cut = cutReply.take()
     const { text, ms, noSpeech } = await transcribe(audio)
     if (noSpeech) {
       timing('dropped', ms, `${seconds} s of sound with no speech in it`)
+      if (cut && !isEnded) await speak(cut)
       // A part carried for joining comes back when what followed was no speech.
       return onTurnEnd(joiner.dropped())
     }
     timing('transcribe', ms, `for ${seconds} s of speech`)
-    if (!text || isEnded || isStale() || /^\W*$/.test(text)) return
+    if (!text || isEnded || isStale() || isNotSpeech(text)) return
     // The window's voice gate and quiet mode hear the user now, before the brain is asked: a notice
     // that arrives while the brain thinks must not pass for the user's word.
     onMessage({ source: 'user', message: text })
     // Any words answer the last "posso?": a plain yes runs it, a plain no drops it, anything else
     // goes to the brain, which may ask again. It is let go only once this turn stands: a turn
     // joined with what the user says next ("é..." then "sim, pode") still answers it.
-    const action = pendingAction && Date.now() - pendingAction.at < PENDING_TTL_MS ? pendingAction : null
+    const action = liveAction(pendingAction, Date.now())
     turns.hold(text, () => {
       pendingAction = null
     })
@@ -682,15 +689,14 @@ export async function startSession({
       timing('fast path', 0, 'no to "posso?"')
       return say(DENIED)
     }
-    if (isStopOnly(text)) {
-      // Said over Ceci, "para" was for her, and she already stopped. Claude's work is stopped only
-      // when the user names it ("para o Claude", "cancela a tarefa"), or when Ceci was quiet.
-      if (wasInterruption && !isStopClaude(text)) {
-        turns.commit()
-        return timing('fast path', 0, 'stop: Ceci only')
-      }
-      return stopNow()
+    // A bare "para" or "cancela" is for Ceci (she already stopped, or was quiet). Claude's work is
+    // stopped only when the user names it ("para o Claude", "cancela a tarefa", "para tudo").
+    const stop = stopTarget(text)
+    if (stop === 'ceci') {
+      turns.commit()
+      return timing('fast path', 0, 'stop: Ceci only')
     }
+    if (stop === 'claude') return stopNow()
     if (action && isConfirm(text)) {
       timing('fast path', 0, `yes to "posso?": ${action.tool.name}`)
       return runTool(action.tool, '')
@@ -714,28 +720,33 @@ export async function startSession({
     // ?voice-debug=1: the mic level and the learned room level twice a second, to tune the detector.
     if (isDebug && ++frameCount % 16 === 0) console.info(`[luke-voice] mic ${rms(frame).toFixed(4)} room ${vad.floor.toFixed(4)} ${mode}`)
     if (!event) return
-    if (event.type === 'start') isInterruption = false
     // The user is talking: an acknowledgement being made would compete with their turn.
     if (event.type === 'start' || event.type === 'barge') cancelAckWarm()
     if (event.type === 'barge') {
       console.info('[luke-voice] barge-in: the user spoke over Ceci')
       cancelSpeech()
-      isInterruption = true
     }
     // A reply whose first audio is still being made: the user talking first wins, as if they had
     // talked over her, instead of the reply then playing over them.
     if (event.type === 'start' && saying !== 0 && saying === speech) {
       console.info('[luke-voice] the user spoke before Ceci\'s reply played')
       cancelSpeech()
-      isInterruption = true
+      // Its turn already stands: if this was a cough, the reply is said again (onUtterance, below).
+      cutReply.cut(sayingText)
     }
     // The user goes on talking before Ceci answered: the last turn waits to be joined.
     if ((event.type === 'start' || event.type === 'barge') && joiner.resumed()) {
       turns.drop()
       cancelSpeech()
+      // A newer turn is being answered again: an older reply cut here is out of date.
+      cutReply.clear()
     }
-    if (event.type === 'end') onTurnEnd(joiner.ended(event.audio), isInterruption)
-    if (event.type === 'drop') onTurnEnd(joiner.dropped())
+    if (event.type === 'end') onTurnEnd(joiner.ended(event.audio))
+    if (event.type === 'drop') {
+      onTurnEnd(joiner.dropped())
+      // Too short to be speech: the reply it cut off is said again, in its turn in the queue.
+      if (cutReply.isCut) queue(() => (cutReply.isCut && !isEnded ? speak(cutReply.take()) : null))
+    }
     // A short pause: the turn model says whether the user is done, so Ceci need not wait 800 ms.
     if (event.type === 'candidate') {
       ask('endpoint', { audio: event.audio }, [event.audio.buffer])
@@ -743,7 +754,7 @@ export async function startSession({
           timing('end of turn', ms, `p=${done.toFixed(2)}`)
           if (done < TURN_DONE || isEnded) return
           const end = vad.endNow(event.id)
-          if (end?.type === 'end') onTurnEnd(joiner.ended(end.audio), isInterruption)
+          if (end?.type === 'end') onTurnEnd(joiner.ended(end.audio))
           if (end?.type === 'drop') onTurnEnd(joiner.dropped())
         })
         .catch(() => {})
@@ -756,10 +767,14 @@ export async function startSession({
     sendUserMessage: text => queue(() => think({ kind: 'notice', text: String(text ?? '') })),
     setMicMuted: next => {
       isMuted = Boolean(next)
-      if (isMuted) vad.reset()
+      if (isMuted) {
+        vad.reset()
+        cutReply.clear()
+      }
     },
-    // The user is mid-utterance: the window holds its spoken notices until they finish.
-    isUserSpeaking: () => vad.inSpeech,
+    // The user is mid-utterance, or what they said is still being written down or answered: the
+    // window holds its spoken notices until they finish.
+    isUserSpeaking: () => vad.inSpeech || userJobs > 0,
     getOutputVolume: () => {
       if (playing.size === 0) return 0
       analyser.getFloatTimeDomainData(levels)

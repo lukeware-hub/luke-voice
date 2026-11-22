@@ -84,7 +84,7 @@ export const VOICE_SETTINGS = { temperature: 0.9, top_p: 0.9, seed: 7 }
 // The same prompt warms the engine up, so the first real transcription is not a cold one. The model
 // names and Lukeware took word errors from 30 to 27 of 129 on 20 recorded turns ("Raiko" became
 // "Haiku", "Apus" became "Opus"), with noise and silence still heard as nothing.
-export const ASR_GLOSSARY = 'Conversa em português do Brasil com a Ceci, uma assistente de programação. Termos comuns: API, commit, branch, main, deploy, build, bug, pull request, GitHub, Claude, Ceci, lint, TypeScript, token, login, checkout, README, Opus, Sonnet, Haiku, Anthropic, Lukeware, Diego.'
+export const ASR_GLOSSARY = 'Conversa em português do Brasil com a Ceci, uma assistente de programação. Termos comuns: API, commit, branch, main, deploy, build, bug, pull request, GitHub, Claude, Ceci, lint, TypeScript, token, login, checkout, README, Opus, Sonnet, Haiku, Anthropic, Lukeware, Diego, push, merge, PR, teste, repositório, subagente, npm, luke-voice.'
 
 // Audio frames allowed for a text (12.5 per second; ~14 characters per second in pt-BR), so a
 // rare generation loop stops after a few seconds instead of babbling for 40.
@@ -186,9 +186,18 @@ export async function listDevices(exe, run = runFile) {
   return parseDevices(`${out.stdout}\n${out.stderr}`)
 }
 
+// The hub reads the profile on every request; setup.mjs rewrites it from another process, so the
+// file is parsed again only when its mtime or size changes.
+const profiles = new Map() // file -> { mtimeMs, size, profile }
 export function readProfile(dir = engineDir()) {
+  const file = profileFile(dir)
   try {
-    return JSON.parse(readFileSync(profileFile(dir), 'utf8'))
+    const { mtimeMs, size } = statSync(file)
+    const cached = profiles.get(file)
+    if (cached?.mtimeMs === mtimeMs && cached.size === size) return cached.profile
+    const profile = JSON.parse(readFileSync(file, 'utf8'))
+    profiles.set(file, { mtimeMs, size, profile })
+    return profile
   } catch {
     return null
   }

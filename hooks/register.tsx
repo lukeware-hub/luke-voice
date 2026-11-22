@@ -8,7 +8,9 @@ const NAME = 'luke-voice'
 let HUB = 'http://127.0.0.1:4848'
 const PANE = 'luke-voice'
 const POLL_WAIT_MS = 20_000
+// A hub that keeps failing is retried less often: 3 s, doubled each time, up to a minute.
 const RETRY_MS = 3_000
+const MAX_RETRY_MS = 60_000
 
 // Off until the user turns it on: while off, nothing about the session leaves the machine.
 const isOn = atom({ plugin: 'luke-voice', key: 'isOn' } as const, false)
@@ -198,10 +200,24 @@ let turnId: string | null = null
 let queued: string[] = []
 // Subagents started for voice tasks, by agent id: the task, to report with its result.
 const tasks = new Map<string, string>()
-// Spawned tasks whose agent id is not known yet, by the prompt their subagent starts with.
-const pendingTasks = new Map<string, string>()
+// Spawned tasks whose agent id is not known yet, by the prompt their subagent starts with: a queue,
+// so the same task asked twice is tracked (and reported) twice.
+const pendingTasks = new Map<string, string[]>()
 // The effort each voice-task subagent runs at, by agent id, or by its prompt until the id is known.
 const taskEfforts = new Map<string, Effort>()
+
+// Takes the oldest task waiting on a prompt. The prompt's effort goes with the last one.
+function takePending(prompt: string) {
+  const list = pendingTasks.get(prompt)
+  const task = list?.shift()
+  const effort = taskEfforts.get(prompt)
+  const isLast = !list?.length
+  if (isLast) {
+    pendingTasks.delete(prompt)
+    taskEfforts.delete(prompt)
+  }
+  return { task, effort, isLast }
+}
 
 // The model and effort for a voice task, by how complex it is (see CLAUDE.md, "Task orchestration").
 export type Complexity = 'complex' | 'medium' | 'simple'
@@ -487,9 +503,14 @@ function subscribe($: EngineInterface, options: Record<string, unknown>): Promis
 
 // Long-polls this session's inbox until the mod is turned off or reloaded.
 async function pollLoop($: EngineInterface, options: Record<string, unknown>, gen: number) {
+  let retryMs = RETRY_MS
+  const backOff = async () => {
+    await $.clock.sleep(retryMs)
+    retryMs = Math.min(retryMs * 2, MAX_RETRY_MS)
+  }
   while (gen === generation) {
     if (!(await subscribe($, options))) {
-      await $.clock.sleep(RETRY_MS)
+      await backOff()
       continue
     }
     try {
@@ -503,12 +524,13 @@ async function pollLoop($: EngineInterface, options: Record<string, unknown>, ge
         continue
       }
       if (!res.ok) throw new Error(`inbox ${res.status}`)
+      retryMs = RETRY_MS
       for (const command of (res.json.commands ?? []) as Command[]) await onCommand($, command)
     } catch (error) {
       if (gen !== generation) return
       token = null
       await setLink($, { state: 'down', reason: `a conexão com o servidor local caiu (${messageOf(error)})` })
-      await $.clock.sleep(RETRY_MS)
+      await backOff()
     }
   }
 }
@@ -556,19 +578,17 @@ async function onCommand($: EngineInterface, command: Command) {
     try {
       const prompt = frameTask(command.task)
       const tier = TIERS[classifyTask(command.task)]
-      pendingTasks.set(prompt, command.task)
+      pendingTasks.set(prompt, [...(pendingTasks.get(prompt) ?? []), command.task])
       taskEfforts.set(prompt, tier.effort)
       const spawned = await $.agent.spawn({ prompt, description: 'luke-voice task', model: tier.model })
       if (spawned.deny) {
-        pendingTasks.delete(prompt)
-        taskEfforts.delete(prompt)
+        takePending(prompt)
         return ack($, command.id, false, `Could not start the task: ${spawned.deny}`)
       }
       // The id comes with the spawn, or with the subagent's turn.start (matched by its prompt).
       if (spawned.agentId) {
-        pendingTasks.delete(prompt)
+        takePending(prompt)
         tasks.set(spawned.agentId, command.task)
-        taskEfforts.delete(prompt)
         taskEfforts.set(spawned.agentId, tier.effort)
       }
       await startRunning($, spawned.agentId ?? prompt, command.task)
@@ -769,6 +789,60 @@ async function setupCommand($: EngineInterface) {
   return `Voz leve pronta, no navegador (${result.reason || 'sem placa de vídeo com 6 GB'}). Nada mais para baixar.`
 }
 
+const UNINSTALL_SH = 'curl -fsSL https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/uninstall.sh | bash'
+const UNINSTALL_WINDOWS =
+  'powershell -NoProfile -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/uninstall-luke-voice-windows.cmd | iex"'
+// Copies install/uninstall.sh out of the plugin folder (it deletes that folder) and starts it in a
+// session of its own, so it outlives this call and Claude Code closing. $.process.run waits for
+// the children until its timeout, then resolves and leaves the uninstaller running.
+const UNINSTALL_RUN = [
+  'd="$2"; mkdir "$d" && cp "$1" "$d/uninstall.sh" || exit 1',
+  'if command -v setsid >/dev/null 2>&1; then set -- setsid',
+  "elif command -v perl >/dev/null 2>&1; then set -- perl -MPOSIX=setsid -e 'setsid(); exec @ARGV'",
+  'else set --; fi',
+  'LUKE_VOICE_NO_PROMPT=1 nohup "$@" bash "$d/uninstall.sh" >"$d/uninstall.log" 2>&1 </dev/null &',
+].join('\n')
+
+// /luke-voice uninstall: says what goes and asks for `confirmar`, since the voice (GBs) is deleted.
+// With it: ends the call, turns off (so this session does not start the hub again) and runs
+// install/uninstall.sh apart from Claude Code. On Windows, the line to paste.
+async function uninstallCommand($: EngineInterface, options: Record<string, unknown>, isConfirmed: boolean) {
+  const { platform } = await $.session.info()
+  if (platform === 'windows') {
+    return ['Para remover o luke-voice no Windows, feche o Claude Code, aperte Windows + R, cole esta linha e aperte Enter:', '', `  ${UNINSTALL_WINDOWS}`].join('\n')
+  }
+  if (!isConfirmed) {
+    return [
+      'Isto remove o luke-voice deste computador:',
+      '  - o mod luke-voice do Claude Code',
+      `  - a pasta ${await lukeHome($)}, com a voz baixada (até 3,3 GB) e o Node.js que o instalador trouxe`,
+      '  - o link do node que o instalador criou',
+      'O resto do computador não muda, e não dá para desfazer.',
+      '',
+      'Para continuar: /luke-voice uninstall confirmar',
+      'Para remover só o mod e manter a voz: /plugin, escolha luke-voice e Uninstall.',
+    ].join('\n')
+  }
+  if (token) await hubFetch($, 'POST', '/end', {}).catch(() => undefined)
+  await toggle($, options, false)
+  const dir = `${((await $.env.get('TMPDIR')) || '/tmp').replace(/\/+$/, '')}/luke-voice-uninstall-${await $.clock.now()}`
+  const log = `${dir}/uninstall.log`
+  const started = await $.process
+    .run(['/bin/sh', '-c', UNINSTALL_RUN, 'sh', `${$.plugin.root}/install/uninstall.sh`, dir], { timeoutMs: 3_000 })
+    .then(
+      out => out.exitCode === 0,
+      () => null,
+    )
+  if (started === false) return `Não consegui começar a desinstalação. Cole isto no Terminal:\n\n  ${UNINSTALL_SH}`
+  return [
+    'Desinstalando o luke-voice. Feche o Claude Code e abra de novo.',
+    `O andamento fica em ${log}.`,
+    started === null ? `Se o log não aparecer, cole isto no Terminal: ${UNINSTALL_SH}` : null,
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
 // The installed plugin's version, to tell when the running hub is an older one.
 async function pluginVersion($: EngineInterface) {
   try {
@@ -847,6 +921,7 @@ async function helpText($: EngineInterface) {
     '  /luke-voice setup    baixa e testa a voz gratuita agora (se a instalação não baixou)',
     '  /luke-voice status   mostra o estado técnico',
     '  /luke-voice help     mostra esta ajuda',
+    '  /luke-voice uninstall  remove o luke-voice e a voz baixada (pede confirmação)',
     '',
     'Bom saber:',
     '  - A janela usa um Chrome só dela, com o microfone e o som já liberados. O seu Chrome normal não muda.',
@@ -879,7 +954,7 @@ export const register: Register = (on, options) => {
     // The hub's port follows LUKE_VOICE_PORT, like the hub (hub/paths.mjs).
     const port = Number(await $.env.get('LUKE_VOICE_PORT'))
     if (Number.isInteger(port) && port > 0 && port < 65536) HUB = `http://127.0.0.1:${port}`
-    await $.command.register({ name: NAME, description: 'Ceci, voice assistant: on/off, call, end, window, voz, setup, status, help' })
+    await $.command.register({ name: NAME, description: 'Ceci, voice assistant: on/off, call, end, window, voz, setup, status, help, uninstall' })
     // Redraw the pane while a task runs, so its elapsed time moves.
     $.clock.every(15_000, () => {
       void read($, running)
@@ -896,6 +971,8 @@ export const register: Register = (on, options) => {
     const arg = e.args.trim().toLowerCase()
     const voiceArg = arg.match(/^(voz|voice)(\s+(.*))?$/)
     if (voiceArg) return { text: await voiceCommand($, opts, voiceArg[3] ?? '') }
+    const uninstallArg = arg.match(/^(uninstall|desinstalar)(\s+(.*))?$/)
+    if (uninstallArg) return { text: await uninstallCommand($, opts, uninstallArg[3] === 'confirmar') }
     switch (arg) {
       case '':
         return { text: (await toggle($, opts)) ? 'luke-voice: ligado. Iniciando a chamada.' : 'luke-voice: desligado' }
@@ -927,14 +1004,14 @@ export const register: Register = (on, options) => {
   }).catch(($, e, next) => next(e))
 
   on('turn.start', async ($, e, next) => {
-    const pending = e.agentId !== undefined ? pendingTasks.get(e.text) : undefined
-    if (e.agentId !== undefined && pending !== undefined) {
-      pendingTasks.delete(e.text)
+    // A subagent already known (its id came with the spawn) does not take another task's place.
+    const waiting = e.agentId !== undefined && !tasks.has(e.agentId) && pendingTasks.has(e.text) ? takePending(e.text) : null
+    const pending = waiting?.task
+    if (e.agentId !== undefined && waiting && pending !== undefined) {
       tasks.set(e.agentId, pending)
-      const effort = taskEfforts.get(e.text)
-      taskEfforts.delete(e.text)
-      if (effort) taskEfforts.set(e.agentId, effort)
-      await stopRunning($, e.text)
+      if (waiting.effort) taskEfforts.set(e.agentId, waiting.effort)
+      // The prompt's row stays while another task with the same prompt still waits for its id.
+      if (waiting.isLast) await stopRunning($, e.text)
       await startRunning($, e.agentId, pending)
     } else if (e.agentId !== undefined && tasks.has(e.agentId)) {
       // A stopped task its subagent picked up again.

@@ -113,6 +113,7 @@ Diga **"pare"** (ou "para tudo", "Ceci, para") para parar o Claude na hora.
 | `/luke-voice setup` | baixa e confere a voz gratuita da Ceci (para quem atualiza pelo marketplace) |
 | `/luke-voice status` | estado técnico: hub, voz, perfil, chamada, chave, fila, progresso do setup |
 | `/luke-voice help` | tudo que você precisa saber, e o que está faltando |
+| `/luke-voice uninstall` | remove o luke-voice e a voz baixada (pede `/luke-voice uninstall confirmar` antes) |
 
 Ele começa **desligado** e lembra a sua escolha. Quando o Claude Code abre com ele ligado, ele só reconecta: nunca começa uma chamada que você não pediu.
 
@@ -203,6 +204,8 @@ Sem nenhuma escolha, o luke-voice usa a ElevenLabs se houver chave salva, e a vo
 ## Desinstalar
 
 Uma linha remove tudo: o luke-voice do Claude Code, a voz baixada, e o Node.js e o Git que o instalador trouxe (e tira os dois do PATH). Ela pergunta antes de começar e pede para fechar o Claude Code antes (aberto, ele ligaria o luke-voice de novo); o resto do computador não muda.
+
+De dentro do Claude Code (macOS ou Linux): digite `/luke-voice uninstall`. Ele diz o que vai ser apagado e pede `/luke-voice uninstall confirmar`; aí encerra a chamada, desliga o luke-voice e roda o desinstalador abaixo em segundo plano. Depois, feche o Claude Code e abra de novo. No Windows, ele mostra a linha abaixo para colar.
 
 - **Windows:** aperte **Windows + R**, cole esta linha e aperte **Enter**:
 

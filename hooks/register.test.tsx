@@ -43,6 +43,7 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
   const calls: Call[] = []
   const sent: string[] = []
   const stored: unknown[] = []
+  const sleeps: unknown[] = []
   let polls = 0
 
   on('command.register', (_, e) => ({ value: { command: e.name } }))
@@ -83,7 +84,7 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
   })
   on('ui.status', (_, e) => (statuses.push(e.text), { value: undefined }))
   on('ui.toast', () => ({ value: undefined }))
-  on('clock.sleep', () => ({ value: undefined }))
+  on('clock.sleep', (_, e) => (sleeps.push(e), { value: undefined }))
   on('clock.now', () => ({ value: clockNow }))
   on('clock.every', () => ({ value: undefined }))
   on('prompt.submit', (_, e) => (sent.push(e.text), { text: e.text }))
@@ -104,7 +105,7 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
     return { value: { status, ok: status < 400, headers: {}, text: JSON.stringify(body) } }
   })
 
-  return { calls, sent, stored, launches, statuses, completes }
+  return { calls, sent, stored, launches, statuses, completes, sleeps }
 }
 
 // The hooks answer in promise turns: yield until the check holds.
@@ -212,6 +213,18 @@ test('a poll answered 409 (a reload took over) ends the loop without subscribing
   expect(calls.filter(c => c.path === '/inbox').length).toBe(1)
 })
 
+test('a hub that keeps failing is retried less and less often, up to a minute, and a good poll resets it', async ($, on) => {
+  const fail = async () => ({ status: 500, body: {} })
+  const { calls, sleeps } = engine(on, [fail, fail, fail, fail, fail, fail, async () => ({ status: 200, body: { commands: [] } }), fail], { status: 409, body: { error: 'replaced' } })
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.command.run(run('window'))
+  await until(() => calls.filter(c => c.path === '/inbox').length >= 9)
+  await until(() => false)
+
+  expect(sleeps.map(e => (e as { ms: number }).ms)).toEqual([3_000, 6_000, 12_000, 24_000, 48_000, 60_000, 3_000])
+})
+
 test('a voice task runs in a Claude Code subagent, and its answer is reported as task_done', async ($, on) => {
   const spawned: string[] = []
   on('agent.spawn', (_, e) => (spawned.push(e.prompt), { model: 'test', agentId: 'agent-7' }))
@@ -239,6 +252,34 @@ test('a voice task runs in a Claude Code subagent, and its answer is reported as
   const events = calls.filter(c => c.path === '/events').map(c => JSON.stringify(c.body))
   expect(events.filter(e => e.includes('task_done')).length).toBe(1)
   expect(events.find(e => e.includes('task_done'))).toContain('Achei o login em auth.ts.')
+})
+
+test('two identical voice tasks whose ids come with turn.start both report task_done', async ($, on) => {
+  const spawned: string[] = []
+  on('agent.spawn', (_, e) => (spawned.push(e.prompt), { model: 'test' }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => (release = resolve))
+  const { calls } = engine(on, [
+    async () => ({ status: 200, body: { commands: [{ id: 'd1', type: 'task', task: 'roda os testes' }, { id: 'd2', type: 'task', task: 'roda os testes' }] } }),
+    async () => (await held, { status: 410, body: {} }),
+  ])
+
+  await $.command.run(run('on'))
+  await until(() => calls.filter(c => c.path === '/ack').length === 2)
+  await $.turn.start({ text: spawned[0] ?? '', turnId: 'a', agentId: 'agent-a' })
+  await $.turn.start({ text: spawned[1] ?? '', turnId: 'b', agentId: 'agent-b' })
+  await $.turn.complete({ answer: 'Primeira.', durationMs: 1, isAborted: false, turnId: 'a', agentId: 'agent-a', reason: 'answer' })
+  await $.turn.complete({ answer: 'Segunda.', durationMs: 1, isAborted: false, turnId: 'b', agentId: 'agent-b', reason: 'answer' })
+  await until(() => calls.filter(c => c.path === '/events' && JSON.stringify(c.body).includes('task_done')).length === 2)
+  await $.command.run(run('off'))
+  release()
+
+  const done = calls.filter(c => c.path === '/events').map(c => JSON.stringify(c.body)).filter(b => b.includes('task_done'))
+  expect(done.length).toBe(2)
+  expect(done.some(b => b.includes('Primeira.'))).toBe(true)
+  expect(done.some(b => b.includes('Segunda.'))).toBe(true)
 })
 
 test('a voice task marks the session busy in the hub when it starts, and free when it ends', async ($, on) => {
@@ -924,6 +965,55 @@ test('in help, the ElevenLabs voice without a key is called out', async ($, on) 
   const paid = (await $.command.run(run('help'))).text
   expect(paid).toContain('✓ Voz: ElevenLabs')
   expect(paid).toContain('✗ Chave da ElevenLabs: falta')
+})
+
+test('/luke-voice uninstall alone only says what goes, and runs nothing', async ($, on) => {
+  const { calls, launches, stored } = engine(on)
+  on('session.info', () => ({ value: { transcriptPath: '', platform: 'macos' } }))
+  for (const arg of ['uninstall', 'desinstalar', 'uninstall agora']) {
+    const text = (await $.command.run(run(arg))).text
+    expect(text).toContain('/luke-voice uninstall confirmar')
+    expect(text).toContain('.luke-voice')
+  }
+  expect(launches).toEqual([])
+  expect(calls).toEqual([])
+  expect(stored).toEqual([])
+})
+
+test('/luke-voice uninstall confirmar ends the call, turns off and starts the uninstaller apart from Claude Code', async ($, on) => {
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => (release = resolve))
+  const { calls, launches, stored } = engine(on, [async () => (await held, { status: 410, body: {} })])
+  on('session.info', () => ({ value: { transcriptPath: '', platform: 'linux' } }))
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/inbox'))
+
+  const text = (await $.command.run(run('desinstalar confirmar'))).text
+  release()
+
+  const paths = calls.map(c => c.path)
+  expect(paths).toContain('/end')
+  expect(paths.indexOf('/end')).toBeLessThan(paths.indexOf('/unsubscribe'))
+  expect(stored.at(-1)).toBe(false)
+  const argv = (launches.at(-1) as { argv: string[] }).argv
+  expect(argv[0]).toBe('/bin/sh')
+  expect(argv[2]).toContain('LUKE_VOICE_NO_PROMPT=1 nohup')
+  expect(argv[2]).toContain('&')
+  // The script runs from a copy: it deletes the plugin folder it lives in.
+  expect(argv[2]).toContain('cp "$1" "$d/uninstall.sh"')
+  expect(String(argv[4]).endsWith('/install/uninstall.sh')).toBe(true)
+  expect(argv[5]).toMatch(/^\/tmp\/luke-voice-uninstall-\d+$/)
+  expect(text).toContain('Feche o Claude Code e abra de novo')
+  expect(text).toContain(`${argv[5]}/uninstall.log`)
+})
+
+test('/luke-voice uninstall on Windows gives the uninstall line to paste and runs nothing', async ($, on) => {
+  const { launches, stored } = engine(on)
+  on('session.info', () => ({ value: { transcriptPath: '', platform: 'windows' } }))
+  const text = (await $.command.run(run('uninstall confirmar'))).text
+  expect(text).toContain('uninstall-luke-voice-windows.cmd | iex')
+  expect(launches).toEqual([])
+  expect(stored).toEqual([])
 })
 
 // The tests below change module state (the stored voice, the hub port), so they run last.
