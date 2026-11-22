@@ -282,6 +282,8 @@ function setMuted(next) {
   ui.muteLabel.textContent = isMuted ? 'Ativar som' : 'Silenciar'
   swapIcon(ui.muteIcon, isMuted ? 'i-microphone' : 'i-microphone-slash')
   if (callState === 'live') setOrb(isMuted ? 'muted' : mode === 'speaking' ? 'speaking' : 'listening')
+  // Back from mute the user usually talks first: news held meanwhile waits for a quiet moment again.
+  if (!isMuted) silentSince = Date.now()
 }
 
 function setCall(state, caption) {
@@ -450,6 +452,9 @@ function flushActivity() {
 // Finished work is said out loud once the user is quiet; nothing else speaks on its own.
 function speakWhenQuiet() {
   if (!conversation || pendingSpeech.length === 0) return
+  // Muted, the mic hears nothing, so the user always looks quiet: a notice spoken now would hold
+  // the turn queue (a brain call and its speech) and the user's first words after unmuting wait.
+  if (isMuted) return
   if (mode === 'speaking' || Date.now() - silentSince < SPEAK_AFTER_SILENCE_MS) return
   // The user is mid-sentence: the news waits until they have been quiet for a moment too.
   if (conversation.isUserSpeaking?.()) {
