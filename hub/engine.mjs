@@ -6,6 +6,7 @@
 import { execFile, execFileSync, spawn as nodeSpawn } from 'node:child_process'
 import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
+import { availableParallelism } from 'node:os'
 import { isAbsolute, join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -58,7 +59,12 @@ export const SERVICES = {
   asr: {
     models: ['native/qwen3-asr-0.6b-q6_k.gguf', 'native/qwen3-asr-0.6b-mmproj-q8_0.gguf'],
     // 1536 context and 256 batch: the same transcripts as 2048, ~270 MiB less video memory.
-    args: ([model, mmproj]) => ['-m', model, '-mm', mmproj, '-ngl', '99', '-c', '1536', '-ub', '256', '-np', '1', ...ON_GPU],
+    // Lean (a GPU with room for the voice only): the ears run on the CPU, model and projector, so
+    // the GPU keeps Ceci's original voice. Measured: ~640 ms a sentence on 8 threads, ~85 ms on the GPU.
+    args: ([model, mmproj], { lean = false } = {}) =>
+      lean
+        ? ['-m', model, '-mm', mmproj, '-ngl', '0', '--no-mmproj-offload', '-c', '1536', '-ub', '256', '-np', '1', '-t', String(cpuThreads()), ...LEAN]
+        : ['-m', model, '-mm', mmproj, '-ngl', '99', '-c', '1536', '-ub', '256', '-np', '1', ...ON_GPU],
   },
   router: {
     models: ['native/qwen3.5-0.8b-q4_k_m.gguf'],
@@ -84,8 +90,14 @@ export const ASR_GLOSSARY = 'Conversa em português do Brasil com a Ceci, uma as
 // rare generation loop stops after a few seconds instead of babbling for 40.
 export const maxFrames = text => Math.ceil(String(text).length * 1.5) + 25
 
-// Below this much video memory the voice and the ears would not fit together: the light profile.
+// Below this much video memory the voice and the ears would not fit together on the GPU.
 export const MIN_VRAM_MIB = 6000
+// Ceci's voice alone takes ~2.8 GB of video memory (Vulkan, RTX 3060 Ti). From this much, with room
+// left for the desktop, the gpu profile still runs her original voice, lean: the ears move to the
+// CPU. A Mac with 8 GB gives Metal ~5.3 GB; a 4 GB card reports about 4 GB. Below it: the light voice.
+export const LEAN_VRAM_MIB = 3800
+// CPU threads for the lean ears: most cores, leaving two for the rest of the machine.
+export const cpuThreads = (cores = availableParallelism()) => Math.max(2, Math.min(8, cores - 2))
 
 export const engineDir = () => join(stateDir(), 'engine')
 const profileFile = dir => join(dir, 'profile.json')
@@ -126,7 +138,8 @@ export function parseDevices(text) {
 // Radeon is an RX, PRO or VII).
 const WEAK_DEVICE = /llvmpipe|lavapipe|swiftshader|microsoft basic render|intel.*\b(uhd|hd graphics|iris)\b|intel.*\barc(\(tm\))?\s+(graphics|\d{3}[vt]\b)|radeon(\(tm\))?\s+(graphics|\d{3}m\b|vega\s+\d+\b)/i
 
-// gpu when this platform has a build and a dedicated device with enough memory; light otherwise.
+// gpu when this platform has a build and a dedicated device with enough memory (lean, with the ears
+// on the CPU, when it has room for the voice only); light otherwise.
 // LUKE_VOICE_PROFILE=gpu|light overrides the choice.
 export function pickProfile({ key, devices = [], override = '' }) {
   if (override === 'light') return { profile: 'light', reason: 'escolhido' }
@@ -136,7 +149,8 @@ export function pickProfile({ key, devices = [], override = '' }) {
   if (override === 'gpu') return { profile: 'gpu', reason: 'escolhido', device: (best ?? devices[0])?.name ?? null }
   if (!best && devices.length) return { profile: 'light', reason: `só placa de vídeo integrada ou por software (${devices[0].name})`, device: devices[0].name }
   if (!best) return { profile: 'light', reason: 'nenhuma placa de vídeo encontrada' }
-  if (best.mib < MIN_VRAM_MIB) return { profile: 'light', reason: `placa de vídeo com ${best.mib} MiB (precisa de ${MIN_VRAM_MIB})`, device: best.name }
+  if (best.mib < LEAN_VRAM_MIB) return { profile: 'light', reason: `placa de vídeo com ${best.mib} MiB (precisa de ${LEAN_VRAM_MIB})`, device: best.name }
+  if (best.mib < MIN_VRAM_MIB) return { profile: 'gpu', lean: true, reason: `${best.name}, ${best.mib} MiB: a voz na placa de vídeo e os ouvidos no processador`, device: best.name }
   return { profile: 'gpu', reason: `${best.name}, ${best.mib} MiB`, device: best.name }
 }
 
@@ -366,6 +380,8 @@ export function createEngine({ dir = engineDir(), models = modelsDir(), spawn = 
   const services = new Map() // name -> { port, child, isReady, restarts: number[], isStopping, hasExited, firstWait }
   let isStopped = false
   let guarded = guard
+  // How the servers run, from the profile: { lean } puts the ears on the CPU. Kept for restarts.
+  let runAs = { lean: false }
 
   // The service is still the one in the map, and nobody asked it to stop.
   const isCurrent = (name, service) => services.get(name) === service && !service.isStopping && !isStopped
@@ -394,7 +410,7 @@ export function createEngine({ dir = engineDir(), models = modelsDir(), spawn = 
     const files = spec.models.map(path => join(models, ...path.split('/')))
     const port = await freePort()
     const base = command ?? [exe]
-    const args = [...base.slice(1), ...spec.args(files), '--host', '127.0.0.1', '--port', String(port)]
+    const args = [...base.slice(1), ...spec.args(files, runAs), '--host', '127.0.0.1', '--port', String(port)]
     mkdirSync(dir, { recursive: true })
     rotateLog(join(dir, `${name}.log`), maxLogBytes)
     const out = createWriteStream(join(dir, `${name}.log`), { flags: 'a' })
@@ -459,8 +475,10 @@ export function createEngine({ dir = engineDir(), models = modelsDir(), spawn = 
 
   return {
     // Starts the servers that have their files, in parallel. Resolves to { name: isReady }.
-    async start(names = Object.keys(SERVICES), { exe } = {}) {
+    // lean (from the profile): the ears on the CPU, for a GPU with room for the voice only.
+    async start(names = Object.keys(SERVICES), { exe, lean = false } = {}) {
       isStopped = false
+      runAs = { lean: Boolean(lean) }
       const result = {}
       await Promise.all(
         names.map(async name => {

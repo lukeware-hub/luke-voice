@@ -21,7 +21,7 @@ O luke-voice escolhe o perfil sozinho, na hora da instalação:
 
 | | perfil gpu ("voz natural") | perfil light ("voz leve") |
 | --- | --- | --- |
-| Quando | O llama.cpp enxerga uma GPU com pelo menos 6 GB de memória de vídeo (NVIDIA, AMD ou Intel pelo Vulkan no Windows e no Linux; Apple Silicon pelo Metal no macOS arm64). | Todo o resto. |
+| Quando | O llama.cpp enxerga uma GPU com pelo menos 6 GB de memória de vídeo (NVIDIA, AMD ou Intel pelo Vulkan no Windows e no Linux; Apple Silicon pelo Metal no macOS arm64). A partir de 3,8 GB (uma placa de 4 GB, um Mac com 8 GB) continua a voz original da Ceci, com os ouvidos no processador: cerca de meio segundo a mais para ouvir cada fala. | Todo o resto. |
 | Fala | Qwen3-TTS 12Hz 1.7B Base, clonada na hora a partir de `agent/ceci-voice.wav` e da transcrição `agent/ceci-voice.txt`. | Kokoro-82M no navegador. O Piper `pt_BR-faber` é o plano B em computadores lentos. |
 | Ouve | Qwen3-ASR 0.6B (Q6). | Whisper base no navegador. |
 | Conversa rápida | Um roteador local instantâneo, o Qwen3.5 0.8B na CPU. | Vai para o Claude Haiku como todo o resto. |
@@ -183,7 +183,7 @@ Sem nenhuma escolha, o luke-voice usa a ElevenLabs se houver chave salva, e a vo
 | --- | --- |
 | Não ouço nada | Veja se o som do computador está ligado e se a janela mostra **Em chamada**. |
 | A voz não foi baixada na instalação | Rode `/luke-voice setup`. Ou comece uma chamada: a primeira chamada baixa a voz, com o progresso na janela. |
-| A Ceci usa a voz leve num computador com placa de vídeo | A GPU tem menos de 6 GB de memória de vídeo, ou o teste do setup falhou. O `/luke-voice status` mostra o perfil. O `/luke-voice setup` tenta de novo. |
+| A Ceci usa a voz leve num computador com placa de vídeo | A GPU tem menos de 3,8 GB de memória de vídeo, ou o teste do setup falhou. O `/luke-voice status` mostra o perfil. O `/luke-voice setup` tenta de novo. |
 | A Ceci demora alguns segundos para responder | Os pedidos que vão para o Claude Haiku levam cerca de 1 a 3 segundos. No perfil gpu, a conversa rápida é instantânea. No perfil light, um computador sem placa de vídeo também leva 1 a 2 segundos a mais para ouvir e falar. |
 | A voz gratuita ficou mais robótica | Num computador lento, o perfil light troca para o Piper, uma voz mais leve, para não falar travado. **Configurações**, na janela, mostra qual modelo de voz está falando. |
 | "Falta a chave da ElevenLabs" ou "Chave: faltando" | Salve a chave com `/plugin configure luke-voice@luke-voice` (ou rode o instalador de novo) e reinicie o Claude Code. Ou use a voz gratuita: `/luke-voice voz local`. |
