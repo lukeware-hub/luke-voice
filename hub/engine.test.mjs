@@ -417,3 +417,24 @@ test('a server log past the limit is moved to .old.log when the server starts, r
   assert.equal(existsSync(log), false)
   assert.equal(readFileSync(join(dir, 'tts.old.log'), 'utf8'), 'x'.repeat(11))
 })
+
+test("Ceci's original voice comes with every install: the same clip, transcript, models and sampling", async () => {
+  const { readFileSync } = await import('node:fs')
+  const { VOICE_SETTINGS } = await import('./engine.mjs')
+  const root = join(import.meta.dirname, '..')
+  const sha = file => createHash('sha256').update(readFileSync(join(root, file))).digest('hex')
+  // The reference clip the owner picked by ear, and its transcript: the TTS clones Ceci from both.
+  // Changing either changes her voice on every machine, so this test must be updated on purpose.
+  assert.equal(sha('agent/ceci-voice.wav'), '76850ec92eb249893f6bebe92968fea16f2296a8a5fb0b6f58295dd3d8534c18')
+  assert.equal(sha('agent/ceci-voice.txt'), 'bf3a8385880f193177565f032b7c74470b80979e654efed89d34082d4ea00f24')
+  // Git must hand both over byte for byte on Windows, Mac and Linux.
+  const attributes = readFileSync(join(root, '.gitattributes'), 'utf8')
+  assert.match(attributes, /^\*\.wav binary$/m)
+  assert.match(attributes, /^agent\/ceci-voice\.txt -text$/m)
+  // The voice models, from luke-voice's own release, pinned by sha256.
+  assert.equal(MODELS['native/qwen3-tts-1.7b-base-q5_k_m.gguf'].sha256, '244e74cd46ba8c6aa4851723b667799ddb08b81839ce61b8bd0c8e247c7b6006')
+  assert.equal(MODELS['native/qwen3-tts-1.7b-base-mmproj-icl-q8_0.gguf'].sha256, 'd57d1a06a37e0d3f550ffec25977ac457fe0415b0885609a6c315a0e9f09f631')
+  assert.match(MODELS['native/qwen3-tts-1.7b-base-q5_k_m.gguf'].url, /^https:\/\/github\.com\/lukeware-hub\/luke-voice\/releases\/download\//)
+  // Her sampling: the fixed seed makes the same sentence sound the same everywhere.
+  assert.deepEqual(VOICE_SETTINGS, { temperature: 0.9, top_p: 0.9, seed: 7 })
+})
