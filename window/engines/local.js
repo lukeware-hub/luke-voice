@@ -4,15 +4,13 @@
 // It gives the window the same session the ElevenLabs engine does.
 import { isConfirm, isDeny, isStopClaude, isStopOnly } from '/engines/fast-path.js'
 import { speechChunks } from '/engines/speech-text.js'
+import { trimContext } from '/engines/context.js'
 import { createTurnJoiner, createTurnLog } from '/engines/turn-join.js'
 import { risingPercent } from '/engines/progress.js'
 import { FRAME, RATE, createVad, rms } from '/engines/vad.js'
 
 export const name = 'local'
 
-// The brain reads the latest context on every turn: keep it short, it is paid in tokens.
-const MAX_CONTEXT = 8
-const MAX_CONTEXT_CHARS = 3000
 const GREETING = 'Oi! Eu sou a Ceci. O que vamos fazer hoje?'
 const BRAIN_FAILED = 'Não consegui pensar numa resposta agora. Tente de novo.'
 const STOPPED = 'Parei o Claude.'
@@ -568,8 +566,7 @@ export async function startSession({
   }
 
   function remember(text) {
-    context.push(text)
-    while (context.length > MAX_CONTEXT || context.join('\n').length > MAX_CONTEXT_CHARS) context.shift()
+    trimContext(context, text)
   }
 
   // One turn with the brain: what to do (a tool) and what to say.
