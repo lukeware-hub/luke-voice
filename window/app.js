@@ -13,6 +13,37 @@ import {
   safeKind,
 } from '/guard.js'
 
+// Appearance: follows the system unless the user picked light or dark in Configurações.
+// Runs before the key exchange below awaits, so the saved theme lands on the first frames.
+// ponytail: a module script runs after first paint, so a forced theme opposite to the system can
+// flash for a frame; an inline <head> script would fix it if that ever shows.
+const THEME_ITEM = 'ceci-theme'
+function applyTheme(theme) {
+  if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme
+  else delete document.documentElement.dataset.theme
+  const value = document.documentElement.dataset.theme ?? 'system'
+  const group = document.querySelector('.segmented')
+  if (group) group.dataset.value = value
+  for (const option of document.querySelectorAll('[data-theme-option]')) {
+    option.setAttribute('aria-checked', String(option.dataset.themeOption === value))
+  }
+}
+try {
+  applyTheme(localStorage.getItem(THEME_ITEM))
+} catch {
+  applyTheme('system')
+}
+for (const option of document.querySelectorAll('[data-theme-option]')) {
+  option.addEventListener('click', () => {
+    applyTheme(option.dataset.themeOption)
+    try {
+      localStorage.setItem(THEME_ITEM, option.dataset.themeOption)
+    } catch {
+      // No storage: the choice holds until the window closes.
+    }
+  })
+}
+
 const params = new URLSearchParams(location.search)
 const STALE_WINDOW = 'Esta janela ficou desatualizada. Feche-a e digite /luke-voice window no Claude Code.'
 const KEY_ITEM = 'luke-voice-key'
@@ -59,7 +90,6 @@ const ui = {
   headline: $('headline'),
   caption: $('caption'),
   call: $('callButton'),
-  callIcon: $('callIcon'),
   callLabel: $('callLabel'),
   mute: $('muteButton'),
   muteIcon: $('muteIcon'),
@@ -172,22 +202,54 @@ function icon(id) {
   return svg
 }
 
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)')
+const EASE_IOS = 'cubic-bezier(0.32, 0.72, 0, 1)'
+
+// Swaps an icon with a short scale-and-blur, the way an SF Symbol replaces another.
+function swapIcon(use, id) {
+  const href = `#${id}`
+  if (use.getAttribute('href') === href) return
+  use.setAttribute('href', href)
+  if (reduceMotion.matches) return
+  use.ownerSVGElement?.animate(
+    [
+      { transform: 'scale(0.5)', opacity: 0, filter: 'blur(4px)' },
+      { transform: 'none', opacity: 1, filter: 'none' },
+    ],
+    { duration: 380, easing: EASE_IOS },
+  )
+}
+
+// New text eases in, so a status change is seen, not just swapped.
+function setText(node, text) {
+  if (node.textContent === text) return
+  node.textContent = text
+  if (!reduceMotion.matches) {
+    node.animate([{ opacity: 0, transform: 'translateY(3px)' }, { opacity: 1, transform: 'none' }], { duration: 260, easing: EASE_IOS })
+  }
+}
+
 const clock = () => new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
 
 /* ---------- Views ---------- */
 
 function showView(name) {
-  for (const view of document.querySelectorAll('.view')) view.hidden = view.dataset.name !== name
-  for (const item of document.querySelectorAll('.nav-item')) {
-    if (item.dataset.target === name) item.setAttribute('aria-current', 'page')
-    else item.removeAttribute('aria-current')
+  const apply = () => {
+    for (const view of document.querySelectorAll('.view')) view.hidden = view.dataset.name !== name
+    for (const item of document.querySelectorAll('.nav-item')) {
+      if (item.dataset.target === name) item.setAttribute('aria-current', 'page')
+      else item.removeAttribute('aria-current')
+    }
+    document.body.dataset.view = name
+    if (name === 'history') {
+      entries = 0
+      ui.historyCount.hidden = true
+    }
+    if (name === 'settings') void renderFacts()
   }
-  document.body.dataset.view = name
-  if (name === 'history') {
-    entries = 0
-    ui.historyCount.hidden = true
-  }
-  if (name === 'settings') void renderFacts()
+  // The selection pill glides to the new item (a view transition); without one, it just moves.
+  if (document.startViewTransition && !reduceMotion.matches && document.body.dataset.view !== name) document.startViewTransition(apply)
+  else apply()
 }
 
 /* ---------- Call state ---------- */
@@ -195,11 +257,11 @@ function showView(name) {
 function setStatus(state) {
   const s = STATES[state] ?? STATES.idle
   ui.status.dataset.state = state
-  ui.statusText.textContent = s.pill
+  setText(ui.statusText, s.pill)
   const [bannerIcon, title, text] = s.banner
   ui.banner.dataset.state = state
-  ui.bannerIcon.setAttribute('href', `#${bannerIcon}`)
-  ui.bannerTitle.textContent = title
+  swapIcon(ui.bannerIcon, bannerIcon)
+  setText(ui.bannerTitle, title)
   ui.bannerText.textContent = text
 }
 
@@ -210,7 +272,7 @@ function setCaption(text, isSpeech = false) {
 
 function setOrb(next) {
   ui.orb.dataset.mode = next
-  ui.orbIcon.setAttribute('href', next === 'muted' ? '#i-microphone-slash' : next === 'speaking' ? '#i-waveform-fill' : '#i-microphone-fill')
+  swapIcon(ui.orbIcon, next === 'muted' ? 'i-microphone-slash' : next === 'speaking' ? 'i-waveform-fill' : 'i-microphone-fill')
 }
 
 function setMuted(next) {
@@ -218,7 +280,7 @@ function setMuted(next) {
   conversation?.setMicMuted(isMuted)
   ui.mute.setAttribute('aria-pressed', String(isMuted))
   ui.muteLabel.textContent = isMuted ? 'Ativar som' : 'Silenciar'
-  ui.muteIcon.setAttribute('href', isMuted ? '#i-microphone' : '#i-microphone-slash')
+  swapIcon(ui.muteIcon, isMuted ? 'i-microphone' : 'i-microphone-slash')
   if (callState === 'live') setOrb(isMuted ? 'muted' : mode === 'speaking' ? 'speaking' : 'listening')
 }
 
@@ -227,8 +289,8 @@ function setCall(state, caption) {
   setStatus(state)
   const isLive = state === 'live' || state === 'connecting'
   ui.call.dataset.live = String(isLive)
-  ui.callIcon.setAttribute('href', isLive ? '#i-phone-x' : '#i-phone-fill')
-  ui.callLabel.textContent = isLive ? 'Encerrar' : 'Chamar'
+  // One phone icon: the stylesheet turns it down 135° to end, as on an iPhone.
+  setText(ui.callLabel, isLive ? 'Encerrar' : 'Chamar')
   ui.mute.disabled = state !== 'live'
   ui.headline.textContent = STATES[state]?.headline ?? ''
   setCaption(caption ?? STATES[state]?.caption ?? '')
