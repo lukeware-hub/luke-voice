@@ -176,6 +176,26 @@ test('a reload of the same Claude session takes over its row: same name, old tok
   await call('POST', '/unsubscribe', { auth: second.token })
 })
 
+test('a reload keeps the commands waiting for the old row, and the old token may still ack one it pulled', async () => {
+  const first = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/reload', sessionId: 's-2' } })).body
+  // Pulled by the old mod, not acked yet.
+  const pulledTask = call('POST', '/command', { key: WINDOW, body: { type: 'task', session: first.name, task: 'primeira' } })
+  const pulled = (await call('GET', '/inbox?wait=2000', { auth: first.token })).body.commands[0]
+  // Queued, never pulled, when the mod reloads.
+  const waitingTask = call('POST', '/command', { key: WINDOW, body: { type: 'task', session: first.name, task: 'segunda' } })
+  await new Promise(resolve => setTimeout(resolve, 50))
+  const second = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/reload', sessionId: 's-2' } })).body
+  const inbox = (await call('GET', '/inbox?wait=0', { auth: second.token })).body.commands
+  assert.deepEqual(inbox.map(c => c.task), ['segunda'])
+  assert.equal((await call('POST', '/ack', { auth: first.token, body: { id: pulled.id, ok: true, message: 'Started.' } })).status, 200)
+  await call('POST', '/ack', { auth: second.token, body: { id: inbox[0].id, ok: true, message: 'Started.' } })
+  assert.deepEqual((await pulledTask).body, { ok: true, message: 'Started.' })
+  assert.deepEqual((await waitingTask).body, { ok: true, message: 'Started.' })
+  // The old token still does nothing else.
+  assert.equal((await call('GET', '/inbox?wait=0', { auth: first.token })).status, 409)
+  await call('POST', '/unsubscribe', { auth: second.token })
+})
+
 test('shutdown needs the service token', async () => {
   assert.equal((await call('POST', '/shutdown', { auth: WINDOW })).status, 401)
   assert.equal((await call('POST', '/shutdown', { auth: SERVICE })).status, 200)
