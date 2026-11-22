@@ -1018,14 +1018,15 @@ if (isMainModule(import.meta.url, process.argv[1])) {
   const runner = createEngineRunner({ engine, log, setDownload: next => hub.setEngineDownload(next), warmQuestions: () => hub.warmQuestions() })
   // Looked for again at most once a minute: a voice downloaded, or a new Spoken Content system
   // voice (Siri Voz 1 to Voz 2), counts from the next call, with no hub restart.
+  // { voice, gender } or null (mac-voice.mjs).
   let macVoice = null
   let macLooked = 0
   const lookForMacVoice = () => {
     if (Date.now() - macLooked < 60_000) return
     macLooked = Date.now()
-    pickMacVoice().then(voice => {
-      if (voice && voice !== macVoice) log(`mac voice: ${voice}`)
-      macVoice = voice
+    pickMacVoice().then(found => {
+      if (found && (found.voice !== macVoice?.voice || found.gender !== macVoice?.gender)) log(`mac voice: ${found.voice} (${found.gender ?? 'gender unknown'})`)
+      macVoice = found
     })
   }
   lookForMacVoice()
@@ -1041,8 +1042,9 @@ if (isMainModule(import.meta.url, process.argv[1])) {
     engineState: runner.state,
     macVoice: () => {
       lookForMacVoice()
-      return macVoice
+      return macVoice?.voice ?? null
     },
+    macVoiceGender: () => macVoice?.gender ?? null,
     onSetup: runner.setup,
     log,
   })
