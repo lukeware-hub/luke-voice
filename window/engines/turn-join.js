@@ -62,6 +62,29 @@ export function createTurnJoiner({ now = () => Date.now(), windowMs = JOIN_WINDO
   }
 }
 
+// A reply cut off because the user seemed to start talking. Its turn already stands, so nothing
+// else brings it back: if the sound turns out to be no speech (a cough, a click), take() gives the
+// reply to say again; if it was the user talking, take() still empties it and the reply is let go.
+export function createCutReply() {
+  let text = ''
+  return {
+    get isCut() {
+      return text !== ''
+    },
+    cut(said) {
+      text = said
+    },
+    take() {
+      const said = text
+      text = ''
+      return said
+    },
+    clear() {
+      text = ''
+    },
+  }
+}
+
 // How many turns of the call the brain reads (the hub keeps the last 12 too): older ones are let go,
 // so a long call does not keep or send an ever-growing history.
 export const MAX_TURNS = 12

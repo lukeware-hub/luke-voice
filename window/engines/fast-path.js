@@ -4,8 +4,8 @@
 // "Cecy", "Sessi" or "Cessi", and "Nara" as "Narah" ("Nará" loses its accent in plain()).
 const NAMES = ['luke', 'ceci', 'cecy', 'sessi', 'cessi', 'sesi', 'nara', 'narah']
 const NAME = `(?:${NAMES.join('|')})`
-const STOP_WORD = '(?:pare|para|parar|cancela|cancelar|chega)'
-const STOP_FILLER = '(?:tudo|agora|o claude|as? tarefas?|isso|por favor|ai)'
+const STOP_WORD = '(?:pare|para|parar|cancela|cancelar|chega|espera|cala)'
+const STOP_FILLER = '(?:tudo|agora|o claude|as? tarefas?|isso|por favor|ai|a boca|de falar)'
 
 // A whole utterance that only asks to stop. "para" inside a longer sentence ("cria uma tarefa para...")
 // is a preposition, so the utterance must be stop words only: the name may come first, and after
@@ -26,14 +26,18 @@ export const isStopOnly = text => STOP_ONLY.test(plain(text))
 // Ceci, a bare "para" is for her alone: she stops talking and Claude's task goes on.
 export const isStopClaude = text => isStopOnly(text) && /\b(claude|tarefas?|tudo)\b/.test(plain(text))
 
+// Who a stop is for: 'claude' when it names Claude's work, 'ceci' for a bare one ("para", "cancela",
+// "espera"), which only quiets her, null when it is not a stop.
+export const stopTarget = text => (isStopClaude(text) ? 'claude' : isStopOnly(text) ? 'ceci' : null)
+
 // Words a short answer to "posso?" is made of. A yes must have at least one YES word and nothing
 // outside YES and FILLER; a no, at least one NO word and nothing outside NO and FILLER. Longer
 // answers ("sim, mas só na pasta X") go to the brain.
-const YES = new Set(['sim', 'pode', 'claro', 'manda', 'bora', 'isso', 'ok', 'okay', 'beleza', 'certo', 'positivo', 'faz', 'faca', 'vai', 'confirmo', 'confirmado', 'perfeito', 'show', 'fechado', 'combinado', 'certeza', 'yes'])
+const YES = new Set(['sim', 'pode', 'claro', 'manda', 'bora', 'isso', 'ok', 'okay', 'beleza', 'certo', 'positivo', 'faz', 'faca', 'vai', 'confirmo', 'confirmado', 'perfeito', 'show', 'fechado', 'combinado', 'certeza', 'yes', 'ta', 'uhum'])
 const NO = new Set(['nao', 'negativo', 'esquece', 'deixa', 'cancela', 'cancelar', 'nem'])
 const FILLER = new Set([
   ...NAMES, 'por', 'favor', 'pode', 'sim', 'ver', 'ai', 'ja', 'agora', 'mesmo', 'com', 'certeza',
-  'fazer', 'mandar', 'ir', 'pra', 'para', 'la', 'precisa', 'obrigado', 'obrigada', 'e', 'o', 'a', 'se', 'ya', 'isso', 'melhor', 'tudo', 'bem',
+  'fazer', 'mandar', 'ir', 'pra', 'para', 'la', 'precisa', 'obrigado', 'obrigada', 'e', 'o', 'a', 'se', 'ya', 'isso', 'melhor', 'tudo', 'bem', 'bom', 'ser', 'que', 'bala',
 ])
 const MAX_ANSWER_WORDS = 7
 
