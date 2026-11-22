@@ -137,6 +137,13 @@ test('a full disk (setup exit code 2) is said as such by both installers', () =>
   for (const file of [SH, CMD]) assert.match(read(file), /falta espaço no disco/)
 })
 
+test("the macOS and Linux uninstaller deletes luke-voice's plugin cache folder, and only it", () => {
+  const text = read(UNSH)
+  assert.match(text, /plugin_cache="\$\{CLAUDE_CONFIG_DIR:-\$HOME\/\.claude\}\/plugins\/cache\/luke-voice"/)
+  assert.match(text, /rm -rf "\$plugin_cache"/)
+  assert.doesNotMatch(text, /rm -rf "[^"]*plugins\/cache"/)
+})
+
 test('the uninstallers close Claude Code first and say when a removal failed', () => {
   for (const file of [UNSH, UNCMD]) {
     const text = read(file)
