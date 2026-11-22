@@ -47,7 +47,7 @@ It speaks Brazilian Portuguese, runs 6 steps and stops with a clear message if o
 3. Installs the luke-voice mod into Claude Code.
 4. Asks which voice Ceci uses (**Qual voz a Ceci deve usar?**). Press **Enter** for the free voice (recommended). Type **e** for ElevenLabs, which then asks for your key (**Chave**).
 5. Checks that the mod is installed and turned on.
-6. Downloads Ceci's free voice, only once: about 3.3 GB on a computer with a good graphics card (6 GB or more), about 360 MB on any other (about 520 MB with a small graphics card). It first checks the disk has room for it, plus 10%. Each file is checked, and a cut download resumes.
+6. Downloads Ceci's free voice, only once: about 3.3 GB on a computer with a good graphics card (6 GB or more; from 3.8 GB, such as a Mac with 8 GB, her ears run on the CPU), about 360 MB on any other (about 520 MB with a small graphics card). It first checks the disk has room for it, plus 10%. Each file is checked, and a cut download resumes.
 
 **It worked when** it ends with the green message **Instalação concluída: luke-voice <versão>**.
 

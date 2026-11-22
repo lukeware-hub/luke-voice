@@ -279,7 +279,7 @@ export function createEngineRunner({ engine, setDownload, warmQuestions = () => 
       state = 'light'
       return
     }
-    await engine.start(undefined, { exe: chosen.exe })
+    await engine.start(undefined, { exe: chosen.exe, lean: chosen.lean })
     if (!isCurrent()) return
     const transcript = voice.replace(/\.wav$/, '.txt')
     await engine.warm({

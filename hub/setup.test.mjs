@@ -169,6 +169,37 @@ test('a voice made slower than real time (an integrated GPU) fails the install t
   }
 })
 
+test('lean (the ears on the CPU): the engine starts lean, and ears too slow on that CPU fail the install test', async () => {
+  const { createServer } = await import('node:http')
+  let earsDelayMs = 0
+  const server = createServer((req, res) => {
+    req.resume()
+    req.on('end', () => {
+      if (req.url === '/v1/audio/speech') return res.end(Buffer.alloc(60_000))
+      if (req.url === '/v1/audio/transcriptions') return setTimeout(() => res.end(JSON.stringify({ text: 'language Portuguese<asr_text>Oi, eu sou a Ceci. Estou pronta!' })), earsDelayMs)
+      res.end(JSON.stringify({ choices: [{ message: { content: '{"intent":"greeting"}' } }] }))
+    })
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const url = `http://127.0.0.1:${server.address().port}`
+  const starts = []
+  const engine = { start: async (_names, options) => starts.push(options), status: () => ({ tts: true, asr: true, router: true }), warm: async () => {}, url: () => url, stop: () => {} }
+  const lean = { profile: 'gpu', lean: true, exe: 'llama-server' }
+  try {
+    const fast = await smokeTest(lean, { engine, voice: 'missing.wav' })
+    assert.equal(fast.ok, true, fast.problems.join('; '))
+    assert.deepEqual(starts[0], { exe: 'llama-server', lean: true })
+    earsDelayMs = 2100
+    const slow = await smokeTest(lean, { engine, voice: 'missing.wav' })
+    assert.equal(slow.ok, false)
+    assert.match(slow.problems.join('; '), /o processador é lento demais para os ouvidos/)
+    // On the GPU the ears are never timed this way.
+    assert.equal((await smokeTest({ profile: 'gpu', exe: 'llama-server' }, { engine, voice: 'missing.wav' })).ok, true)
+  } finally {
+    server.close()
+  }
+})
+
 test('a first failed test is run again: one failure alone does not switch the calls to the light voice', async () => {
   const gpu = { profile: 'gpu', reason: 'RTX, 8192 MiB', devices: [{ name: 'Vulkan0', mib: 8192 }], exe: 'llama-server' }
   const results = [{ ok: false, ms: 1, heard: '', problems: ['o servidor tts não iniciou'] }, { ok: true, ms: 4000, heard: 'Oi, eu sou a Ceci.', problems: [] }]

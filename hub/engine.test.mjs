@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { test } from 'node:test'
 
-import { BINARIES, LLAMA_BUILD, MIN_VRAM_MIB, SERVICES, createEngine, ensureBinaries, groupBytes, parseDevices, pickProfile, platformKey, profileGroups, profileReady } from './engine.mjs'
+import { BINARIES, LEAN_VRAM_MIB, LLAMA_BUILD, MIN_VRAM_MIB, SERVICES, cpuThreads, createEngine, ensureBinaries, groupBytes, parseDevices, pickProfile, platformKey, profileGroups, profileReady } from './engine.mjs'
 import { MODELS } from './models.mjs'
 
 const fresh = () => mkdtempSync(join(tmpdir(), 'luke-engine-'))
@@ -51,6 +51,19 @@ test('the servers run lean: small contexts, no busy-waiting, no prompt cache, fe
   assert.deepEqual(flags('router'), { '-c': '2048', '-ub': null, '-np': '1', '-ngl': '0', '--poll': '0', '-cram': '0', '-t': null, '-lm': null })
 })
 
+test('lean: the ears move to the CPU (model and projector) so a smaller GPU keeps Ceci\'s original voice', () => {
+  const lean = SERVICES.asr.args(['m.gguf', 'mm.gguf'], { lean: true })
+  assert.equal(lean[lean.indexOf('-ngl') + 1], '0')
+  assert.ok(lean.includes('--no-mmproj-offload'))
+  assert.equal(lean[lean.indexOf('-t') + 1], String(cpuThreads()))
+  assert.ok(!lean.includes('-lm'), 'on the CPU the model stays mapped instead of copied')
+  assert.deepEqual([lean[lean.indexOf('-c') + 1], lean[lean.indexOf('-ub') + 1]], ['1536', '256'])
+  // The voice itself never changes with lean: same flags, same GPU.
+  assert.deepEqual(SERVICES.tts.args(['m.gguf', 'mm.gguf'], { lean: true }), SERVICES.tts.args(['m.gguf', 'mm.gguf']))
+  // Most cores, two left for the machine, between 2 and 8.
+  assert.deepEqual([cpuThreads(4), cpuThreads(8), cpuThreads(16), cpuThreads(2)], [2, 6, 8, 2])
+})
+
 test('each profile downloads its own groups at install time, within budget', () => {
   assert.deepEqual(profileGroups('gpu', [{ name: 'Vulkan0' }]), ['turn', 'native'])
   assert.deepEqual(profileGroups('light', []), ['turn', 'light', 'light-cpu'])
@@ -81,7 +94,16 @@ test('the gpu profile needs a native build and a device with enough memory; the 
   const small = [{ name: 'UHD', mib: 2048 }]
   assert.equal(pickProfile({ key: 'win32-x64', devices: big }).profile, 'gpu')
   assert.equal(pickProfile({ key: 'win32-x64', devices: small }).profile, 'light')
-  assert.match(pickProfile({ key: 'win32-x64', devices: small }).reason, new RegExp(String(MIN_VRAM_MIB)))
+  assert.match(pickProfile({ key: 'win32-x64', devices: small }).reason, new RegExp(String(LEAN_VRAM_MIB)))
+  assert.equal(pickProfile({ key: 'win32-x64', devices: big }).lean, undefined)
+  // Room for the voice only (a 4 GB card, a Mac with 8 GB): still Ceci's original voice, lean.
+  for (const device of [{ name: 'NVIDIA GeForce GTX 1650', mib: 4096 }, { name: 'Apple M1', mib: 5461 }, { name: 'RTX', mib: MIN_VRAM_MIB - 1 }]) {
+    const choice = pickProfile({ key: 'darwin-arm64', devices: [device] })
+    assert.deepEqual([choice.profile, choice.lean], ['gpu', true], device.name)
+    assert.match(choice.reason, /os ouvidos no processador/)
+  }
+  assert.equal(pickProfile({ key: 'win32-x64', devices: [{ name: 'RTX', mib: LEAN_VRAM_MIB - 1 }] }).profile, 'light')
+  assert.equal(pickProfile({ key: 'win32-x64', devices: [{ name: 'RTX', mib: MIN_VRAM_MIB }] }).lean, undefined)
   assert.equal(pickProfile({ key: 'win32-x64', devices: [] }).profile, 'light')
   assert.equal(pickProfile({ key: null, devices: big }).profile, 'light')
   assert.equal(pickProfile({ key: 'win32-x64', devices: big, override: 'light' }).profile, 'light')
@@ -166,6 +188,29 @@ const ttsModels = () => {
   return models
 }
 const sleepMs = ms => new Promise(resolve => setTimeout(resolve, ms))
+
+test('a lean start runs the ears on the CPU, and a crashed ear restarts lean too', async () => {
+  const dir = fresh()
+  const models = fresh()
+  for (const path of SERVICES.asr.models) {
+    mkdirSync(dirname(join(models, path)), { recursive: true })
+    writeFileSync(join(models, path), '')
+  }
+  const spawned = []
+  const spawn = (cmd, args, options) => (spawned.push(args), nodeSpawn(cmd, args, options))
+  const engine = createEngine({ dir, models, spawn, command: [process.execPath, fakeServer(dir, { crash: 600 })], readyTimeoutMs: 10_000 })
+  try {
+    assert.deepEqual(await engine.start(['asr'], { lean: true }), { asr: true })
+    for (let i = 0; i < 80 && spawned.length < 2; i++) await sleepMs(50)
+    assert.ok(spawned.length >= 2, 'the fake server did not crash and restart')
+    for (const args of spawned) {
+      assert.equal(args[args.indexOf('-ngl') + 1], '0')
+      assert.ok(args.includes('--no-mmproj-offload'))
+    }
+  } finally {
+    engine.stop()
+  }
+})
 
 test('a server slower than the start timeout is used once it answers, and is never started twice', async () => {
   const dir = fresh()

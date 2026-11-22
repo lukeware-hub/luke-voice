@@ -26,6 +26,9 @@ const TEST_LINE = 'Oi, eu sou a Ceci. Estou pronta!'
 // integrated GPU (shared memory reported as video memory) can pass every other check and still be
 // too slow; a discrete one makes the test line in about half its length.
 const MAX_REAL_TIME = 0.9
+// Lean profile (the ears on the CPU): hearing the test line must stay a short pause in a call. On a
+// 16-thread desktop CPU a sentence takes ~0.6 s; a CPU over 2 s would make every turn drag.
+const MAX_EARS_MS = 2000
 
 // How long a WAV lasts, in ms: its bytes after the header at the header's byte rate (Qwen3-TTS
 // writes 24 kHz 16-bit mono, assumed when there is no header).
@@ -106,7 +109,7 @@ export async function smokeTest(profile, { engine = createEngine(), voice = VOIC
   const problems = []
   const started = Date.now()
   try {
-    await engine.start(undefined, { exe: profile.exe })
+    await engine.start(undefined, { exe: profile.exe, lean: profile.lean })
     const status = engine.status()
     for (const [name, isUp] of Object.entries(status)) if (!isUp) problems.push(`o servidor ${name} não iniciou`)
     const refB64 = existsSync(voice) ? readFileSync(voice).toString('base64') : ''
@@ -129,9 +132,12 @@ export async function smokeTest(profile, { engine = createEngine(), voice = VOIC
         form.append('model', 'qwen3-asr')
         form.append('language', 'pt')
         form.append('prompt', ASR_GLOSSARY)
+        const listened = Date.now()
         const answer = await fetch(`${asr}/v1/audio/transcriptions`, { method: 'POST', body: form })
         heard = answer.ok ? String((await answer.json()).text ?? '').replace(/^[\s\S]*<asr_text>/, '').trim() : ''
+        const earsMs = Date.now() - listened
         if (!/ceci|pronta/i.test(heard)) problems.push(`os ouvidos ouviram "${heard}"`)
+        else if (profile.lean && earsMs > MAX_EARS_MS) problems.push(`o processador é lento demais para os ouvidos (${(earsMs / 1000).toFixed(1)} s para uma frase)`)
       }
     }
     const router = engine.url('router')
