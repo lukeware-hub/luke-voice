@@ -967,6 +967,55 @@ test('in help, the ElevenLabs voice without a key is called out', async ($, on) 
   expect(paid).toContain('✗ Chave da ElevenLabs: falta')
 })
 
+test('/luke-voice uninstall alone only says what goes, and runs nothing', async ($, on) => {
+  const { calls, launches, stored } = engine(on)
+  on('session.info', () => ({ value: { transcriptPath: '', platform: 'macos' } }))
+  for (const arg of ['uninstall', 'desinstalar', 'uninstall agora']) {
+    const text = (await $.command.run(run(arg))).text
+    expect(text).toContain('/luke-voice uninstall confirmar')
+    expect(text).toContain('.luke-voice')
+  }
+  expect(launches).toEqual([])
+  expect(calls).toEqual([])
+  expect(stored).toEqual([])
+})
+
+test('/luke-voice uninstall confirmar ends the call, turns off and starts the uninstaller apart from Claude Code', async ($, on) => {
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => (release = resolve))
+  const { calls, launches, stored } = engine(on, [async () => (await held, { status: 410, body: {} })])
+  on('session.info', () => ({ value: { transcriptPath: '', platform: 'linux' } }))
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/inbox'))
+
+  const text = (await $.command.run(run('desinstalar confirmar'))).text
+  release()
+
+  const paths = calls.map(c => c.path)
+  expect(paths).toContain('/end')
+  expect(paths.indexOf('/end')).toBeLessThan(paths.indexOf('/unsubscribe'))
+  expect(stored.at(-1)).toBe(false)
+  const argv = (launches.at(-1) as { argv: string[] }).argv
+  expect(argv[0]).toBe('/bin/sh')
+  expect(argv[2]).toContain('LUKE_VOICE_NO_PROMPT=1 nohup')
+  expect(argv[2]).toContain('&')
+  // The script runs from a copy: it deletes the plugin folder it lives in.
+  expect(argv[2]).toContain('cp "$1" "$d/uninstall.sh"')
+  expect(String(argv[4]).endsWith('/install/uninstall.sh')).toBe(true)
+  expect(argv[5]).toMatch(/^\/tmp\/luke-voice-uninstall-\d+$/)
+  expect(text).toContain('Feche o Claude Code e abra de novo')
+  expect(text).toContain(`${argv[5]}/uninstall.log`)
+})
+
+test('/luke-voice uninstall on Windows gives the uninstall line to paste and runs nothing', async ($, on) => {
+  const { launches, stored } = engine(on)
+  on('session.info', () => ({ value: { transcriptPath: '', platform: 'windows' } }))
+  const text = (await $.command.run(run('uninstall confirmar'))).text
+  expect(text).toContain('uninstall-luke-voice-windows.cmd | iex')
+  expect(launches).toEqual([])
+  expect(stored).toEqual([])
+})
+
 // The tests below change module state (the stored voice, the hub port), so they run last.
 
 test('/luke-voice voz elevenlabs stores the choice, tells the hub, and says the key is missing', async ($, on) => {
