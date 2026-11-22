@@ -1,8 +1,8 @@
 // Things the user says that the local voice handles at once, with no brain call (no wait, no tokens).
 
 // The assistant's name as the ears write it: Whisper and Qwen3-ASR sometimes write "Ceci" as
-// "Cecy", "Sessi" or "Cessi".
-const NAMES = ['luke', 'ceci', 'cecy', 'sessi', 'cessi', 'sesi']
+// "Cecy", "Sessi" or "Cessi", and "Nara" as "Narah" ("Nará" loses its accent in plain()).
+const NAMES = ['luke', 'ceci', 'cecy', 'sessi', 'cessi', 'sesi', 'nara', 'narah']
 const NAME = `(?:${NAMES.join('|')})`
 const STOP_WORD = '(?:pare|para|parar|cancela|cancelar|chega)'
 const STOP_FILLER = '(?:tudo|agora|o claude|as? tarefas?|isso|por favor|ai)'

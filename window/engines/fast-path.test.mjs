@@ -4,7 +4,7 @@ import { test } from 'node:test'
 import { isConfirm, isDeny, isStopClaude, isStopOnly } from './fast-path.js'
 
 test('a short stop request is caught, with or without accents, fillers or the name', () => {
-  for (const said of ['Pare.', 'para!', 'Ceci, para tudo.', 'Luke, para tudo.', 'PARA AGORA', 'cancela isso', 'chega', 'Pará.', 'para o Claude, por favor', 'Ceci, para.', 'Cecí, pare agora', 'Cecy, chega']) {
+  for (const said of ['Pare.', 'para!', 'Ceci, para tudo.', 'Luke, para tudo.', 'Nara, para tudo.', 'Para, Narah, para!', 'Nará, pare', 'PARA AGORA', 'cancela isso', 'chega', 'Pará.', 'para o Claude, por favor', 'Ceci, para.', 'Cecí, pare agora', 'Cecy, chega']) {
     assert.equal(isStopOnly(said), true, said)
   }
 })

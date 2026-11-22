@@ -266,6 +266,22 @@ else
   ok 'A ElevenLabs não precisa baixar nada.'
 fi
 
+# A Mac too slow for the natural voice speaks with its own system voice (hub/mac-voice.mjs): the
+# installer asks for Siri Voz 1 and never changes a system setting itself (macOS lets no program
+# download a Siri voice). Siri Voz 1 makes the assistant Luke, Siri Voz 2 Nara (hub/persona.mjs).
+if [ "$provider" = 'local' ] && [ "$(uname -s)" = Darwin ]; then
+  mac_profile=$(json 'j.profile' <"$LV_HOME/engine/profile.json" 2>/dev/null) || mac_profile=''
+  if [ "$mac_profile" = 'light' ] && ! defaults read com.apple.Accessibility SpokenContentDefaultVoiceSelectionsByLanguage 2>/dev/null | grep -q 'com\.apple\.siri\.'; then
+    echo '      Para a voz soar mais natural neste Mac, escolha a Siri Voz 1 em Ajustes do Sistema ›'
+    echo '      Acessibilidade › Conteúdo Falado › Voz do Sistema. Ela baixa uma vez (cerca de 230 MB),'
+    echo '      numa rede que não seja a internet do celular. Com a Siri Voz 1 a assistente é o Luke;'
+    echo '      com a Siri Voz 2, a Nara.'
+    if [ "${LUKE_VOICE_NO_PROMPT:-}" != 1 ]; then
+      open 'x-apple.systempreferences:com.apple.Accessibility-Settings.extension?SpokenContent' >/dev/null 2>&1 || true
+    fi
+  fi
+fi
+
 # The first Claude Code opened from now on turns luke-voice on and starts the call by itself.
 can_call=false
 if [ "$provider" = 'local' ] || [ "$has_key" = "true" ]; then

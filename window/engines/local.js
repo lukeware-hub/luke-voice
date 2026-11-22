@@ -198,7 +198,7 @@ const percent = ({ loaded, total }) => Math.min(99, Math.round((loaded / total) 
 
 // How long a call waits for the native engine the hub is starting, before using the light voice.
 const NATIVE_WAIT_MS = 90_000
-const MAC_VOICE_HINT = 'Para a Ceci soar mais natural neste Mac, baixe a voz Luciana (Premium) em Ajustes do Sistema › Acessibilidade › Conteúdo Falado › Voz do Sistema › Gerenciar Vozes. Ela vale a partir da próxima chamada.'
+const MAC_VOICE_HINT = 'Para a voz soar mais natural neste Mac, escolha a Siri Voz 1 em Ajustes do Sistema › Acessibilidade › Conteúdo Falado › Voz do Sistema (ela baixa uma vez, numa rede que não seja a internet do celular). Com a Siri Voz 1 a assistente é o Luke; com a Siri Voz 2, a Nara. Ela vale a partir da próxima chamada.'
 // A native /stt or /tts request past these is dropped (that turn, or that chunk), so a hung
 // llama-server never holds the turn queue forever.
 const STT_TIMEOUT_MS = 20_000
@@ -242,6 +242,9 @@ export async function startSession({
   const isNative = forceNative === '0' ? false : Boolean(config.native?.tts && config.native?.asr)
   // No natural voice on this Mac, but a Premium voice of macOS: the hub speaks with it, the page still listens.
   const isMacVoice = !isNative && forceNative !== '0' && Boolean(config.macVoice)
+  // Luke or Nara when the Mac speaks with its own voice (the hub's persona); Ceci otherwise.
+  const isLuke = isMacVoice && config.persona?.name === 'Luke'
+  const herName = isMacVoice && config.persona?.name === 'Nara' ? 'Nara' : 'Ceci'
   if (!isNative && config.download?.total) onStatus(`Preparando a voz natural: ${percent(config.download)}%. Por enquanto, a voz leve.`)
   // The natural voice was expected (this machine has the gpu profile, or the hub was starting it)
   // but failed or did not come up in time: the user is told, never left guessing why she sounds different.
@@ -349,7 +352,7 @@ export async function startSession({
       out = await response.json()
     } catch (error) {
       // A hung engine: this turn is dropped, and the user hears nothing back, so say why.
-      if (error?.name === 'TimeoutError') throw new Error('A Ceci não conseguiu ouvir a tempo. Fale de novo.')
+      if (error?.name === 'TimeoutError') throw new Error(`${isLuke ? 'O Luke' : `A ${herName}`} não conseguiu ouvir a tempo. Fale de novo.`)
       throw error
     }
     return { text: String(out.text ?? ''), ms: (out.ms ?? 0) + check.ms }
@@ -789,7 +792,7 @@ export async function startSession({
   // Ceci greets like the ElevenLabs agent does (agent/agent.json first_message), so a call
   // sounds the same with either voice and the user knows she is listening.
   // Then, while nobody talks, the acknowledgements. A failed greeting is only logged.
-  void say(GREETING)
+  void say(isLuke ? GREETING.replace('Eu sou a Ceci', 'Eu sou o Luke') : GREETING.replace('Ceci', herName))
     .catch(error => console.warn(`[luke-voice] the greeting failed: ${error?.message ?? error}`))
     .then(warmAcks)
   return session
