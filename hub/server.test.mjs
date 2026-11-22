@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 
 process.env.LUKE_VOICE_HOME = mkdtempSync(join(tmpdir(), 'luke-voice-test-'))
-const { chromeArgs, createHub, loadSecrets, needsPrepare, openWindow, windowCommand } = await import('./server.mjs')
+const { browserCandidates, chromeArgs, chromePath, createHub, isWsl, loadSecrets, needsPrepare, openWindow, windowCommand } = await import('./server.mjs')
 
 const SERVICE = 'service-token'
 const WINDOW = 'window-key'
@@ -703,8 +703,61 @@ test('without Chrome, the default browser gets the whole URL (on Windows not thr
   assert.equal(cmd, 'rundll32')
   assert.deepEqual(args, ['url.dll,FileProtocolHandler', url])
   assert.deepEqual(windowCommand(url, { chrome: null, platform: 'darwin' }), ['open', [url]])
-  assert.deepEqual(windowCommand(url, { chrome: null, platform: 'linux' }), ['xdg-open', [url]])
+  assert.deepEqual(windowCommand(url, { chrome: null, platform: 'linux', wsl: false }), ['xdg-open', [url]])
   assert.equal(windowCommand(url, { chrome: 'C:/chrome.exe', platform: 'win32', profile: 'P' })[1][0], `--app=${url}`)
+})
+
+test('the app window opens in Chrome, else Chromium, else Edge: on Windows, snap and flatpak on Linux, ~/Applications on a Mac', () => {
+  const only = path => candidate => candidate === path
+  const winEnv = { PROGRAMFILES: 'C:\\Program Files', 'PROGRAMFILES(X86)': 'C:\\Program Files (x86)', LOCALAPPDATA: 'C:\\Users\\ana\\AppData\\Local' }
+  const edge = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
+  const chrome = 'C:\\Users\\ana\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe'
+  assert.equal(chromePath({ platform: 'win32', env: winEnv, exists: only(edge) }), edge)
+  assert.equal(chromePath({ platform: 'win32', env: winEnv, exists: p => p === edge || p === chrome }), chrome)
+  for (const path of ['/usr/bin/chromium-browser', '/snap/bin/chromium', '/var/lib/flatpak/exports/bin/com.google.Chrome', '/home/ana/.local/share/flatpak/exports/bin/org.chromium.Chromium']) {
+    assert.equal(chromePath({ platform: 'linux', home: '/home/ana', exists: only(path) }), path)
+  }
+  assert.equal(chromePath({ platform: 'darwin', home: '/Users/ana', exists: only('/Users/ana/Applications/Google Chrome.app/Contents/MacOS/Google Chrome') }), '/Users/ana/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')
+  assert.equal(chromePath({ platform: 'linux', home: '/home/ana', exists: () => false }), null)
+  assert.equal(browserCandidates({ platform: 'linux', home: '/home/ana' })[0], '/usr/bin/google-chrome')
+  // The same --app flags for every one of them.
+  assert.equal(windowCommand('http://x/?k=1', { chrome: edge, platform: 'win32', profile: 'P' })[1][0], '--app=http://x/?k=1')
+})
+
+test('in WSL the call opens in Windows\' browser: wslview when there, else rundll32.exe, with the whole URL', () => {
+  const url = 'http://127.0.0.1:4848/?k=abc&call=1'
+  assert.equal(isWsl({ platform: 'linux', read: () => 'Linux version 5.15.153.1-microsoft-standard-WSL2' }), true)
+  assert.equal(isWsl({ platform: 'linux', read: () => 'Linux version 6.8.0-45-generic (buildd@lcy02)' }), false)
+  assert.equal(isWsl({ platform: 'linux', read: () => { throw new Error('ENOENT') } }), false)
+  assert.equal(isWsl({ platform: 'win32', read: () => 'microsoft' }), false)
+  assert.deepEqual(windowCommand(url, { platform: 'linux', wsl: true, has: name => name === 'wslview' }), ['wslview', [url]])
+  assert.deepEqual(windowCommand(url, { platform: 'linux', wsl: true, has: () => false }), ['rundll32.exe', ['url.dll,FileProtocolHandler', url]])
+})
+
+test('opening the window says whether it opened: an opener that fails or exits with an error is not "opening"', async () => {
+  const quiet = () => {}
+  assert.equal(await openWindow('http://x/', { command: [process.execPath, ['-e', 'process.exit(3)']], log: quiet }), false)
+  assert.equal(await openWindow('http://x/', { command: [process.execPath, ['-e', 'process.exit(0)']], log: quiet }), true)
+  assert.equal(await openWindow('http://x/', { command: ['luke-voice-no-such-browser', []], log: quiet }), false)
+})
+
+test('when the window cannot be opened, show tells the mod and gives it the address to open by hand', async () => {
+  const hub5 = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: async () => false })
+  await new Promise(resolve => hub5.listen(0, '127.0.0.1', resolve))
+  const saved = port
+  port = hub5.address().port
+  try {
+    const s = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/web' } })).body
+    const shown = (await call('POST', '/show', { auth: s.token, body: { call: true } })).body
+    assert.equal(shown.isOpened, false)
+    assert.equal(shown.isWindowOpen, false)
+    assert.match(shown.url, new RegExp(`k=${WINDOW}&call=1$`))
+    await call('POST', '/unsubscribe', { auth: s.token })
+  } finally {
+    port = saved
+    hub5.closeAllConnections()
+    hub5.close()
+  }
 })
 
 test('with no program to open the window (no xdg-open), the hub keeps running and says why', async () => {

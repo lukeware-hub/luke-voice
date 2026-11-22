@@ -3,6 +3,7 @@
 // cut, and checked before use. The hub serves them to the call window at /models/.
 import { createHash } from 'node:crypto'
 import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { statfs } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -334,6 +335,33 @@ export function pruneModels({ dir = modelsDir() } = {}) {
     }
   }
   return removed
+}
+
+// Bytes still to download for these model paths: what is missing of each file (a cut download's
+// .part counts as already there, since it resumes).
+export function remainingBytes(paths, { dir = modelsDir() } = {}) {
+  let bytes = 0
+  for (const path of paths) {
+    const entry = MODELS[path]
+    if (!entry) continue
+    const file = join(dir, ...path.split('/'))
+    if (sizeOf(file) === entry.size) continue
+    bytes += entry.size - Math.min(sizeOf(`${file}.part`), entry.size)
+  }
+  return bytes
+}
+
+// Free bytes on the disk that holds dir (or its nearest folder that exists); null when the system
+// cannot say.
+export async function freeBytes(dir, { stat = statfs } = {}) {
+  let at = dir
+  while (!existsSync(at) && dirname(at) !== at) at = dirname(at)
+  try {
+    const info = await stat(at)
+    return Number(info.bavail) * Number(info.bsize)
+  } catch {
+    return null
+  }
 }
 
 // What is on disk for a group of models (or all): how many files and bytes, of how many.

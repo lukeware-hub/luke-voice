@@ -3,7 +3,7 @@
 // instant router of the hybrid brain (Qwen3.5 0.8B, on the CPU). The binaries are llama.cpp's
 // official release builds (Vulkan on Windows and Linux, Metal on macOS), pinned by sha256; the
 // models are in hub/models.mjs. No Python, no PyTorch.
-import { execFile, spawn as nodeSpawn } from 'node:child_process'
+import { execFile, execFileSync, spawn as nodeSpawn } from 'node:child_process'
 import { createWriteStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { join } from 'node:path'
@@ -88,8 +88,21 @@ export const MIN_VRAM_MIB = 6000
 export const engineDir = () => join(stateDir(), 'engine')
 const profileFile = dir => join(dir, 'profile.json')
 
-export function platformKey(platform = process.platform, arch = process.arch) {
-  const key = `${platform}-${arch}`
+// An Apple silicon Mac running an Intel Node.js (a terminal under Rosetta, or an x64 Node someone
+// installed) reports x64, and darwin-x64 has no build: Ceci would fall to the light voice. The arm64
+// build runs natively when spawned, so a translated process counts as arm64.
+export function isRosetta() {
+  if (process.platform !== 'darwin') return false
+  try {
+    return execFileSync('sysctl', ['-n', 'sysctl.proc_translated'], { encoding: 'utf8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] }).trim() === '1'
+  } catch {
+    return false
+  }
+}
+
+export function platformKey(platform = process.platform, arch = process.arch, { isTranslated = isRosetta } = {}) {
+  const real = platform === 'darwin' && arch === 'x64' && isTranslated() ? 'arm64' : arch
+  const key = `${platform}-${real}`
   return BINARIES[key] ? key : null
 }
 
@@ -189,8 +202,9 @@ export function profileReady(profile, { models = modelsDir() } = {}) {
 // Everything a profile needs, downloaded and checked: the build and the profile decision, then the
 // models of that profile. onProgress(loaded, total, label) reports bytes over all model files.
 // Returns the profile. `devices` already listed and a `reason` come with a fallback to the light
-// profile (setup.mjs, when the natural voice fails its test).
-export async function prepareEngine({ dir = engineDir(), models = modelsDir(), request, onProgress = () => {}, run = runFile, override = process.env.LUKE_VOICE_PROFILE ?? '', devices: known = null, reason = '' } = {}) {
+// profile (setup.mjs, when the natural voice fails its test). checkSpace({ paths, dir }) runs once
+// the profile is known, before its models are downloaded (setup.mjs fails early on a full disk).
+export async function prepareEngine({ dir = engineDir(), models = modelsDir(), request, onProgress = () => {}, run = runFile, override = process.env.LUKE_VOICE_PROFILE ?? '', devices: known = null, reason = '', checkSpace = null } = {}) {
   const key = platformKey()
   let exe = null
   let devices = known ?? []
@@ -204,6 +218,7 @@ export async function prepareEngine({ dir = engineDir(), models = modelsDir(), r
   writeFileSync(profileFile(dir), JSON.stringify(profile, null, 2))
   const groups = profileGroups(profile.profile, devices)
   const total = groupBytes(groups)
+  await checkSpace?.({ paths: groupPaths(groups), dir: models })
   let done = 0
   for (const path of groupPaths(groups)) {
     await ensureModel(path, { dir: models, request, onProgress: loaded => onProgress(done + loaded, total, 'modelos') })

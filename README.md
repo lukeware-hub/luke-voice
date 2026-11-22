@@ -10,7 +10,7 @@ Ceci has two voices:
 | --- | --- | --- |
 | Cost | Free. It uses your Claude account for the short replies. | Paid per use (the free plan gives about 15 minutes a month). |
 | Where it runs | On your computer. Models run locally (natural voice on a computer with a good graphics card, light voice on any other). | In an ElevenLabs agent, over the internet. |
-| What you need | Nothing extra. The installer downloads the voice once: about 2.8 GB (natural voice) or about 320 MB (light voice). | An ElevenLabs key. |
+| What you need | Nothing extra. The installer downloads the voice once: about 3.3 GB (natural voice) or about 360 MB (light voice). | An ElevenLabs key. |
 | Sound | Natural voice: cloned from a reference clip, in Brazilian Portuguese. Light voice: good, a little synthetic. | The most natural. |
 
 > Not affiliated with ElevenLabs. The ElevenLabs voice calls the public ElevenLabs API with your own key.
@@ -25,7 +25,7 @@ luke-voice picks the profile by itself at install time:
 | Speaks | Qwen3-TTS 12Hz 1.7B Base, cloned at run time from `agent/ceci-voice.wav` and its transcript `agent/ceci-voice.txt`. | Kokoro-82M in the browser. Piper `pt_BR-faber` is the fallback on slow computers. |
 | Listens | Qwen3-ASR 0.6B (Q6). | Whisper base in the browser. |
 | Small talk | An instant local router, Qwen3.5 0.8B on the CPU. | Goes to Claude Haiku like everything else. |
-| Download | About 2.8 GB, once. No Python, no PyTorch. | About 320 MB, once (about 480 MB on a machine with a small GPU, where Kokoro runs in fp32 on WebGPU). |
+| Download | About 3.3 GB, once (3.24 GB of models and the 39 MB llama.cpp engine). No Python, no PyTorch. | About 360 MB, once (about 520 MB on a machine with a small GPU, where Kokoro runs in fp32 on WebGPU). |
 | Video memory in a call | About 5.4 GB for the voice and the ears together, and about 3.2 GB of RAM for the whole engine (measured on an RTX 3060 Ti). | None beyond the browser's. |
 
 On the gpu profile, the hub downloads llama.cpp's official release build b12556 (pinned by sha256, about 39 MB) and runs three local `llama-server` processes: Ceci's voice, her ears and the router.
@@ -50,15 +50,17 @@ Nothing else is needed first. The installer brings Node.js and Git when they are
 - **Windows:** press **Windows + R**, paste this line and press **Enter**:
 
   ```
-  powershell -c "$env:LUKE_VOICE_PAUSE=1; irm https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/install-luke-voice-windows.cmd | iex"
+  powershell -NoProfile -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/install-luke-voice-windows.cmd | iex"
   ```
 
-  The same line works in PowerShell. Or download [install-luke-voice-windows.cmd](https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/install-luke-voice-windows.cmd) and double-click it. If Windows says "Windows protected your PC", click **More info** and then **Run anyway**.
+  The same line works typed in PowerShell or in a Command Prompt. Started from Windows + R, the window waits for Enter before it closes. Or download [install-luke-voice-windows.cmd](https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/install-luke-voice-windows.cmd) and double-click it. If Windows says "Windows protected your PC", click **More info** and then **Run anyway**.
 - **macOS / Linux:** paste this in the Terminal:
 
   ```bash
   curl -fsSL https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/install.sh | bash
   ```
+
+  Without curl: `wget -qO- https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/install.sh | bash`.
 
 The installer speaks Brazilian Portuguese. When it asks **Qual voz a Ceci deve usar?** (which voice should Ceci use):
 - Press **Enter** for the free voice. Nothing else is needed.
@@ -69,13 +71,13 @@ The installer speaks Brazilian Portuguese. When it asks **Qual voz a Ceci deve u
 
 The installer has 6 steps:
 1. Finds Claude Code.
-2. Gets Node.js and Git ready. A missing one is downloaded from its official site, checked by sha256 and kept in `~/.luke-voice` for you alone: Node.js 24 LTS (about 30 MB), and on Windows MinGit, Git for Windows' portable build (about 40 MB). Without git on macOS or Linux, luke-voice is downloaded as an archive instead.
+2. Gets Node.js and Git ready. A missing one is downloaded from its official site, checked by sha256 and kept in `~/.luke-voice` for you alone: Node.js 24 LTS (about 30 MB), and on Windows MinGit, Git for Windows' portable build (about 40 MB). A Node.js older than 20, or one that cannot download through your proxy, counts as missing: luke-voice gets its own and leaves yours as it is. Without git on macOS or Linux, luke-voice is downloaded as an archive instead.
 3. Installs the luke-voice mod into Claude Code.
 4. Asks for the voice.
 5. Checks the mod is installed and turned on.
-6. **Baixando a voz da Ceci (até 3,5 GB, só uma vez)** (downloading Ceci's voice) runs `node hub/setup.mjs`. It picks the profile, downloads everything and checks each file by sha256. Downloads can resume if they are cut. On the gpu profile it also runs a short test: Ceci says a line, her ears write it back, and the router answers a greeting. If the test fails, setup downloads the light voice too (320 to 480 MB) and calls use it until `/luke-voice setup` passes the test.
+6. **Baixando a voz da Ceci (até 3,3 GB, só uma vez)** (downloading Ceci's voice) runs `node hub/setup.mjs`. It picks the profile, checks the disk has room (what is left to download plus 10%; otherwise it stops with **Falta espaço**), downloads everything and checks each file by sha256. Downloads can resume if they are cut. On the gpu profile it also runs a short test: Ceci says a line, her ears write it back, and the router answers a greeting. If the test fails, setup downloads the light voice too (320 to 480 MB) and calls use it until `/luke-voice setup` passes the test.
 
-**Done when:** it ends with the green message **Instalação concluída** (installation complete). If it stops with **A instalação parou**, read the **O que fazer** (what to do) line, fix that one thing and run it again. Running it again is always safe.
+**Done when:** it ends with the green message **Instalação concluída: luke-voice <versão>** (installation complete). If it stops with **A instalação parou**, read the **O que fazer** (what to do) line, fix that one thing and run it again. Running it again is always safe.
 
 To install without questions, set `LUKE_VOICE_NO_PROMPT=1` before you run it; add `LUKE_VOICE_PROVIDER=local` (or `elevenlabs`) to choose the voice, and `LUKE_VOICE_PROFILE=gpu` or `light` to force the profile. `LUKE_VOICE_REF=<branch or tag>` installs that version instead of `main`, to test a change.
 
@@ -188,17 +190,21 @@ With no choice at all, luke-voice uses ElevenLabs while a key is saved, and the 
 | The window says **Hub offline** | Turn luke-voice on in Claude Code; the window reconnects by itself. |
 | ElevenLabs: the call stopped connecting | Your free minutes for the month may be over. Check your usage at elevenlabs.io, or switch to the free voice. |
 | The window still has the old look | Close Claude Code completely and open it again. |
-| Installer: "o Claude Code não foi encontrado" | Do step 1, then run the installer again. |
+| Installer: "o Claude Code não foi encontrado" | Do step 1, then run the installer again. If you just installed Claude Code, close and open the terminal first. |
+| Installer: "sem conexão com a internet, ou a rede (um proxy de empresa) bloqueou o download" | Check the internet. Behind a company proxy, set `HTTPS_PROXY=http://address:port` and run the installer again (on Windows it also uses the proxy set in Windows). |
+| Installer: "Falta espaço: a voz precisa de X GB livres" | Free that much space on the disk it names and run the installer again; the download resumes. |
+| "Node.js não encontrado" | Close and open the terminal (or Claude Code) again. If it repeats, run the installer again. |
+| "Não consegui abrir a janela da chamada" | No Chrome, Chromium or Edge was found. Open the address the message shows in a browser, or install Google Chrome. |
 | Anything else | Type `/luke-voice status` and send the result to whoever maintains luke-voice. |
 
 ## Uninstall
 
-One line removes everything: luke-voice from Claude Code, the downloaded voice, and the Node.js and Git the installer brought (and takes them off the PATH). It asks before it starts; nothing else on the computer changes.
+One line removes everything: luke-voice from Claude Code, the downloaded voice, and the Node.js and Git the installer brought (and takes them off the PATH). It asks before it starts, and asks you to close Claude Code first (while it is open, luke-voice would start again); nothing else on the computer changes.
 
 - **Windows:** press **Windows + R**, paste this line and press **Enter**:
 
   ```
-  powershell -c "$env:LUKE_VOICE_PAUSE=1; irm https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/uninstall-luke-voice-windows.cmd | iex"
+  powershell -NoProfile -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/uninstall-luke-voice-windows.cmd | iex"
   ```
 
 - **macOS / Linux:** paste this in the Terminal:
@@ -206,6 +212,8 @@ One line removes everything: luke-voice from Claude Code, the downloaded voice, 
   ```bash
   curl -fsSL https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/uninstall.sh | bash
   ```
+
+  Without curl: `wget -qO- https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/uninstall.sh | bash`.
 
 To remove only the mod and keep the voice: in Claude Code, type `/plugin`, choose **luke-voice** and **Uninstall**.
 

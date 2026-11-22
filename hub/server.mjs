@@ -5,7 +5,8 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { createReadStream, existsSync, linkSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { pipeline } from 'node:stream/promises'
-import { basename, dirname, join } from 'node:path'
+import { homedir } from 'node:os'
+import { basename, dirname, join, posix, win32 } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { conversationToken, credits, ensureAgent, outOfCreditsMessage } from './agent.mjs'
@@ -116,17 +117,55 @@ export function loadSecrets(file = stateFile('hub.json')) {
   }
 }
 
-function chromePath() {
-  const candidates =
-    process.platform === 'win32'
-      ? [process.env.PROGRAMFILES, process.env['PROGRAMFILES(X86)'], process.env.LOCALAPPDATA]
-          .filter(Boolean)
-          .map(base => join(base, 'Google', 'Chrome', 'Application', 'chrome.exe'))
-      : process.platform === 'darwin'
-        ? ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome']
-        : ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium']
-  return candidates.find(path => existsSync(path)) ?? null
+// The browsers that open the call as an app window (--app), in order: Google Chrome, then
+// Chromium, then Microsoft Edge (on every Windows 10 and 11). Linux also looks for the snap and
+// flatpak builds; macOS for an app installed in the user's own Applications folder.
+export function browserCandidates({ platform = process.platform, env = process.env, home = homedir() } = {}) {
+  if (platform === 'win32') {
+    const bases = [env.PROGRAMFILES ?? env.ProgramFiles, env['PROGRAMFILES(X86)'] ?? env['ProgramFiles(x86)'], env.LOCALAPPDATA].filter(Boolean)
+    return [
+      ...bases.map(base => win32.join(base, 'Google', 'Chrome', 'Application', 'chrome.exe')),
+      ...bases.map(base => win32.join(base, 'Microsoft', 'Edge', 'Application', 'msedge.exe')),
+    ]
+  }
+  if (platform === 'darwin') {
+    const apps = ['Google Chrome.app/Contents/MacOS/Google Chrome', 'Chromium.app/Contents/MacOS/Chromium', 'Microsoft Edge.app/Contents/MacOS/Microsoft Edge']
+    return apps.flatMap(app => [`/Applications/${app}`, posix.join(home, 'Applications', app)])
+  }
+  const flatpak = id => [`/var/lib/flatpak/exports/bin/${id}`, posix.join(home, '.local/share/flatpak/exports/bin', id)]
+  return [
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/snap/bin/chromium',
+    ...flatpak('com.google.Chrome'),
+    ...flatpak('org.chromium.Chromium'),
+    '/usr/bin/microsoft-edge',
+    '/usr/bin/microsoft-edge-stable',
+  ]
 }
+
+export function chromePath({ exists = existsSync, ...where } = {}) {
+  return browserCandidates(where).find(path => exists(path)) ?? null
+}
+
+// Linux inside WSL: the call opens in Windows' own browser, which has the microphone and the
+// speakers (WSL forwards 127.0.0.1 to it).
+export function isWsl({ platform = process.platform, read = path => readFileSync(path, 'utf8') } = {}) {
+  if (platform !== 'linux') return false
+  try {
+    return /microsoft/i.test(read('/proc/version'))
+  } catch {
+    return false
+  }
+}
+
+const onPath = (name, { env = process.env, exists = existsSync } = {}) =>
+  String(env.PATH ?? '')
+    .split(':')
+    .filter(Boolean)
+    .some(dir => exists(posix.join(dir, name)))
 
 // The Chrome app window runs in a profile of its own that only ever loads this page, so it can
 // allow the microphone and play the agent's voice without a prompt or a click.
@@ -141,22 +180,47 @@ export function chromeArgs(url, profile) {
   ]
 }
 
-// A Chrome app window; else the default browser. On Windows not through cmd's `start`: cmd cuts
-// the URL at its "&", and the call (`&call=1`) would not start.
-export function windowCommand(url, { chrome = chromePath(), platform = process.platform, profile = join(stateDir(), 'chrome') } = {}) {
+// A Chrome (or Chromium, or Edge) app window; else the default browser; in WSL, Windows' browser.
+// On Windows not through cmd's `start`: cmd cuts the URL at its "&", and the call (`&call=1`)
+// would not start.
+export function windowCommand(url, { platform = process.platform, wsl = isWsl({ platform }), chrome = wsl ? null : chromePath({ platform }), profile = join(stateDir(), 'chrome'), has = name => onPath(name) } = {}) {
+  if (wsl) return has('wslview') ? ['wslview', [url]] : ['rundll32.exe', ['url.dll,FileProtocolHandler', url]]
   if (chrome) return [chrome, chromeArgs(url, profile)]
   if (platform === 'win32') return ['rundll32', ['url.dll,FileProtocolHandler', url]]
   return [platform === 'darwin' ? 'open' : 'xdg-open', [url]]
 }
 
-export function openWindow(url, { command = windowCommand(url), log = () => {} } = {}) {
+// Resolves whether the window opened. A browser started as an app window counts once it runs; an
+// opener (xdg-open, wslview, open, rundll32) also has to exit without an error within graceMs:
+// xdg-open with no browser behind it exits with an error instead of opening anything.
+export function openWindow(url, { command = windowCommand(url), log = () => {}, graceMs = 3000 } = {}) {
   const [cmd, args] = command
-  // windowsHide only for rundll32: Chrome opens its first window with the hidden show flag it is given.
-  const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: cmd === 'rundll32' })
-  // No browser to open (a Linux server without xdg-open): the hub keeps running; the window can be
-  // opened by hand at the URL /luke-voice status shows.
-  child.on('error', error => log(`the call window could not be opened: ${error.message}`))
-  child.unref()
+  const isApp = args.some(arg => String(arg).startsWith('--app='))
+  return new Promise(resolve => {
+    let isDone = false
+    const done = (isOpened, why) => {
+      if (isDone) return
+      isDone = true
+      // No browser to open (a Linux server without xdg-open): the hub keeps running; the mod says
+      // so, with the address to open by hand.
+      if (!isOpened) log(`the call window could not be opened: ${why}`)
+      resolve(isOpened)
+    }
+    let child
+    try {
+      // windowsHide only for rundll32: Chrome opens its first window with the hidden show flag it is given.
+      child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: /rundll32/.test(cmd) })
+    } catch (error) {
+      return done(false, error.message)
+    }
+    child.on('error', error => done(false, error.message))
+    child.once('spawn', () => {
+      if (isApp) return done(true)
+      setTimeout(() => done(true), graceMs).unref()
+    })
+    child.once('exit', code => (code ? done(false, `${cmd} exited with ${code}`) : done(true)))
+    child.unref()
+  })
 }
 
 // The engine must be prepared (again) when it never was, when a file of its profile is missing (a
@@ -309,11 +373,16 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       resolve?.({ ok: Boolean(body.ok), message: String(body.message ?? '') })
       return [200, { ok: true }]
     },
-    'POST /show': (session, body) => {
+    'POST /show': async (session, body) => {
       focused = session.name
       const startCall = Boolean(body.call)
       if (streams.size === 0) {
-        open(`http://127.0.0.1:${PORT}/?k=${windowKey}${startCall ? '&call=1' : ''}`, { log })
+        const url = `http://127.0.0.1:${PORT}/?k=${windowKey}${startCall ? '&call=1' : ''}`
+        // Never "the window is opening" when nothing could open it: the mod gets the address instead.
+        if ((await open(url, { log })) === false) {
+          sendRoster()
+          return [200, { ok: true, isWindowOpen: false, isOpened: false, url }]
+        }
       } else {
         broadcast({ type: 'focus', name: session.name, startCall })
       }
@@ -763,6 +832,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
 
 // Run directly: listen on the fixed port and exit after ten idle minutes.
 if (isMainModule(import.meta.url, process.argv[1])) {
+  // Behind a proxy, launch.mjs started this Node with NODE_USE_ENV_PROXY (hub/proxy.mjs).
   const { serviceToken, windowKey } = loadSecrets()
   const log = line => console.log(line)
   const engine = createEngine({ log })

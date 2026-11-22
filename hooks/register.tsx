@@ -221,6 +221,14 @@ function frame(prompt: string) {
   return `The user asked luke-voice, their voice assistant, to pass this on:\n\n${prompt}`
 }
 
+// The link's reason when the ElevenLabs voice has no key; the pane shows it as it is.
+const NO_KEY = 'falta a chave da ElevenLabs'
+// What the mod says when it cannot run Node.js at all (ENOENT): a Claude Code opened before the
+// installer put Node.js on the PATH, or from the Dock or an IDE that never read it.
+export const NO_NODE = 'Node.js não encontrado: feche e abra o terminal (ou o Claude Code) de novo.'
+const isNotFound = (error: unknown) => /ENOENT|not found|no such file/i.test(error instanceof Error ? `${error.message} ${(error as { code?: string }).code ?? ''}` : String(error))
+const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
+
 async function setLink($: EngineInterface, patch: Partial<Link>) {
   await update($, link, current => ({ ...current, ...patch }))
   await refreshStatus($)
@@ -231,7 +239,7 @@ async function setLink($: EngineInterface, patch: Partial<Link>) {
 // every healthy moment read as a warning; the footer button and the pane already show the state.
 export function statusLine(l: Link): string | undefined {
   if (l.state === 'down') return `servidor local fora do ar${l.reason ? ` (${short(l.reason, 80)})` : ''} · /luke-voice help`
-  if (l.state === 'up' && l.reason === 'no ElevenLabs key') return 'falta a chave da ElevenLabs · /luke-voice help'
+  if (l.state === 'up' && l.reason === NO_KEY) return `${NO_KEY} · /luke-voice help`
   return undefined
 }
 
@@ -329,18 +337,46 @@ let storedVoice: VoiceProvider | '' = ''
 
 // The installer leaves `first-call` in luke-voice's home: the first Claude Code a person opens
 // after installing turns luke-voice on and starts the call, with no button and no command. Only
-// once, and only with a person at the prompt (never a `claude -p` run).
+// once, and only with a person at the prompt (never a `claude -p` run). The marker is set to done
+// only once this session subscribed to the hub: a hub that failed to start (no Node.js on the PATH
+// yet, say) leaves the first call for the next Claude Code opened.
+let firstCallMarker: string | null = null
+
+async function lukeHome($: EngineInterface) {
+  return (await $.env.get('LUKE_VOICE_HOME')) || `${(await $.env.get('USERPROFILE')) || (await $.env.get('HOME')) || ''}/.luke-voice`
+}
+
 async function isFirstCall($: EngineInterface, isInteractive: boolean) {
   if (!isInteractive) return false
-  const home = (await $.env.get('LUKE_VOICE_HOME')) || `${(await $.env.get('USERPROFILE')) || (await $.env.get('HOME')) || ''}/.luke-voice`
-  const marker = `${home}/first-call`
+  const marker = `${await lukeHome($)}/first-call`
   try {
     if (!(await $.fs.exists(marker)) || (await $.fs.read(marker)).trim() !== 'pending') return false
-    await $.fs.write(marker, 'done')
+    firstCallMarker = marker
     return true
   } catch {
     return false
   }
+}
+
+async function markFirstCallDone($: EngineInterface) {
+  const marker = firstCallMarker
+  firstCallMarker = null
+  if (marker) await $.fs.write(marker, 'done').catch(() => undefined)
+}
+
+// The Node.js the installer brought, when it is there, else the one on the PATH. A Claude Code
+// opened from the Dock, an IDE or a terminal opened before the install may not see the installer's
+// Node.js on its PATH.
+async function nodeCommand($: EngineInterface) {
+  const home = await lukeHome($)
+  for (const own of [`${home}/node/node.exe`, `${home}/node/bin/node`]) {
+    try {
+      if (await $.fs.exists(own)) return own
+    } catch {
+      // Not readable: the next one.
+    }
+  }
+  return 'node'
 }
 
 // Read again before each subscribe: another session may have changed the voice since this one
@@ -370,13 +406,24 @@ async function subscribeOnce($: EngineInterface, options: Record<string, unknown
   try {
     await loadStoredVoice($)
     // The key goes to the launcher on stdin, so a hub it starts has it from the first call.
-    const launched = await $.process.run(['node', `${$.plugin.root}/hub/launch.mjs`], {
-      timeoutMs: 20_000,
-      stdin: JSON.stringify({ apiKey: await apiKey($, options), provider: chosenProvider(options) }),
-    })
-    const out = JSON.parse(launched.stdout.trim().split('\n').pop() || '{}') as { ok?: boolean; serviceToken?: string; error?: string }
+    let launched: { stdout: string; stderr: string }
+    try {
+      launched = await $.process.run([await nodeCommand($), `${$.plugin.root}/hub/launch.mjs`], {
+        timeoutMs: 20_000,
+        stdin: JSON.stringify({ apiKey: await apiKey($, options), provider: chosenProvider(options) }),
+      })
+    } catch (error) {
+      await setLink($, { state: 'down', reason: isNotFound(error) ? NO_NODE : `o servidor local não iniciou (${messageOf(error)})` })
+      return false
+    }
+    let out: { ok?: boolean; serviceToken?: string; error?: string } = {}
+    try {
+      out = JSON.parse(launched.stdout.trim().split('\n').pop() || '{}')
+    } catch {
+      // Not the launcher's answer: its stderr says why.
+    }
     if (!out.ok || !out.serviceToken) {
-      await setLink($, { state: 'down', reason: out.error || launched.stderr.trim() || 'the hub did not start' })
+      await setLink($, { state: 'down', reason: out.error || launched.stderr.trim() || 'o servidor local não iniciou' })
       return false
     }
     const res = await hubFetch(
@@ -387,17 +434,18 @@ async function subscribeOnce($: EngineInterface, options: Record<string, unknown
       out.serviceToken,
     )
     if (!res.ok || typeof res.json.token !== 'string') {
-      await setLink($, { state: 'down', reason: `subscribe failed (${res.status})` })
+      await setLink($, { state: 'down', reason: `o servidor local recusou a conexão (${res.status})` })
       return false
     }
     token = res.json.token
     // A hub older than 0.8.0 does not answer with a voice: it only has ElevenLabs.
     voice = res.json.provider === 'local' ? 'local' : 'elevenlabs'
     // Only the ElevenLabs voice needs a key; the free voice runs without one.
-    await setLink($, { state: 'up', name: String(res.json.name), reason: voice === 'elevenlabs' && !res.json.hasKey ? 'no ElevenLabs key' : null })
+    await setLink($, { state: 'up', name: String(res.json.name), reason: voice === 'elevenlabs' && !res.json.hasKey ? NO_KEY : null })
+    await markFirstCallDone($)
     return true
   } catch (error) {
-    await setLink($, { state: 'down', reason: String(error instanceof Error ? error.message : error) })
+    await setLink($, { state: 'down', reason: `sem conexão com o servidor local (${messageOf(error)})` })
     return false
   }
 }
@@ -432,7 +480,7 @@ async function pollLoop($: EngineInterface, options: Record<string, unknown>, ge
     } catch (error) {
       if (gen !== generation) return
       token = null
-      await setLink($, { state: 'down', reason: String(error instanceof Error ? error.message : error) })
+      await setLink($, { state: 'down', reason: `a conexão com o servidor local caiu (${messageOf(error)})` })
       await $.clock.sleep(RETRY_MS)
     }
   }
@@ -563,7 +611,7 @@ async function toggle($: EngineInterface, options: Record<string, unknown>, to?:
   } else {
     await turnOff($)
   }
-  $.ui.toast(active ? 'luke-voice: on, starting the call…' : 'luke-voice: off')
+  $.ui.toast(active ? 'luke-voice: ligado, iniciando a chamada…' : 'luke-voice: desligado')
   return active
 }
 
@@ -571,13 +619,16 @@ async function show($: EngineInterface, options: Record<string, unknown>, withCa
   if (!(await read($, isOn))) await toggle($, options, true, false)
   if (!(await subscribe($, options))) {
     const l = await read($, link)
-    return `luke-voice could not reach its hub: ${l.reason ?? 'unknown reason'}.`
+    if (l.reason === NO_NODE) return NO_NODE
+    return `O luke-voice não conseguiu ligar o servidor local: ${l.reason ?? 'motivo desconhecido'}. Veja /luke-voice help.`
   }
   void $.ui.open({ id: PANE, title: 'luke-voice' })
   const res = await hubFetch($, 'POST', '/show', { call: withCall })
   const l = await read($, link)
-  const keyNote = l.reason === 'no ElevenLabs key' ? ' No ElevenLabs key yet: set ELEVENLABS_API_KEY or run /plugin configure luke-voice@luke-voice.' : ''
-  return `${withCall ? 'Calling' : 'Window shown'} as session "${l.name}".${res.json.isWindowOpen ? '' : ' The call window is opening.'}${keyNote}`
+  // Nothing could open the window (no browser found): the address, to open by hand.
+  if (res.json.isOpened === false) return `Não consegui abrir a janela da chamada. Abra este endereço no Chrome ou no Edge: ${String(res.json.url ?? '')}`
+  const keyNote = l.reason === NO_KEY ? ' Falta a chave da ElevenLabs: salve com /plugin configure luke-voice@luke-voice, ou use /luke-voice voz local.' : ''
+  return `${withCall ? 'Chamando a Ceci' : 'Janela da chamada'} na sessão "${l.name}".${res.json.isWindowOpen ? '' : ' A janela da chamada está abrindo.'}${keyNote}`
 }
 
 // /luke-voice voz [local|elevenlabs]: shows the voice, or switches it for the next call.
@@ -601,7 +652,7 @@ async function voiceCommand($: EngineInterface, options: Record<string, unknown>
   const hasKey = Boolean(res?.json.hasKey)
   if (isApplied) {
     voice = next
-    await setLink($, { reason: next === 'elevenlabs' && !hasKey ? 'no ElevenLabs key' : null })
+    await setLink($, { reason: next === 'elevenlabs' && !hasKey ? NO_KEY : null })
   }
   return [
     `Voz trocada para ${voiceName(next)}. ${isApplied ? 'Vale a partir da próxima chamada.' : 'Vale quando o luke-voice ligar.'}`,
@@ -613,7 +664,7 @@ async function voiceCommand($: EngineInterface, options: Record<string, unknown>
 
 async function statusText($: EngineInterface) {
   const on = await read($, isOn)
-  if (!on) return 'luke-voice: off. Nothing from this session is sent anywhere.'
+  if (!on) return 'luke-voice: desligado. Nada desta sessão sai do seu computador.'
   const l = await read($, link)
   const health = await hubFetch($, 'GET', '/health', undefined, null).catch(() => null)
   const h = health?.json ?? {}
@@ -645,7 +696,7 @@ function profileText(h: EngineHealth) {
 }
 
 // /luke-voice setup: downloads and checks the free voice now (as the installer does), instead of
-// on the first call. With luke-voice on, the hub does it in the background (up to 3.5 GB with a GPU)
+// on the first call. With luke-voice on, the hub does it in the background (up to 3.3 GB with a GPU)
 // and /luke-voice status shows the progress; with it off, hub/setup.mjs runs here, for at most ten
 // minutes, and a cut download resumes on the next run.
 async function setupCommand($: EngineInterface) {
@@ -657,17 +708,20 @@ async function setupCommand($: EngineInterface) {
   }
   let out: { stdout: string; stderr: string } | null = null
   try {
-    out = await $.process.run(['node', `${$.plugin.root}/hub/setup.mjs`, '--json'], { timeoutMs: 10 * 60_000 })
-  } catch {
+    out = await $.process.run([await nodeCommand($), `${$.plugin.root}/hub/setup.mjs`, '--json'], { timeoutMs: 10 * 60_000 })
+  } catch (error) {
+    if (isNotFound(error)) return NO_NODE
     return 'O download ainda não terminou. Rode /luke-voice setup de novo: ele continua de onde parou.'
   }
-  let result: { ok?: boolean; profile?: string; reason?: string; heard?: string; problems?: string[]; error?: string } = {}
+  let result: { ok?: boolean; profile?: string; reason?: string; heard?: string; problems?: string[]; error?: string; help?: string } = {}
   try {
     result = JSON.parse(out.stdout.trim().split('\n').pop() || '{}')
   } catch {
-    result = { ok: false, error: out.stderr.trim() || 'setup did not answer' }
+    result = { ok: false, error: out.stderr.trim() || 'o setup não respondeu' }
   }
-  if (result.error) return `Não consegui preparar a voz: ${short(result.error, 200)}. Veja a internet e tente de novo.`
+  // A full disk: setup's own line says how much and where.
+  if (result.error?.startsWith('Falta espaço')) return result.error
+  if (result.error) return `Não consegui preparar a voz: ${short(result.error, 200)}. ${result.help || 'Veja a internet e tente de novo.'}`
   if (result.profile === 'gpu' && result.ok) {
     return [
       `Voz natural pronta, na placa de vídeo (${result.reason}).`,
@@ -735,7 +789,7 @@ async function helpText($: EngineInterface) {
     '',
     'As vozes (troque com /luke-voice voz):',
     '  - Gratuita (padrão): roda no seu computador e é baixada na instalação, uma vez só.',
-    '    Com placa de vídeo de 6 GB ou mais: a voz natural da Ceci (2,8 GB). Sem ela: a voz leve, no navegador (cerca de 320 MB).',
+    '    Com placa de vídeo de 6 GB ou mais: a voz natural da Ceci (cerca de 3,3 GB). Sem ela: a voz leve, no navegador (cerca de 360 MB, ou 520 MB com uma placa de vídeo pequena).',
     '    O áudio não sai do seu computador; só o texto do que você falou vai para o Claude (Claude Haiku 5.5, da sua conta).',
     '  - ElevenLabs (opcional, paga por uso): crie uma conta em elevenlabs.io e copie uma chave em elevenlabs.io/app/settings/api-keys.',
     '    Salve a chave com: /plugin configure luke-voice@luke-voice e escolha /luke-voice voz elevenlabs.',
@@ -767,7 +821,9 @@ async function helpText($: EngineInterface) {
     'Se algo não funcionar:',
     '  - Não ouço nada: veja se o som do computador está ligado e se a janela mostra "Em chamada".',
     '  - Voz gratuita demora para falar: veja o Perfil acima. Se ainda está baixando, espere ou rode /luke-voice setup. Sem placa de vídeo, cada resposta leva 1 a 2 segundos a mais.',
-    '  - "No ElevenLabs API key" ou "Chave faltando": salve a chave (veja "As vozes") e reinicie o Claude Code, ou volte para a voz gratuita com /luke-voice voz local.',
+    '  - "Falta a chave da ElevenLabs": salve a chave (veja "As vozes") e reinicie o Claude Code, ou volte para a voz gratuita com /luke-voice voz local.',
+    '  - "Node.js não encontrado": feche e abra o terminal (ou o Claude Code) de novo. Se repetir, rode o instalador de novo.',
+    '  - "Não consegui abrir a janela da chamada": instale o Google Chrome (ou use o Edge) e abra o endereço que a mensagem mostra.',
     '  - "Hub offline" na janela: ligue o luke-voice no Claude Code; a janela volta sozinha.',
     '  - ElevenLabs: a chamada não conecta mais: os minutos grátis do mês podem ter acabado. Veja em elevenlabs.io.',
     '  - A janela está com o visual antigo: feche o Claude Code e abra de novo.',
@@ -806,17 +862,17 @@ export const register: Register = (on, options) => {
     if (voiceArg) return { text: await voiceCommand($, opts, voiceArg[3] ?? '') }
     switch (arg) {
       case '':
-        return { text: (await toggle($, opts)) ? 'luke-voice: on. Starting the call.' : 'luke-voice: off' }
+        return { text: (await toggle($, opts)) ? 'luke-voice: ligado. Iniciando a chamada.' : 'luke-voice: desligado' }
       case 'on':
       case 'off':
-        return { text: (await toggle($, opts, arg === 'on')) ? 'luke-voice: on. Starting the call.' : 'luke-voice: off' }
+        return { text: (await toggle($, opts, arg === 'on')) ? 'luke-voice: ligado. Iniciando a chamada.' : 'luke-voice: desligado' }
       case 'call':
         return { text: await show($, opts, true) }
       case 'window':
         return { text: await show($, opts, false) }
       case 'end':
         if (token) await hubFetch($, 'POST', '/end', {})
-        return { text: 'Call ended.' }
+        return { text: 'Chamada encerrada.' }
       case 'status':
         return { text: await statusText($) }
       case 'setup':

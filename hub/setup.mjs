@@ -5,14 +5,18 @@
 // --no-test skips the short test (the hub already runs the voice, so a second copy would not fit).
 // Without it the test is also skipped when a running hub reports the natural voice up, for the same
 // reason; a failed test is run once more before the light voice is chosen.
-// LUKE_VOICE_PROFILE=gpu|light forces the profile. Exit code 0 when the voice is ready.
+// LUKE_VOICE_PROFILE=gpu|light forces the profile. Exit code 0 when the voice is ready, 2 when the
+// disk has no room for it, 1 otherwise.
+// Behind a proxy (HTTPS_PROXY or HTTP_PROXY set), the downloads go through it (hub/proxy.mjs).
+import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { ASR_GLOSSARY, createEngine, groupBytes, maxFrames, prepareEngine, profileGroups, VOICE_SETTINGS } from './engine.mjs'
-import { modelsDir } from './models.mjs'
+import { freeBytes, modelsDir, remainingBytes } from './models.mjs'
 import { ORIGIN, isMainModule } from './paths.mjs'
+import { honorsEnvProxy, proxyEnv, proxyFrom } from './proxy.mjs'
 import { route } from './router.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -22,6 +26,47 @@ const TEST_LINE = 'Oi, eu sou a Ceci. Estou pronta!'
 const gb = bytes => `${(bytes / 1e9).toFixed(2)} GB`
 const mb = bytes => `${Math.round(bytes / 1e6)} MB`
 export const size = bytes => (bytes >= 1e9 ? gb(bytes) : mb(bytes))
+// In a sentence for the user: "3,6 GB", "540 MB".
+const sizeText = bytes => (bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1).replace('.', ',')} GB` : mb(bytes))
+
+// Fails before a download that would not fit: what is left to download plus 10%, on the disk that
+// holds the models. A system that cannot say how much is free is not stopped.
+export async function checkSpace({ paths, dir, free = freeBytes }) {
+  const needed = Math.ceil(remainingBytes(paths, { dir }) * 1.1)
+  if (!needed) return
+  const have = await free(dir)
+  if (have === null || have >= needed) return
+  const error = new Error(`Falta espaço: a voz precisa de ${sizeText(needed)} livres em ${dir}; libere espaço e rode de novo.`)
+  error.code = 'LUKE_NO_SPACE'
+  throw error
+}
+
+const NETWORK = /fetch failed|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH|UND_ERR|CERT|certificate|socket|proxy/i
+
+// Why the voice could not be prepared, for a person: { reason, help } in Portuguese. The original
+// error stays in parentheses where it helps whoever looks into it.
+export function explain(error, { env = process.env, versions = process.versions } = {}) {
+  const message = String(error?.message ?? error)
+  const code = String(error?.code ?? error?.cause?.code ?? '')
+  if (code === 'LUKE_NO_SPACE') return { reason: message, help: '' }
+  if (code === 'ENOSPC') return { reason: 'o disco encheu durante o download', help: 'Libere espaço e rode de novo: o download continua de onde parou.' }
+  if (NETWORK.test(`${message} ${code} ${error?.cause?.message ?? ''}`)) {
+    const proxy = proxyFrom(env)
+    return {
+      reason: `sem conexão com a internet, ou a rede (um proxy de empresa) bloqueou o download (${code || message})`,
+      help: !proxy
+        ? 'Confira a internet. Atrás de um proxy de empresa, defina HTTPS_PROXY=http://endereço:porta e rode de novo.'
+        : honorsEnvProxy(versions)
+          ? `Confira a internet e o proxy ${proxy} (endereço, porta e se ele libera github.com e huggingface.co) e rode de novo.`
+          : `O Node.js ${versions.node} não baixa pelo proxy ${proxy}: rode o instalador de novo, ele traz um Node.js que baixa.`,
+    }
+  }
+  const status = /Download failed \((\d+)\)/.exec(message)?.[1]
+  if (status) return { reason: `o servidor de download respondeu com erro ${status}`, help: 'Tente de novo em alguns minutos. Se repetir, veja se a rede bloqueia github.com ou huggingface.co.' }
+  if (/Integrity check failed/.test(message)) return { reason: 'um arquivo baixado veio diferente do esperado', help: 'Rode de novo: ele baixa esse arquivo outra vez. Se repetir, a rede (um proxy) pode estar mudando os downloads.' }
+  if (/Could not unpack/.test(message)) return { reason: `não consegui abrir o motor de voz baixado (${message})`, help: 'Rode de novo. Se repetir, veja se um antivírus bloqueou a pasta .luke-voice.' }
+  return { reason: message, help: 'Rode de novo. Se repetir, digite /luke-voice help no Claude Code.' }
+}
 
 // A progress line: redrawn in place on a terminal, every 10% otherwise (installer logs).
 export function progressPrinter(out = process.stdout) {
@@ -102,9 +147,10 @@ export async function hubRunsVoice({ origin = ORIGIN } = {}) {
   }
 }
 
-export async function setup({ out = process.stdout, prepare = prepareEngine, test = smokeTest, isTested = true, isVoiceRunning = hubRunsVoice } = {}) {
+export async function setup({ out = process.stdout, prepare = prepareEngine, test = smokeTest, isTested = true, isVoiceRunning = hubRunsVoice, free = freeBytes } = {}) {
   const say = line => out.write(`${line}\n`)
-  const profile = await prepare({ onProgress: progressPrinter(out) })
+  const spaceCheck = options => checkSpace({ ...options, free })
+  const profile = await prepare({ onProgress: progressPrinter(out), checkSpace: spaceCheck })
   const bytes = groupBytes(profileGroups(profile.profile, profile.devices))
   if (profile.profile === 'gpu') {
     say(`      Perfil: voz natural na placa de vídeo (${profile.reason}). Modelos: ${size(bytes)} em ${modelsDir()}.`)
@@ -126,11 +172,11 @@ export async function setup({ out = process.stdout, prepare = prepareEngine, tes
       say('      As chamadas vão usar a voz leve, no navegador, até isso ser resolvido. Para tentar de novo: /luke-voice setup.')
       // Saved as the light profile, so the hub and the window do not use the broken natural voice.
       try {
-        const fallback = await prepare({ onProgress: progressPrinter(out), override: 'light', devices: profile.devices, reason: `a voz natural falhou no teste: ${result.problems.join('; ')}` })
+        const fallback = await prepare({ onProgress: progressPrinter(out), checkSpace: spaceCheck, override: 'light', devices: profile.devices, reason: `a voz natural falhou no teste: ${result.problems.join('; ')}` })
         say(`      Voz leve pronta. Modelos: ${size(groupBytes(profileGroups(fallback.profile, fallback.devices)))} em ${modelsDir()}.`)
         return { profile, test: result, ok: false, fallback }
       } catch (error) {
-        say(`      A voz leve também não pôde ser baixada: ${error?.message ?? error}.`)
+        say(`      A voz leve também não pôde ser baixada: ${explain(error).reason}.`)
         return { profile, test: result, ok: false, fallback: null }
       }
     }
@@ -142,15 +188,23 @@ export async function setup({ out = process.stdout, prepare = prepareEngine, tes
 }
 
 if (isMainModule(import.meta.url, process.argv[1])) {
+  // Behind a proxy: this same script again, with Node told to use it (read only at Node's start).
+  const withProxy = proxyEnv(process.env)
+  if (Object.entries(withProxy).some(([name, value]) => process.env[name] !== value)) {
+    const again = spawnSync(process.execPath, ['--disable-warning=UNDICI-EHPA', fileURLToPath(import.meta.url), ...process.argv.slice(2)], { stdio: 'inherit', env: { ...process.env, ...withProxy } })
+    process.exit(again.status ?? 1)
+  }
   const asJson = process.argv.includes('--json')
   try {
     const result = await setup({ out: asJson ? { write: () => true, isTTY: false } : process.stdout, isTested: !process.argv.includes('--no-test') })
     if (asJson) process.stdout.write(`${JSON.stringify({ ok: result.ok, profile: result.profile.profile, reason: result.profile.reason ?? '', heard: result.test?.heard ?? '', problems: result.test?.problems ?? [] })}\n`)
     process.exit(result.ok ? 0 : 1)
   } catch (error) {
-    const message = String(error?.message ?? error)
-    if (asJson) process.stdout.write(`${JSON.stringify({ ok: false, error: message })}\n`)
-    else process.stderr.write(`      Could not prepare the voice: ${message}\n`)
-    process.exit(1)
+    const { reason, help } = explain(error)
+    if (asJson) process.stdout.write(`${JSON.stringify({ ok: false, error: reason, help })}\n`)
+    else if (error?.code === 'LUKE_NO_SPACE') process.stderr.write(`      ${reason}\n`)
+    else process.stderr.write(`      Não consegui preparar a voz: ${reason}.\n      O que fazer: ${help}\n`)
+    // 2: the disk is full, and the installers say so instead of "the first call finishes it".
+    process.exit(error?.code === 'LUKE_NO_SPACE' ? 2 : 1)
   }
 }
