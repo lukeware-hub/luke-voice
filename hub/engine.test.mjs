@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn as nodeSpawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -436,6 +436,30 @@ test('prepare downloads the profile models in parallel, reports them as one tota
   assert.equal(existsSync(join(dir, 'downloads', 'llama-b1500-bin-win-vulkan-x64.zip.part')), false)
   assert.equal(existsSync(join(dir, 'downloads', `llama-${LLAMA_BUILD}-bin-win-vulkan-x64.zip`)), false)
   assert.equal(existsSync(join(dir, 'downloads', 'llama-b1800-bin-win-vulkan-x64.zip')), true)
+})
+
+test('after the natural voice failed its test, a later preparation keeps the light voice', async () => {
+  const { prepareEngine } = await import('./engine.mjs')
+  const ensure = async (path, { onProgress }) => onProgress(MODELS[path].size, MODELS[path].size)
+  const M1 = [{ id: 'MTL0', name: 'Apple M1', mib: 12124 }]
+  const why = 'a voz natural falhou no teste: lenta demais (7.4 s para 2.6 s de fala)'
+  const dir = fresh()
+  // setup.mjs, after two failed tests: the light profile, remembering the failure.
+  const fallback = await prepareEngine({ dir, models: fresh(), key: 'darwin-arm64', override: 'light', devices: M1, failed: true, reason: why, ensure })
+  assert.equal(fallback.profile, 'light')
+  assert.equal(fallback.naturalFailed, true)
+  // The hub, starting while the light models still download, prepares again with no override:
+  // it once wrote gpu here and every call used the slow natural voice. No llama.cpp is fetched.
+  const again = await prepareEngine({ dir, models: fresh(), key: 'darwin-arm64', override: '', ensure, run: () => assert.fail('no llama.cpp for the light voice') })
+  assert.equal(again.profile, 'light')
+  assert.equal(again.naturalFailed, true)
+  assert.equal(again.reason, why)
+  // The devices are kept: the light voice's models are the WebGPU ones on this Mac.
+  assert.deepEqual(again.devices, M1)
+  assert.equal(JSON.parse(readFileSync(join(dir, 'profile.json'), 'utf8')).profile, 'light')
+  // Setup tests the natural voice again: the remembered failure no longer decides.
+  const retried = await prepareEngine({ dir, models: fresh(), key: null, override: '', retryNatural: true, ensure })
+  assert.equal(retried.naturalFailed, undefined)
 })
 
 test('the archive of this build stays until it is unpacked', async () => {
