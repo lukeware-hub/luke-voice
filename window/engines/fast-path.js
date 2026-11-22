@@ -48,7 +48,9 @@ function shortAnswer(text, strong) {
 }
 
 // "sim", "pode", "manda ver", "Sim, pode-se." (as Whisper writes it), "claro, pode fazer".
-export const isConfirm = text => !isDeny(text) && shortAnswer(text, YES)
+// A question back ("tá aí?", "pode ser?", "o que?") is never a yes, even when made of yes words.
+const QUESTION = new RegExp(`\\?\\W*$|^\\W*(${NAME}\\W+)*(o que|que|como|onde|quando|por que|porque|qual|quem|cade|ta ai)\\b`)
+export const isConfirm = text => !QUESTION.test(plain(text)) && !isDeny(text) && shortAnswer(text, YES)
 
 // "não", "agora não", "deixa pra lá", "melhor não", "esquece".
 export const isDeny = text => shortAnswer(text, NO)

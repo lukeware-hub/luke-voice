@@ -105,3 +105,13 @@ test('the new yes words never turn a no, a doubt or a new request into a yes', (
     assert.equal(isDeny(said), false, said)
   }
 })
+
+test('a question back is never a yes, even when made of yes words', () => {
+  for (const said of ['Tá aí?', 'tá?', 'Sim?', 'Pode ser?', 'pode?', 'Tá aí', 'Ceci, tá aí?', 'O que?', 'Como assim, pode?', 'Onde?', 'Quando pode?', 'Por que, Ceci?', 'Ok?']) {
+    assert.equal(isConfirm(said), false, said)
+  }
+  // Still yes: no question.
+  for (const said of ['Tá.', 'Pode ser.', 'Sim, pode', 'Tá bom.', 'Claro que sim!', 'Ceci, pode sim']) {
+    assert.equal(isConfirm(said), true, said)
+  }
+})
