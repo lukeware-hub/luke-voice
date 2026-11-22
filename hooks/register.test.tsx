@@ -241,6 +241,34 @@ test('a voice task runs in a Claude Code subagent, and its answer is reported as
   expect(events.find(e => e.includes('task_done'))).toContain('Achei o login em auth.ts.')
 })
 
+test('two identical voice tasks whose ids come with turn.start both report task_done', async ($, on) => {
+  const spawned: string[] = []
+  on('agent.spawn', (_, e) => (spawned.push(e.prompt), { model: 'test' }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => (release = resolve))
+  const { calls } = engine(on, [
+    async () => ({ status: 200, body: { commands: [{ id: 'd1', type: 'task', task: 'roda os testes' }, { id: 'd2', type: 'task', task: 'roda os testes' }] } }),
+    async () => (await held, { status: 410, body: {} }),
+  ])
+
+  await $.command.run(run('on'))
+  await until(() => calls.filter(c => c.path === '/ack').length === 2)
+  await $.turn.start({ text: spawned[0] ?? '', turnId: 'a', agentId: 'agent-a' })
+  await $.turn.start({ text: spawned[1] ?? '', turnId: 'b', agentId: 'agent-b' })
+  await $.turn.complete({ answer: 'Primeira.', durationMs: 1, isAborted: false, turnId: 'a', agentId: 'agent-a', reason: 'answer' })
+  await $.turn.complete({ answer: 'Segunda.', durationMs: 1, isAborted: false, turnId: 'b', agentId: 'agent-b', reason: 'answer' })
+  await until(() => calls.filter(c => c.path === '/events' && JSON.stringify(c.body).includes('task_done')).length === 2)
+  await $.command.run(run('off'))
+  release()
+
+  const done = calls.filter(c => c.path === '/events').map(c => JSON.stringify(c.body)).filter(b => b.includes('task_done'))
+  expect(done.length).toBe(2)
+  expect(done.some(b => b.includes('Primeira.'))).toBe(true)
+  expect(done.some(b => b.includes('Segunda.'))).toBe(true)
+})
+
 test('a voice task marks the session busy in the hub when it starts, and free when it ends', async ($, on) => {
   const spawned: string[] = []
   on('agent.spawn', (_, e) => (spawned.push(e.prompt), { model: 'test', agentId: 'agent-8' }))

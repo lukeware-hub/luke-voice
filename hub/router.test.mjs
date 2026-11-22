@@ -73,6 +73,14 @@ test('after a question of hers, a short reaction is an answer for Claude', async
   assert.equal((await route('tá bom', { ...fixed('ack'), lastSaid: 'Terminei.' })).intent, 'ack')
 })
 
+test('a question mid-line, or a "confirma/posso/pode", still makes a short "sim" an answer for Claude', () => {
+  return Promise.all(
+    ['Posso rodar? Me confirma.', 'Rodo os testes. Me confirma', 'Posso mandar pro Claude.', 'Pode ser na pasta api.'].map(async lastSaid =>
+      assert.equal((await route('sim', { ...fixed('ack'), lastSaid })).intent, 'claude', lastSaid),
+    ),
+  )
+})
+
 test('"tudo certo?" read as a greeting is answered as "how are you"', async () => {
   assert.equal((await route('oi, tudo bem?', fixed('greeting'))).intent, 'how_are_you')
   assert.equal(confirmed('identity', 'o que você faz?'), true)

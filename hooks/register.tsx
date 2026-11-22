@@ -198,10 +198,24 @@ let turnId: string | null = null
 let queued: string[] = []
 // Subagents started for voice tasks, by agent id: the task, to report with its result.
 const tasks = new Map<string, string>()
-// Spawned tasks whose agent id is not known yet, by the prompt their subagent starts with.
-const pendingTasks = new Map<string, string>()
+// Spawned tasks whose agent id is not known yet, by the prompt their subagent starts with: a queue,
+// so the same task asked twice is tracked (and reported) twice.
+const pendingTasks = new Map<string, string[]>()
 // The effort each voice-task subagent runs at, by agent id, or by its prompt until the id is known.
 const taskEfforts = new Map<string, Effort>()
+
+// Takes the oldest task waiting on a prompt. The prompt's effort goes with the last one.
+function takePending(prompt: string) {
+  const list = pendingTasks.get(prompt)
+  const task = list?.shift()
+  const effort = taskEfforts.get(prompt)
+  const isLast = !list?.length
+  if (isLast) {
+    pendingTasks.delete(prompt)
+    taskEfforts.delete(prompt)
+  }
+  return { task, effort, isLast }
+}
 
 // The model and effort for a voice task, by how complex it is (see CLAUDE.md, "Task orchestration").
 export type Complexity = 'complex' | 'medium' | 'simple'
@@ -556,19 +570,17 @@ async function onCommand($: EngineInterface, command: Command) {
     try {
       const prompt = frameTask(command.task)
       const tier = TIERS[classifyTask(command.task)]
-      pendingTasks.set(prompt, command.task)
+      pendingTasks.set(prompt, [...(pendingTasks.get(prompt) ?? []), command.task])
       taskEfforts.set(prompt, tier.effort)
       const spawned = await $.agent.spawn({ prompt, description: 'luke-voice task', model: tier.model })
       if (spawned.deny) {
-        pendingTasks.delete(prompt)
-        taskEfforts.delete(prompt)
+        takePending(prompt)
         return ack($, command.id, false, `Could not start the task: ${spawned.deny}`)
       }
       // The id comes with the spawn, or with the subagent's turn.start (matched by its prompt).
       if (spawned.agentId) {
-        pendingTasks.delete(prompt)
+        takePending(prompt)
         tasks.set(spawned.agentId, command.task)
-        taskEfforts.delete(prompt)
         taskEfforts.set(spawned.agentId, tier.effort)
       }
       await startRunning($, spawned.agentId ?? prompt, command.task)
@@ -927,14 +939,14 @@ export const register: Register = (on, options) => {
   }).catch(($, e, next) => next(e))
 
   on('turn.start', async ($, e, next) => {
-    const pending = e.agentId !== undefined ? pendingTasks.get(e.text) : undefined
-    if (e.agentId !== undefined && pending !== undefined) {
-      pendingTasks.delete(e.text)
+    // A subagent already known (its id came with the spawn) does not take another task's place.
+    const waiting = e.agentId !== undefined && !tasks.has(e.agentId) && pendingTasks.has(e.text) ? takePending(e.text) : null
+    const pending = waiting?.task
+    if (e.agentId !== undefined && waiting && pending !== undefined) {
       tasks.set(e.agentId, pending)
-      const effort = taskEfforts.get(e.text)
-      taskEfforts.delete(e.text)
-      if (effort) taskEfforts.set(e.agentId, effort)
-      await stopRunning($, e.text)
+      if (waiting.effort) taskEfforts.set(e.agentId, waiting.effort)
+      // The prompt's row stays while another task with the same prompt still waits for its id.
+      if (waiting.isLast) await stopRunning($, e.text)
       await startRunning($, e.agentId, pending)
     } else if (e.agentId !== undefined && tasks.has(e.agentId)) {
       // A stopped task its subagent picked up again.
