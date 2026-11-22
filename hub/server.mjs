@@ -29,6 +29,9 @@ const ACK_WAIT_MS = 15_000
 const ROUTER_WAIT_MS = 1500
 // Qwen3-ASR transcribes a turn in ~0.2 s; a hung engine must not hold the request (the window gives up at 20 s).
 const STT_WAIT_MS = 20_000
+// How much of what Ceci just said goes into the ears' prompt: her last minute, newest 200 characters.
+const RECENT_SAID_MS = 60_000
+const RECENT_SAID_CHARS = 200
 // A brain turn is one short Claude Haiku call (~2.5 s); a cold start can take longer.
 const BRAIN_WAIT_MS = 40_000
 const NO_SESSION_SAY = 'Nenhuma sessão do Claude está ligada. Ligue o luke-voice no Claude Code e me chame de novo.'
@@ -621,17 +624,35 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     return Buffer.concat(chunks)
   }
 
+  // What Ceci said in the last minute, for the ears: the user often answers with her words
+  // ("Alcaçuz", "o Opus 5.5"). On 20 recorded turns it cut word errors from 27 to 24 of 129, and
+  // noise or silence still came back empty. Kept as a list, so a short "Certo." made while the call
+  // is idle does not push her last answer out.
+  let recentSaid = [] // { text, at }
+  const noteSaid = text => recentSaid.push({ text, at: clock() })
+  const saidLately = () => {
+    const since = clock() - RECENT_SAID_MS
+    recentSaid = recentSaid.filter(said => said.at >= since).slice(-8)
+    const joined = recentSaid.map(said => said.text).join(' ')
+    // The newest words matter most: cut from the front, at a word boundary.
+    return joined.length <= RECENT_SAID_CHARS ? joined : joined.slice(-RECENT_SAID_CHARS).replace(/^\S*\s+/, '')
+  }
+  const asrPrompt = () => {
+    const names = [...sessions.values()].map(s => s.name).join(', ')
+    const said = saidLately()
+    return [ASR_GLOSSARY, names && `Sessões: ${names}.`, said && `Ceci acabou de dizer: ${said}`].filter(Boolean).join(' ')
+  }
+
   // Speech to text on the native engine (Qwen3-ASR): a WAV in, { text } out.
   async function nativeStt(req, res) {
     const url = engine?.url('asr')
     if (!url) return send(res, 503, { error: 'The native speech engine is not running.' })
     const wav = await readRaw(req, MAX_AUDIO)
-    const names = [...sessions.values()].map(s => s.name).join(', ')
     const form = new FormData()
     form.append('file', new Blob([wav], { type: 'audio/wav' }), 'speech.wav')
     form.append('model', 'qwen3-asr')
     form.append('language', 'pt')
-    form.append('prompt', names ? `${ASR_GLOSSARY} Sessões: ${names}.` : ASR_GLOSSARY)
+    form.append('prompt', asrPrompt())
     const started = Date.now()
     // The window gone (it hung up, or gave up waiting) or a hung engine: stop the transcription,
     // so the engine's single slot is free for the next turn. The request closes once its body is
@@ -714,6 +735,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     const text = String(body.text ?? '').slice(0, MAX_TTS_CHARS).trim()
     if (!text) return send(res, 400, { error: 'Nothing to say.' })
     if (!loadVoiceRef()) return send(res, 503, { error: "Ceci's voice reference (agent/ceci-voice.wav and agent/ceci-voice.txt) is missing: reinstall luke-voice." })
+    noteSaid(text)
     // A live line: the background question search stops until the engine is idle again.
     const done = questionTakes().live()
     // The window hangs up when the user talks over Ceci: stop the generation with it, so the

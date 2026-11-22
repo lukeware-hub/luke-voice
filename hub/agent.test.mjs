@@ -63,7 +63,17 @@ test('both voices are Ceci: same name, age and creator, told only when asked, an
     assert.match(text, /criada por Diego Morais na Lukeware Inteligência Digital LTDA, a empresa da qual ele é dono. Lukeware é o nome da empresa, não o seu/, file)
     assert.match(text, /Só fale da sua idade, da sua aparência ou de quem te criou quando o usuário perguntar/, file)
     assert.match(text, /Nunca invente/, file)
+    // From the recorded conversation of 0.10.4: she spoke of herself by name, offered searches
+    // she could not run, explained misheard words as if real, and opened every line the same way.
+    assert.match(text, /sempre na primeira pessoa .* Nunca fale de si pelo nome/, file)
+    assert.match(text, /Só ofereça pesquisar, conferir ou olhar algo quando for coisa do computador/, file)
+    assert.match(text, /pergunte só se ouviu certo, com o seu palpite \("Você disse Alcaçuz\?"\)/, file)
+    assert.match(text, /Nunca explique, defina ou ensine a pronúncia de uma palavra que pode ter sido mal ouvida/, file)
+    assert.match(text, /Não termine toda fala com pergunta, e não repita o começo das suas últimas falas/, file)
+    assert.doesNotMatch(text, /use as ferramentas para descobrir o resto/, file)
   }
+  // The free voice speaks every word through the local engine: two short sentences at most.
+  assert.match(await readFile(join(root, 'agent/brain-prompt.md'), 'utf8'), /nunca mais de duas frases curtas, contando a pergunta/)
   const def = JSON.parse(await readFile(join(root, 'agent/agent.json'), 'utf8'))
   assert.match(def.conversation_config.agent.first_message, /Eu sou a Ceci/)
   // The free local voice greets with the same words.
