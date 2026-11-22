@@ -106,6 +106,9 @@ let pendingActivity = []
 let pendingSpeech = []
 let silentSince = Date.now()
 let connectedAt = 0
+// Bumped by every Chamar and Encerrar: a call still connecting when the user ends it (or starts
+// another) is ended as soon as its session comes back, instead of going live.
+let callGeneration = 0
 let entries = 0
 let restoreRect = null
 let compactRect = null
@@ -361,6 +364,11 @@ function flushActivity() {
 function speakWhenQuiet() {
   if (!conversation || pendingSpeech.length === 0) return
   if (mode === 'speaking' || Date.now() - silentSince < SPEAK_AFTER_SILENCE_MS) return
+  // The user is mid-sentence: the news waits until they have been quiet for a moment too.
+  if (conversation.isUserSpeaking?.()) {
+    silentSince = Date.now()
+    return
+  }
   flushActivity()
   const text = pendingSpeech.splice(0).join('\n')
   // The news goes in as context, never as the user's words; the user message is fixed text.
@@ -435,17 +443,24 @@ async function voiceEngine() {
 
 async function startCall() {
   if (conversation || callState === 'connecting') return
+  const generation = ++callGeneration
+  const isCurrent = () => generation === callGeneration
   setCall('connecting')
   try {
     const voice = await voiceEngine()
-    conversation = await voice.startSession({
+    if (!isCurrent()) return
+    const started = await voice.startSession({
       hub,
       prepare: microphone,
       clientTools,
-      onStatus: text => {
-        if (callState === 'connecting') setCaption(text)
+      onStatus: (text, { isWarning = false } = {}) => {
+        if (!isCurrent()) return
+        if (callState === 'connecting' || isWarning) setCaption(text)
+        // A voice downgrade is kept in the history too: a caption is soon replaced by Ceci's next line.
+        if (isWarning) addLog('failed', text)
       },
       onConnect: async () => {
+        if (!isCurrent()) return
         connectedAt = Date.now()
         window.focus()
         setCall('live')
@@ -453,6 +468,8 @@ async function startCall() {
         conversation?.sendContextualUpdate(`${sessionsLine()}\n[activity]\n${quoteUntrusted(snapshot.text)}`)
       },
       onDisconnect: details => {
+        // A session ended because its call was ended while it connected: nothing to show.
+        if (!isCurrent()) return
         const wasEnded = conversation === null
         conversation = null
         // A call the agent drops in its first seconds never really started: say so, with the reason.
@@ -463,8 +480,15 @@ async function startCall() {
         }
         setCall('idle', 'Chamada encerrada. Toque em Chamar para falar de novo.')
       },
-      onError: message => setCall('error', `Erro na chamada: ${message}`),
+      onError: message => {
+        if (!isCurrent()) return
+        // One failed turn does not end a live call: the error is shown and the call, the mic and
+        // its mute stay as they are (an error state would unmute the mic while the session runs).
+        if (callState === 'live') return setCaption(`Erro na chamada: ${message}`)
+        setCall('error', `Erro na chamada: ${message}`)
+      },
       onModeChange: ({ mode: next }) => {
+        if (!isCurrent()) return
         mode = next
         if (callState === 'live') {
           setOrb(isMuted ? 'muted' : next === 'speaking' ? 'speaking' : 'listening')
@@ -473,6 +497,7 @@ async function startCall() {
         if (next !== 'speaking') silentSince = Date.now()
       },
       onMessage: ({ source, message }) => {
+        if (!isCurrent()) return
         if (source === 'user') {
           gate.userSpoke(message)
           const change = quiet.userSpoke(message)
@@ -484,13 +509,20 @@ async function startCall() {
         if (source === 'ai') setCaption(message.replace(/\[[a-z ]+\]\s*/gi, ''), true)
       },
     })
+    if (!isCurrent()) {
+      await started.endSession().catch(() => {})
+      return
+    }
+    conversation = started
   } catch (error) {
+    if (!isCurrent()) return
     conversation = null
     setCall('error', String(error.message ?? error))
   }
 }
 
 async function endCall() {
+  callGeneration++
   const current = conversation
   conversation = null
   pendingActivity = []
@@ -525,7 +557,8 @@ function connectStream() {
     if (ui.status.dataset.state === 'offline') setCall(callState === 'offline' ? 'idle' : callState)
   }
   stream.onerror = () => {
-    if (!conversation) {
+    // A call still connecting keeps its state: it ends or goes live on its own.
+    if (!conversation && callState !== 'connecting') {
       callState = 'offline'
       setStatus('offline')
       ui.headline.textContent = STATES.offline.headline

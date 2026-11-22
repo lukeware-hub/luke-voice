@@ -177,6 +177,9 @@ export const nativeBytes = () => groupBytes(['native'])
 // Whether every model file of a saved profile is on disk (by size; the hash was checked on download).
 export function profileReady(profile, { models = modelsDir() } = {}) {
   if (profile?.profile === 'gpu' && !(profile.exe && existsSync(profile.exe))) return false
+  // An update that moves to another llama.cpp build must not run the old binary with the new
+  // models: the profile is prepared again, which downloads the build it names.
+  if (profile?.profile === 'gpu' && profile.build !== LLAMA_BUILD) return false
   return groupPaths(profileGroups(profile?.profile, profile?.devices ?? [])).every(path => {
     const file = join(models, ...path.split('/'))
     return existsSync(file) && statSync(file).size === MODELS[path].size
@@ -247,21 +250,23 @@ function startGuard(log) {
 }
 
 export function createEngine({ dir = engineDir(), models = modelsDir(), spawn = nodeSpawn, request = fetch, log = () => {}, command = null, readyTimeoutMs = 90_000, latePollMs = 2000, guard = null } = {}) {
-  const services = new Map() // name -> { port, child, isReady, restarts: number[], isStopping, firstWait }
+  const services = new Map() // name -> { port, child, isReady, restarts: number[], isStopping, hasExited, firstWait }
   let isStopped = false
   let guarded = guard
 
   // The service is still the one in the map, and nobody asked it to stop.
   const isCurrent = (name, service) => services.get(name) === service && !service.isStopping && !isStopped
-  const isRunning = child => child.exitCode === null && child.signalCode === null
+  // A child that could not be spawned at all has no exit code: hasExited covers it.
+  const isRunning = service => !service.hasExited && service.child.exitCode === null && service.child.signalCode === null
 
-  async function waitReady(name, port, timeoutMs = readyTimeoutMs) {
+  // Polls this service's port until it answers. Stops as soon as its server is gone (crashed or
+  // never ran) or another server replaced it, instead of polling a dead port for the whole timeout.
+  async function waitReady(name, service, timeoutMs = readyTimeoutMs) {
     const until = Date.now() + timeoutMs
     while (Date.now() < until) {
-      const service = services.get(name)
-      if (!service || service.isStopping) return false
+      if (!isCurrent(name, service) || !isRunning(service)) return false
       try {
-        const res = await request(`http://127.0.0.1:${port}/health`)
+        const res = await request(`http://127.0.0.1:${service.port}/health`)
         if (res.ok) return true
       } catch {
         // not listening yet
@@ -292,9 +297,12 @@ export function createEngine({ dir = engineDir(), models = modelsDir(), spawn = 
     guarded ??= startGuard(log)
     if (child.pid) guarded.add(child.pid)
     child.on('exit', () => child.pid && guarded.remove(child.pid))
-    const service = { port, child, isReady: false, restarts: previous?.restarts ?? [], isStopping: false, firstWait: null }
+    const service = { port, child, isReady: false, restarts: previous?.restarts ?? [], isStopping: false, hasExited: false, firstWait: null }
     services.set(name, service)
-    child.on('exit', code => {
+    const onGone = code => {
+      // A failed spawn may be followed by an exit event: count it once.
+      if (service.hasExited) return
+      service.hasExited = true
       service.isReady = false
       if (service.isStopping || isStopped) return
       // Crashed: start it again, unless it keeps crashing (5 times in 5 minutes).
@@ -307,8 +315,15 @@ export function createEngine({ dir = engineDir(), models = modelsDir(), spawn = 
           if (isCurrent(name, service)) void startOne(name, exe).catch(() => {})
         }, 1000)
       }
+    }
+    child.on('exit', onGone)
+    // The exe is missing or cannot run (ENOENT, EACCES: an antivirus quarantine): without this
+    // listener the error would crash the whole hub. It counts as a crash, with the same limit.
+    child.on('error', error => {
+      log(`engine ${name} could not run: ${error.message}`)
+      onGone(error.code)
     })
-    service.firstWait = waitReady(name, port)
+    service.firstWait = waitReady(name, service)
     service.isReady = await service.firstWait
     log(`engine ${name} ${service.isReady ? `ready on ${port}` : 'did not become ready'}`)
     if (!service.isReady) void waitLate(name, service)
@@ -318,8 +333,8 @@ export function createEngine({ dir = engineDir(), models = modelsDir(), spawn = 
   // A server slower than the timeout (a cold disk, a first shader compile) is still running: keep
   // checking, and use it once it answers, instead of marking it down for the life of the hub.
   async function waitLate(name, service) {
-    while (isCurrent(name, service) && isRunning(service.child)) {
-      if (await waitReady(name, service.port, latePollMs)) {
+    while (isCurrent(name, service) && isRunning(service)) {
+      if (await waitReady(name, service, latePollMs)) {
         if (!isCurrent(name, service)) return
         service.isReady = true
         log(`engine ${name} ready on ${service.port} (late)`)
@@ -338,7 +353,7 @@ export function createEngine({ dir = engineDir(), models = modelsDir(), spawn = 
           const current = services.get(name)
           if (current?.isReady) return (result[name] = true)
           // Already starting, or late but running: wait for it, do not start a second one.
-          if (current && !current.isStopping && isRunning(current.child) && current.firstWait) return (result[name] = await current.firstWait)
+          if (current && !current.isStopping && isRunning(current) && current.firstWait) return (result[name] = await current.firstWait)
           const ready = SERVICES[name].models.every(path => existsSync(join(models, ...path.split('/'))))
           result[name] = ready ? await startOne(name, exe).catch(error => (log(`engine ${name}: ${error.message}`), false)) : false
         }),

@@ -76,3 +76,24 @@ test('in the background, takes are made only while no live line is wanted, and a
   takes.stop()
   other.stop()
 })
+
+test('while the voice server is down, the background search backs off instead of spinning, and resumes when it is back', async () => {
+  const flat = wav(take(1.2, 0))
+  let isUp = false
+  const calls = []
+  const say = async seed => {
+    calls.push(seed)
+    return isUp ? flat : null
+  }
+  const dir = mkdtempSync(join(tmpdir(), 'luke-voice-takes-'))
+  const takes = createQuestionTakes({ say: (_text, seed) => say(seed), dir, voiceKey: 'v', idleMs: 0, retryMs: 50 })
+  takes.warm(['Posso?'])
+  // Retries at about 0, 50, 150 and 350 ms: never a take every few milliseconds.
+  await new Promise(r => setTimeout(r, 300))
+  assert.ok(calls.length >= 2 && calls.length <= 4, `${calls.length} takes asked of a server that is down`)
+  isUp = true
+  await new Promise(r => setTimeout(r, 700))
+  // Back up: the next retry works, and the search goes on at full speed through every seed.
+  assert.deepEqual([...new Set(calls)], [101, 102, 103, 104, 105, 106, 107, 108])
+  takes.stop()
+})

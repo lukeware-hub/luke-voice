@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { test } from 'node:test'
 
-import { BINARIES, MIN_VRAM_MIB, SERVICES, createEngine, ensureBinaries, groupBytes, parseDevices, pickProfile, platformKey, profileGroups } from './engine.mjs'
+import { BINARIES, LLAMA_BUILD, MIN_VRAM_MIB, SERVICES, createEngine, ensureBinaries, groupBytes, parseDevices, pickProfile, platformKey, profileGroups, profileReady } from './engine.mjs'
 import { MODELS } from './models.mjs'
 
 const fresh = () => mkdtempSync(join(tmpdir(), 'luke-engine-'))
@@ -242,4 +242,61 @@ test('a CPU posing as a GPU (llvmpipe) or Intel integrated graphics gets the lig
   assert.match(pickProfile({ key, devices: cases[0][0] }).reason, /integrada ou por software \(llvmpipe/)
   assert.equal(pickProfile({ key, devices: cases[3 - 2][0], override: 'gpu' }).profile, 'gpu', 'forced, it is still allowed')
   assert.equal(pickProfile({ key, devices: cases[6][0] }).device, 'NVIDIA GeForce RTX 4060 Laptop GPU')
+})
+
+test('a llama-server that cannot be started (missing or quarantined) is logged and given up on, not a hub crash', async () => {
+  const dir = fresh()
+  let spawns = 0
+  const spawn = (...args) => (spawns++, nodeSpawn(...args))
+  const lines = []
+  const engine = createEngine({ dir, models: ttsModels(), spawn, command: [join(dir, 'missing-llama-server.exe')], readyTimeoutMs: 10_000, log: line => lines.push(line) })
+  try {
+    const started = Date.now()
+    assert.deepEqual(await engine.start(['tts']), { tts: false })
+    assert.ok(Date.now() - started < 3000, `start waited ${Date.now() - started} ms for a server that never ran`)
+    // Treated as a crash: restarted, within the same limit of 5 in 5 minutes.
+    await sleepMs(5500)
+    assert.equal(spawns, 5)
+    assert.ok(lines.some(line => /engine tts could not run/.test(line)), lines.join('\n'))
+    assert.ok(lines.some(line => /giving up/.test(line)), lines.join('\n'))
+  } finally {
+    engine.stop()
+  }
+})
+
+test('start stops waiting for a server that crashed before it was ready', async () => {
+  const dir = fresh()
+  const crasher = join(dir, 'crash-at-once.cjs')
+  writeFileSync(crasher, 'process.exit(1)')
+  const engine = createEngine({ dir, models: ttsModels(), command: [process.execPath, crasher], readyTimeoutMs: 10_000 })
+  try {
+    const started = Date.now()
+    assert.deepEqual(await engine.start(['tts']), { tts: false })
+    assert.ok(Date.now() - started < 3000, `start polled a dead server for ${Date.now() - started} ms`)
+  } finally {
+    engine.stop()
+  }
+})
+
+test('a gpu profile saved by another llama.cpp build is not ready, so it is prepared again', () => {
+  const models = fresh()
+  const engineFiles = fresh()
+  const exe = join(engineFiles, 'llama-server.exe')
+  writeFileSync(exe, '')
+  // Stand-in sizes, so the test does not write gigabytes.
+  const paths = Object.keys(MODELS).filter(path => ['turn', 'native'].includes(MODELS[path].group))
+  const sizes = paths.map(path => MODELS[path].size)
+  try {
+    for (const path of paths) {
+      MODELS[path].size = 1
+      mkdirSync(dirname(join(models, path)), { recursive: true })
+      writeFileSync(join(models, path), 'x')
+    }
+    const profile = { profile: 'gpu', exe, devices: [{ name: 'RTX', mib: 8192 }], build: LLAMA_BUILD }
+    assert.equal(profileReady(profile, { models }), true)
+    assert.equal(profileReady({ ...profile, build: 'b1' }, { models }), false)
+    assert.equal(profileReady({ ...profile, build: undefined }, { models }), false)
+  } finally {
+    paths.forEach((path, i) => (MODELS[path].size = sizes[i]))
+  }
 })

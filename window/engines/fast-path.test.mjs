@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { isConfirm, isDeny, isStopOnly } from './fast-path.js'
+import { isConfirm, isDeny, isStopClaude, isStopOnly } from './fast-path.js'
 
 test('a short stop request is caught, with or without accents, fillers or the name', () => {
   for (const said of ['Pare.', 'para!', 'Ceci, para tudo.', 'Luke, para tudo.', 'PARA AGORA', 'cancela isso', 'chega', 'Pará.', 'para o Claude, por favor', 'Ceci, para.', 'Cecí, pare agora', 'Cecy, chega']) {
@@ -34,4 +34,17 @@ test('an answer with a change, a question or a new request goes to the brain', (
     assert.equal(isConfirm(said), false, said)
     assert.equal(isDeny(said), false, said)
   }
+})
+
+test('a stop that names Claude or the task stops Claude; a bare one may be meant for Ceci alone', () => {
+  for (const said of ['para o Claude', 'Ceci, para o Claude, por favor', 'cancela a tarefa', 'Cancela as tarefas.', 'para tudo', 'Pare a tarefa agora']) {
+    assert.equal(isStopOnly(said), true, said)
+    assert.equal(isStopClaude(said), true, said)
+  }
+  for (const said of ['Para.', 'chega', 'Ceci, para.', 'cancela isso', 'pare agora']) {
+    assert.equal(isStopOnly(said), true, said)
+    assert.equal(isStopClaude(said), false, said)
+  }
+  // Still a request, not a stop.
+  assert.equal(isStopClaude('Cria uma tarefa para o Claude revisar os testes.'), false)
 })

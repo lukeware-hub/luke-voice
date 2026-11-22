@@ -3,7 +3,7 @@
 // A whole utterance that only asks to stop. "para" inside a longer sentence ("cria uma tarefa para...")
 // is a preposition, so the stop words must be the whole utterance, with at most a few fillers.
 // The assistant's name may come first; Whisper sometimes writes "Ceci" as "Cecy" or "Sessi".
-const STOP_ONLY = /^\W*((luke|ceci|cecy|sessi)\W+)?(pare|para|parar|cancela|cancelar|chega)(\W+(tudo|agora|o claude|isso|por favor|ai))*\W*$/i
+const STOP_ONLY = /^\W*((luke|ceci|cecy|sessi)\W+)?(pare|para|parar|cancela|cancelar|chega)(\W+(tudo|agora|o claude|as? tarefas?|isso|por favor|ai))*\W*$/i
 
 const plain = text =>
   String(text ?? '')
@@ -13,6 +13,10 @@ const plain = text =>
     .trim()
 
 export const isStopOnly = text => STOP_ONLY.test(plain(text))
+
+// A stop that names Claude's work ("para o Claude", "cancela a tarefa", "para tudo"). Said over
+// Ceci, a bare "para" is for her alone: she stops talking and Claude's task goes on.
+export const isStopClaude = text => isStopOnly(text) && /\b(claude|tarefas?|tudo)\b/.test(plain(text))
 
 // Words a short answer to "posso?" is made of. A yes must have at least one YES word and nothing
 // outside YES and FILLER; a no, at least one NO word and nothing outside NO and FILLER. Longer

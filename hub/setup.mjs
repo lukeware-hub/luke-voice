@@ -3,6 +3,8 @@
 // profile needs, and runs a short test. Run by the installers and by /luke-voice setup:
 //   node hub/setup.mjs [--json] [--no-test]
 // --no-test skips the short test (the hub already runs the voice, so a second copy would not fit).
+// Without it the test is also skipped when a running hub reports the natural voice up, for the same
+// reason; a failed test is run once more before the light voice is chosen.
 // LUKE_VOICE_PROFILE=gpu|light forces the profile. Exit code 0 when the voice is ready.
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -10,7 +12,7 @@ import { fileURLToPath } from 'node:url'
 
 import { ASR_GLOSSARY, createEngine, groupBytes, maxFrames, prepareEngine, profileGroups, VOICE_SETTINGS } from './engine.mjs'
 import { modelsDir } from './models.mjs'
-import { isMainModule } from './paths.mjs'
+import { ORIGIN, isMainModule } from './paths.mjs'
 import { route } from './router.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -87,15 +89,38 @@ export async function smokeTest(profile, { engine = createEngine(), voice = VOIC
   }
 }
 
-export async function setup({ out = process.stdout, prepare = prepareEngine, test = smokeTest, isTested = true } = {}) {
+// Whether a luke-voice hub already runs the natural voice on this machine (its /health lists the
+// native servers up). Then a second copy for the test would not fit in video memory, and would
+// fail for that reason only.
+export async function hubRunsVoice({ origin = ORIGIN } = {}) {
+  try {
+    const res = await fetch(`${origin}/health`, { signal: AbortSignal.timeout(2000) })
+    const health = await res.json()
+    return health?.app === 'luke-voice' && health.native?.tts === true
+  } catch {
+    return false
+  }
+}
+
+export async function setup({ out = process.stdout, prepare = prepareEngine, test = smokeTest, isTested = true, isVoiceRunning = hubRunsVoice } = {}) {
   const say = line => out.write(`${line}\n`)
   const profile = await prepare({ onProgress: progressPrinter(out) })
   const bytes = groupBytes(profileGroups(profile.profile, profile.devices))
   if (profile.profile === 'gpu') {
     say(`      Perfil: voz natural na placa de vídeo (${profile.reason}). Modelos: ${size(bytes)} em ${modelsDir()}.`)
     if (!isTested) return { profile, test: null, ok: true }
+    if (await isVoiceRunning()) {
+      say('      A voz natural já está rodando no hub do luke-voice, que é o teste dela (uma segunda cópia não caberia na placa de vídeo).')
+      return { profile, test: null, ok: true }
+    }
     say('      Testando a voz, os ouvidos e o roteador...')
-    const result = await test(profile)
+    let result = await test(profile)
+    // A first failure can be passing (a slow first start, the video memory still being freed):
+    // only two in a row switch the calls to the light voice.
+    if (!result.ok) {
+      say(`      A voz natural não passou no teste: ${result.problems.join('; ')}. Testando de novo...`)
+      result = await test(profile)
+    }
     if (!result.ok) {
       say(`      A voz natural não passou no teste: ${result.problems.join('; ')}.`)
       say('      As chamadas vão usar a voz leve, no navegador, até isso ser resolvido. Para tentar de novo: /luke-voice setup.')

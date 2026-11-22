@@ -2,7 +2,7 @@
 // voice detector, Whisper writes down what the user said, the brain decides what to do and say,
 // and Kokoro speaks it. Only the brain leaves the machine (through the hub, to Claude).
 // It gives the window the same session the ElevenLabs engine does.
-import { isConfirm, isDeny, isStopOnly } from '/engines/fast-path.js'
+import { isConfirm, isDeny, isStopClaude, isStopOnly } from '/engines/fast-path.js'
 import { speechChunks } from '/engines/speech-text.js'
 import { createTurnJoiner } from '/engines/turn-join.js'
 import { risingPercent } from '/engines/progress.js'
@@ -185,7 +185,7 @@ export const getVoiceInfo = () => voiceInfo
 
 listeners.add(data => {
   if (data.type !== 'ready') return
-  voiceInfo = { device: data.device, threads: data.threads, tts: data.tts, stt: data.stt, turn: data.turn }
+  voiceInfo = { device: data.device, threads: data.threads, tts: data.tts, stt: data.stt, turn: data.turn, fallback: data.fallback ?? null }
   timing('voice ready', data.warmMs ?? 0, `(${data.tts}, ${data.stt}, ${data.device}, ${data.threads} threads, warm-up)`)
 })
 
@@ -193,6 +193,11 @@ const percent = ({ loaded, total }) => Math.min(99, Math.round((loaded / total) 
 
 // How long a call waits for the native engine the hub is starting, before using the light voice.
 const NATIVE_WAIT_MS = 90_000
+// A native /stt or /tts request past these is dropped (that turn, or that chunk), so a hung
+// llama-server never holds the turn queue forever.
+const STT_TIMEOUT_MS = 20_000
+const TTS_TIMEOUT_MS = 30_000
+const NATIVE_DOWN = 'A voz natural não respondeu; usando a voz leve nesta chamada.'
 
 export async function startSession({
   hub,
@@ -228,6 +233,9 @@ export async function startSession({
   }
   const isNative = forceNative === '0' ? false : Boolean(config.native?.tts && config.native?.asr)
   if (!isNative && config.download?.total) onStatus(`Preparando a voz natural: ${percent(config.download)}%. Por enquanto, a voz leve.`)
+  // The natural voice was expected (this machine has the gpu profile, or the hub was starting it)
+  // but failed or did not come up in time: the user is told, never left guessing why she sounds different.
+  else if (!isNative && forceNative !== '0' && (config.profile === 'gpu' || ['starting', 'failed'].includes(config.engine))) onStatus(NATIVE_DOWN, { isWarning: true })
   try {
     await prepare()
     await loadVoice(isNative ? 'native' : 'browser')
@@ -235,21 +243,40 @@ export async function startSession({
     listeners.delete(showProgress)
   }
   if (voiceInfo) voiceInfo = { ...voiceInfo, tts: isNative ? 'native' : voiceInfo.tts, stt: isNative ? 'native' : voiceInfo.stt, device: isNative ? 'native' : voiceInfo.device }
+  // The browser voice switched from Kokoro to the lighter Piper (Kokoro too slow here, or it did not load).
+  if (!isNative && voiceInfo?.fallback) onStatus(voiceInfo.fallback, { isWarning: true })
 
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
   })
-  const micContext = new AudioContext({ sampleRate: RATE })
-  await micContext.audioWorklet.addModule('/engines/mic-worklet.js')
-  const source = micContext.createMediaStreamSource(stream)
-  const frames = new AudioWorkletNode(micContext, 'luke-mic-frames')
-  source.connect(frames)
+  let micContext = null
+  let outContext = null
+  let frames
+  let analyser
+  let levels
+  try {
+    micContext = new AudioContext({ sampleRate: RATE })
+    await micContext.audioWorklet.addModule('/engines/mic-worklet.js')
+    const source = micContext.createMediaStreamSource(stream)
+    frames = new AudioWorkletNode(micContext, 'luke-mic-frames')
+    source.connect(frames)
 
-  const outContext = new AudioContext()
-  const analyser = outContext.createAnalyser()
-  analyser.fftSize = 512
-  analyser.connect(outContext.destination)
-  const levels = new Float32Array(analyser.fftSize)
+    outContext = new AudioContext()
+    analyser = outContext.createAnalyser()
+    analyser.fftSize = 512
+    analyser.connect(outContext.destination)
+    levels = new Float32Array(analyser.fftSize)
+  } catch (error) {
+    // The call does not start: let go of the microphone (its indicator would stay on) and the audio.
+    for (const track of stream.getTracks()) track.stop()
+    await Promise.allSettled([micContext?.close(), outContext?.close()])
+    throw error
+  }
+  // Chrome may start an audio context suspended (no click on the page yet): the next click resumes it.
+  const resumeAudio = () => {
+    for (const audio of [micContext, outContext]) if (audio.state === 'suspended') audio.resume().catch(() => {})
+  }
+  document.addEventListener('click', resumeAudio)
 
   const vad = createVad(voiceInfo?.turn ? { candidateFrames: TURN_CANDIDATE_FRAMES, endFrames: TURN_END_FRAMES } : {})
   const context = []
@@ -258,6 +285,9 @@ export async function startSession({
   let isEnded = false
   let mode = 'listening'
   let speech = 0 // bumped to cancel what is being said
+  let saying = 0 // the speech whose audio is being made now (0: none)
+  // Whether the user's current utterance cut Ceci off (spoken over her, or before her reply played).
+  let isInterruption = false
   let playing = new Set()
   let playhead = 0
   let busy = Promise.resolve()
@@ -277,8 +307,8 @@ export async function startSession({
   // The native voice for one piece of text, whole (the acknowledgements).
   async function nativeSynth(text) {
     const started = performance.now()
-    const response = await fetch('/tts', { method: 'POST', headers: { 'content-type': 'application/json', 'x-luke-key': KEY }, body: JSON.stringify({ text }) })
-    if (!response.ok) return { audio: new Float32Array(0), sampleRate: 24_000, isBroken: true, ms: 0 }
+    const response = await fetch('/tts', { method: 'POST', headers: { 'content-type': 'application/json', 'x-luke-key': KEY }, body: JSON.stringify({ text }), signal: AbortSignal.timeout(TTS_TIMEOUT_MS) }).catch(() => null)
+    if (!response?.ok) return { audio: new Float32Array(0), sampleRate: 24_000, isBroken: true, ms: 0 }
     const pieces = []
     const sampleRate = await readWavStream(response, piece => pieces.push(piece), () => false)
     const audio = new Float32Array(pieces.reduce((n, p) => n + p.length, 0))
@@ -294,9 +324,16 @@ export async function startSession({
   async function nativeTranscribe(audio) {
     const check = await ask('check', { audio })
     if (!check.isSpeech) return { text: '', noSpeech: true, ms: check.ms }
-    const response = await fetch('/stt', { method: 'POST', headers: { 'content-type': 'audio/wav', 'x-luke-key': KEY }, body: wavBytes(audio) })
-    if (!response.ok) throw new Error(`The native speech engine answered ${response.status}.`)
-    const out = await response.json()
+    let out
+    try {
+      const response = await fetch('/stt', { method: 'POST', headers: { 'content-type': 'audio/wav', 'x-luke-key': KEY }, body: wavBytes(audio), signal: AbortSignal.timeout(STT_TIMEOUT_MS) })
+      if (!response.ok) throw new Error(`The native speech engine answered ${response.status}.`)
+      out = await response.json()
+    } catch (error) {
+      // A hung engine: this turn is dropped, and the user hears nothing back, so say why.
+      if (error?.name === 'TimeoutError') throw new Error('A Ceci não conseguiu ouvir a tempo. Fale de novo.')
+      throw error
+    }
     return { text: String(out.text ?? ''), ms: (out.ms ?? 0) + check.ms }
   }
 
@@ -351,6 +388,15 @@ export async function startSession({
     const parts = speechChunks(text, { isNative: true })
     if (parts.length === 0) return
     const mine = ++speech
+    saying = mine
+    try {
+      await speakNativeParts(text, parts, mine)
+    } finally {
+      if (saying === mine) saying = 0
+    }
+  }
+
+  async function speakNativeParts(text, parts, mine) {
     onMessage({ source: 'ai', message: text })
     const stop = new AbortController()
     nativeStop = stop
@@ -361,13 +407,21 @@ export async function startSession({
       // How long what is queued still plays: the hub may use that time for more takes of a
       // question, so picking one never makes Ceci wait.
       const budget = playing.size ? Math.max(0, Math.round((playhead - outContext.currentTime) * 1000)) : 0
-      const response = await fetch('/tts', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-luke-key': KEY },
-        body: JSON.stringify({ text: parts[i], budget, ...(isQuestionPick ? {} : { pick: false }) }),
-        signal: stop.signal,
-      }).catch(() => null)
+      const request = () =>
+        fetch('/tts', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-luke-key': KEY },
+          body: JSON.stringify({ text: parts[i], budget, ...(isQuestionPick ? {} : { pick: false }) }),
+          // Cut off by the user, or the engine hung: this chunk is dropped either way.
+          signal: AbortSignal.any([stop.signal, AbortSignal.timeout(TTS_TIMEOUT_MS)]),
+        }).catch(() => null)
+      let response = await request()
       if (mine !== speech || isEnded) return
+      // One failed chunk (the engine restarting, a timeout) is asked once more before it is skipped.
+      if (!response?.ok) {
+        response = await request()
+        if (mine !== speech || isEnded) return
+      }
       if (!response?.ok) {
         console.warn(`[luke-voice] the native voice could not say: ${parts[i]}`)
         continue
@@ -402,6 +456,8 @@ export async function startSession({
         },
         () => mine !== speech || isEnded,
       )
+      // Cut off meanwhile: what is held back is stale and must not play (nor set 'speaking' again).
+      if (mine !== speech || isEnded) return
       flush()
     }
     if (mine !== speech || isEnded) return
@@ -416,6 +472,15 @@ export async function startSession({
     const parts = speechChunks(text)
     if (parts.length === 0) return
     const mine = ++speech
+    saying = mine
+    try {
+      await speakParts(text, parts, mine)
+    } finally {
+      if (saying === mine) saying = 0
+    }
+  }
+
+  async function speakParts(text, parts, mine) {
     onMessage({ source: 'ai', message: text })
     let next = synth(parts[0])
     for (let i = 0; i < parts.length; i++) {
@@ -525,13 +590,13 @@ export async function startSession({
       .catch(error => onError(String(error?.message ?? error))))
 
   // A turn ended (or a carried part came back): transcribe and answer it.
-  function onTurnEnd(ended) {
+  function onTurnEnd(ended, wasInterruption = false) {
     if (!ended) return
     if (ended.isJoined) console.info('[luke-voice] resumed: joined with the previous part')
-    queue(() => onUtterance(ended.audio), ended.turn)
+    queue(() => onUtterance(ended.audio, wasInterruption), ended.turn)
   }
 
-  async function onUtterance(audio) {
+  async function onUtterance(audio, wasInterruption = false) {
     const seconds = (audio.length / RATE).toFixed(1)
     const { text, ms, noSpeech } = await transcribe(audio)
     if (noSpeech) {
@@ -551,7 +616,12 @@ export async function startSession({
       timing('fast path', 0, 'no to "posso?"')
       return say(DENIED)
     }
-    if (isStopOnly(text)) return stopNow()
+    if (isStopOnly(text)) {
+      // Said over Ceci, "para" was for her, and she already stopped. Claude's work is stopped only
+      // when the user names it ("para o Claude", "cancela a tarefa"), or when Ceci was quiet.
+      if (wasInterruption && !isStopClaude(text)) return timing('fast path', 0, 'stop: Ceci only')
+      return stopNow()
+    }
     if (action && isConfirm(text)) {
       timing('fast path', 0, `yes to "posso?": ${action.tool.name}`)
       return runTool(action.tool, '')
@@ -575,13 +645,22 @@ export async function startSession({
     // ?voice-debug=1: the mic level and the learned room level twice a second, to tune the detector.
     if (isDebug && ++frameCount % 16 === 0) console.info(`[luke-voice] mic ${rms(frame).toFixed(4)} room ${vad.floor.toFixed(4)} ${mode}`)
     if (!event) return
+    if (event.type === 'start') isInterruption = false
     if (event.type === 'barge') {
       console.info('[luke-voice] barge-in: the user spoke over Ceci')
       cancelSpeech()
+      isInterruption = true
+    }
+    // A reply whose first audio is still being made: the user talking first wins, as if they had
+    // talked over her, instead of the reply then playing over them.
+    if (event.type === 'start' && saying !== 0 && saying === speech) {
+      console.info('[luke-voice] the user spoke before Ceci\'s reply played')
+      cancelSpeech()
+      isInterruption = true
     }
     // The user goes on talking before Ceci answered: the last turn waits to be joined.
     if ((event.type === 'start' || event.type === 'barge') && joiner.resumed()) cancelSpeech()
-    if (event.type === 'end') onTurnEnd(joiner.ended(event.audio))
+    if (event.type === 'end') onTurnEnd(joiner.ended(event.audio), isInterruption)
     if (event.type === 'drop') onTurnEnd(joiner.dropped())
     // A short pause: the turn model says whether the user is done, so Ceci need not wait 800 ms.
     if (event.type === 'candidate') {
@@ -590,7 +669,7 @@ export async function startSession({
           timing('end of turn', ms, `p=${done.toFixed(2)}`)
           if (done < TURN_DONE || isEnded) return
           const end = vad.endNow(event.id)
-          if (end?.type === 'end') onTurnEnd(joiner.ended(end.audio))
+          if (end?.type === 'end') onTurnEnd(joiner.ended(end.audio), isInterruption)
           if (end?.type === 'drop') onTurnEnd(joiner.dropped())
         })
         .catch(() => {})
@@ -605,6 +684,8 @@ export async function startSession({
       isMuted = Boolean(next)
       if (isMuted) vad.reset()
     },
+    // The user is mid-utterance: the window holds its spoken notices until they finish.
+    isUserSpeaking: () => vad.inSpeech,
     getOutputVolume: () => {
       if (playing.size === 0) return 0
       analyser.getFloatTimeDomainData(levels)
@@ -617,12 +698,20 @@ export async function startSession({
       isEnded = true
       cancelSpeech()
       frames.port.onmessage = null
+      document.removeEventListener('click', resumeAudio)
       for (const track of stream.getTracks()) track.stop()
       await Promise.allSettled([micContext.close(), outContext.close()])
       onDisconnect({ reason: 'user' })
     },
     // For tests and the help page: say something without the brain.
     speak,
+  }
+
+  // A headset unplugged mid-call: Ceci can no longer hear, and the user is told so.
+  for (const track of stream.getAudioTracks()) {
+    track.onended = () => {
+      if (!isEnded) onError('O microfone foi desconectado. Conecte-o, encerre a chamada e chame de novo.')
+    }
   }
 
   onConnect()
