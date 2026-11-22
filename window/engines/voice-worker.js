@@ -117,7 +117,8 @@ async function loadTurn() {
 }
 
 // Probability that the user finished their turn, from the last 8 s of the utterance, as Smart
-// Turn's reference code does: zero mean and unit variance, padded with silence at the end.
+// Turn's reference code does: zero mean and unit variance, padded with silence at the start so
+// the speech sits at the end of the window.
 async function endOfTurn(audio) {
   const tail = audio.length > TURN_SAMPLES ? audio.subarray(audio.length - TURN_SAMPLES) : audio
   let mean = 0
@@ -127,7 +128,8 @@ async function endOfTurn(audio) {
   for (const v of tail) variance += (v - mean) ** 2
   const std = Math.sqrt(variance / (tail.length || 1) + 1e-7)
   const input = new Float32Array(TURN_SAMPLES)
-  for (let i = 0; i < tail.length; i++) input[i] = (tail[i] - mean) / std
+  const offset = TURN_SAMPLES - tail.length
+  for (let i = 0; i < tail.length; i++) input[offset + i] = (tail[i] - mean) / std
   const { input_features: x } = await turn.features(input)
   const out = await turn.smart.run({ input_features: new turn.ort.Tensor('float32', x.data, x.dims) })
   return out.logits.data[0]
