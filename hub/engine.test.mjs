@@ -229,7 +229,7 @@ setInterval(() => {}, 1000)`,
   assert.equal(isUp, false, 'the server outlived the killed hub')
 })
 
-test('a CPU posing as a GPU (llvmpipe) or Intel integrated graphics gets the light voice, not the natural one', () => {
+test('a CPU posing as a GPU (llvmpipe) or integrated graphics (Intel, AMD APUs) gets the light voice, not the natural one', () => {
   const key = 'linux-x64'
   const cases = [
     [[{ id: 'Vulkan0', name: 'llvmpipe (LLVM 15.0.7, 256 bits)', mib: 32000 }], 'light'],
@@ -237,6 +237,19 @@ test('a CPU posing as a GPU (llvmpipe) or Intel integrated graphics gets the lig
     [[{ id: 'Vulkan0', name: 'Intel(R) Iris(R) Xe Graphics', mib: 8000 }], 'light'],
     [[{ id: 'Vulkan0', name: 'Intel(R) Arc(TM) A770 Graphics', mib: 16000 }], 'gpu'],
     [[{ id: 'Vulkan0', name: 'AMD Radeon RX 7600', mib: 8176 }], 'gpu'],
+    // Integrated GPUs whose shared memory reads as video memory: too slow for the natural voice.
+    [[{ id: 'Vulkan0', name: 'Intel(R) Arc(TM) Graphics', mib: 18000 }], 'light'],
+    [[{ id: 'Vulkan0', name: 'Intel(R) Arc(TM) 140V GPU (16GB)', mib: 16000 }], 'light'],
+    [[{ id: 'Vulkan0', name: 'Intel(R) Arc(TM) 130T GPU', mib: 16000 }], 'light'],
+    [[{ id: 'Vulkan0', name: 'AMD Radeon(TM) Graphics', mib: 12000 }], 'light'],
+    [[{ id: 'Vulkan0', name: 'AMD Radeon 780M Graphics', mib: 16000 }], 'light'],
+    [[{ id: 'Vulkan0', name: 'AMD Radeon(TM) 890M', mib: 16000 }], 'light'],
+    [[{ id: 'Vulkan0', name: 'AMD Radeon(TM) Vega 8 Graphics', mib: 8000 }], 'light'],
+    // Discrete ones stay allowed.
+    [[{ id: 'Vulkan0', name: 'Intel(R) Arc(TM) B580 Graphics', mib: 12000 }], 'gpu'],
+    [[{ id: 'Vulkan0', name: 'AMD Radeon RX 7900 XTX', mib: 24000 }], 'gpu'],
+    [[{ id: 'Vulkan0', name: 'AMD Radeon PRO W7800', mib: 32000 }], 'gpu'],
+    [[{ id: 'Vulkan0', name: 'AMD Radeon RX 6700M', mib: 10000 }], 'gpu'],
     [[{ id: 'Metal', name: 'Apple M2 Pro', mib: 21000 }], 'gpu'],
     // A laptop with both: the dedicated one is picked.
     [[{ id: 'Vulkan0', name: 'Intel(R) UHD Graphics', mib: 16000 }, { id: 'Vulkan1', name: 'NVIDIA GeForce RTX 4060 Laptop GPU', mib: 8188 }], 'gpu'],
@@ -244,7 +257,7 @@ test('a CPU posing as a GPU (llvmpipe) or Intel integrated graphics gets the lig
   for (const [devices, profile] of cases) assert.equal(pickProfile({ key, devices }).profile, profile, devices.map(d => d.name).join(' + '))
   assert.match(pickProfile({ key, devices: cases[0][0] }).reason, /integrada ou por software \(llvmpipe/)
   assert.equal(pickProfile({ key, devices: cases[3 - 2][0], override: 'gpu' }).profile, 'gpu', 'forced, it is still allowed')
-  assert.equal(pickProfile({ key, devices: cases[6][0] }).device, 'NVIDIA GeForce RTX 4060 Laptop GPU')
+  assert.equal(pickProfile({ key, devices: cases.at(-1)[0] }).device, 'NVIDIA GeForce RTX 4060 Laptop GPU')
 })
 
 test('a llama-server that cannot be started (missing or quarantined) is logged and given up on, not a hub crash', async () => {

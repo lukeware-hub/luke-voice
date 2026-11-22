@@ -101,7 +101,8 @@ const loadVoice = kind => {
   return (workerLoad ??= ask('load', kind === 'native' ? { ...overrides, native: true } : overrides).catch(error => ((workerLoad = null), Promise.reject(error))))
 }
 
-const KEY = query.get('k') ?? ''
+// The window key, for the hub's /tts and /stt; the window hands it to startSession.
+let KEY = ''
 
 // 16 kHz mono PCM16 WAV, what the hub's /stt takes.
 function wavBytes(audio, rate = RATE) {
@@ -205,6 +206,7 @@ const NATIVE_DOWN = 'A voz natural não respondeu; usando a voz leve nesta chama
 
 export async function startSession({
   hub,
+  windowKey = '',
   native: forceNative = query.get('voice-native'),
   prepare = async () => {},
   clientTools = {},
@@ -218,6 +220,7 @@ export async function startSession({
   onMessage = () => {},
   onStatus = () => {},
 }) {
+  KEY = windowKey
   const downloaded = risingPercent()
   const showProgress = data => {
     if (data.type === 'progress') onStatus(`Baixando a voz gratuita (só na primeira vez): ${downloaded(data)}%`)

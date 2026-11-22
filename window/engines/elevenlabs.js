@@ -41,7 +41,8 @@ function loadClient() {
 // Starts a call. `prepare` runs between the token and the connection (the window asks for the mic there).
 // The session it returns is what the window drives: sendContextualUpdate, sendUserMessage,
 // setMicMuted, getOutputVolume and endSession.
-export async function startSession({ hub, prepare = async () => {}, ...options }) {
+// The window key is for the hub's own voice only: it never reaches the ElevenLabs client.
+export async function startSession({ hub, prepare = async () => {}, windowKey: _hubOnly, ...options }) {
   // The token first: it also sets up the agent, and its errors say what is missing. The client
   // downloads meanwhile.
   const client = loadClient()

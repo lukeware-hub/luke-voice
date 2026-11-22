@@ -118,8 +118,11 @@ export function parseDevices(text) {
 
 // Devices that report memory but would not keep up with the natural voice: a CPU posing as a
 // Vulkan device (Mesa's llvmpipe on a Linux box without GPU drivers reports the system RAM), and
-// Intel's integrated graphics, whose "memory" is shared RAM.
-const WEAK_DEVICE = /llvmpipe|lavapipe|swiftshader|microsoft basic render|intel.*\b(uhd|hd graphics|iris)\b/i
+// integrated graphics, whose "memory" is shared RAM: Intel's UHD, Iris and the Arc of Meteor,
+// Lunar and Arrow Lake ("Arc(TM) Graphics", "Arc(TM) 140V"; a discrete Arc names its A or B
+// model), and AMD's APUs ("Radeon(TM) Graphics", "Radeon 780M", "Radeon Vega 8"; a discrete
+// Radeon is an RX, PRO or VII).
+const WEAK_DEVICE = /llvmpipe|lavapipe|swiftshader|microsoft basic render|intel.*\b(uhd|hd graphics|iris)\b|intel.*\barc(\(tm\))?\s+(graphics|\d{3}[vt]\b)|radeon(\(tm\))?\s+(graphics|\d{3}m\b|vega\s+\d+\b)/i
 
 // gpu when this platform has a build and a dedicated device with enough memory; light otherwise.
 // LUKE_VOICE_PROFILE=gpu|light overrides the choice.

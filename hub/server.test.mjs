@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 
 process.env.LUKE_VOICE_HOME = mkdtempSync(join(tmpdir(), 'luke-voice-test-'))
-const { browserCandidates, chromeArgs, chromePath, createHub, isWsl, loadSecrets, needsPrepare, openWindow, windowCommand } = await import('./server.mjs')
+const { browserCandidates, chromeArgs, chromePath, createEngineRunner, createHub, isWsl, loadSecrets, needsPrepare, openWindow, windowCommand } = await import('./server.mjs')
 
 const SERVICE = 'service-token'
 const WINDOW = 'window-key'
@@ -83,18 +83,58 @@ test('a send reaches only the named session, and its ack answers the window', as
   assert.equal((await call('GET', '/inbox', { auth: a.token })).status, 401)
 })
 
-test('show opens the window once with the window key, and the page needs that key', async () => {
+test('show opens the window once with a one-time launch code, never the window key, and the page trades it once for the key', async () => {
   const s = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/web' } })).body
   await call('POST', '/show', { auth: s.token, body: { call: true } })
   assert.equal(opened.length, 1)
-  assert.match(opened[0], new RegExp(`k=${WINDOW}&call=1$`))
-  assert.equal((await call('GET', '/')).status, 403)
-  assert.equal((await call('GET', `/?k=${WINDOW}`)).status, 200)
+  // The address is on the browser's command line, which other users of the computer can read.
+  assert.ok(!opened[0].includes(WINDOW), 'the window key is not in the address')
+  const nonce = /[?&]n=([\w-]+)&call=1$/.exec(opened[0])?.[1]
+  assert.ok(nonce, opened[0])
+  // The page holds no secret: a reload (the address no longer has the code) still loads it.
+  assert.equal((await call('GET', '/')).status, 200)
+  const same = `http://127.0.0.1:${port}`
+  // Only the window's own page may trade it: another site, or no Origin at all, is refused.
+  assert.equal((await call('POST', '/launch', { body: { nonce }, origin: 'https://evil.example' })).status, 403)
+  assert.equal((await call('POST', '/launch', { body: { nonce } })).status, 403)
+  const traded = await call('POST', '/launch', { body: { nonce }, origin: same })
+  assert.equal(traded.status, 200)
+  assert.equal(traded.body.key, WINDOW)
+  assert.equal((await call('POST', '/launch', { body: { nonce }, origin: same })).status, 403, 'a code works once')
+  assert.equal((await call('POST', '/launch', { body: { nonce: 'made-up' }, origin: same })).status, 403)
+  assert.equal((await call('POST', '/launch', { body: {}, origin: same })).status, 403)
   await call('POST', '/unsubscribe', { auth: s.token })
 })
 
+test('a launch code expires after two minutes', async () => {
+  let now = 1_000_000
+  const timed = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: url => opened.push(url), clock: () => now })
+  await new Promise(resolve => timed.listen(0, '127.0.0.1', resolve))
+  const saved = port
+  port = timed.address().port
+  try {
+    const same = `http://127.0.0.1:${port}`
+    const s = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/web' } })).body
+    const code = async () => {
+      await call('POST', '/show', { auth: s.token, body: {} })
+      return /[?&]n=([\w-]+)$/.exec(opened.at(-1))?.[1]
+    }
+    const inTime = await code()
+    now += 119_000
+    assert.equal((await call('POST', '/launch', { body: { nonce: inTime }, origin: same })).status, 200)
+    const late = await code()
+    now += 121_000
+    assert.equal((await call('POST', '/launch', { body: { nonce: late }, origin: same })).status, 403)
+    await call('POST', '/unsubscribe', { auth: s.token })
+  } finally {
+    port = saved
+    timed.closeAllConnections()
+    timed.close()
+  }
+})
+
 test('the page loads no remote script; the ElevenLabs client is loaded on demand, pinned, with an integrity hash', async () => {
-  const page = (await call('GET', `/?k=${WINDOW}`)).body
+  const page = (await call('GET', '/')).body
   // The free voice must never wait on a CDN: no remote script on the page itself.
   assert.doesNotMatch(page, /<script\b[^>]*\bsrc="https?:/)
   const eleven = (await call('GET', '/engines/elevenlabs.js')).body
@@ -143,11 +183,11 @@ test('shutdown needs the service token', async () => {
 })
 
 test('the Chrome window allows the mic and sound without a prompt, in its own profile', () => {
-  const args = chromeArgs('http://127.0.0.1:4848/?k=x', '/home/u/.luke-voice/chrome')
+  const args = chromeArgs('http://127.0.0.1:4848/?n=x', '/home/u/.luke-voice/chrome')
   assert.ok(args.includes('--use-fake-ui-for-media-stream'))
   assert.ok(args.includes('--autoplay-policy=no-user-gesture-required'))
   assert.ok(args.includes('--user-data-dir=/home/u/.luke-voice/chrome'))
-  assert.ok(args.includes('--app=http://127.0.0.1:4848/?k=x'))
+  assert.ok(args.includes('--app=http://127.0.0.1:4848/?n=x'))
 })
 
 test('a voice task reaches the named session, and an empty task is refused', async () => {
@@ -335,25 +375,33 @@ test('vendored files are served from the hub, unknown ones are 404, and the page
       req.end()
     })
   try {
-    const file = await fetchRaw('/vendor/espeak/dist/version.mjs')
+    const file = await fetchRaw('/vendor/espeak/dist/version.mjs', { 'sec-fetch-site': 'same-origin' })
     assert.equal(file.status, 200)
     assert.equal(file.text, 'export const V = 1')
     assert.equal(file.headers['content-type'], 'text/javascript; charset=utf-8')
     assert.equal(file.headers['content-length'], '18')
-    assert.equal((await fetchRaw('/vendor/../../hub.json')).status, 404)
-    const model = await fetchRaw('/models/turn/silero-vad.onnx')
+    assert.equal((await fetchRaw('/vendor/../../hub.json', { 'sec-fetch-site': 'same-origin' })).status, 404)
+    const model = await fetchRaw('/models/turn/silero-vad.onnx', { 'sec-fetch-site': 'same-origin' })
     assert.equal(model.status, 200)
     assert.equal(model.text, 'ONNXBYTES')
     assert.equal(model.headers['content-length'], '9')
-    assert.equal((await fetchRaw('/models/nope.onnx')).status, 404)
+    assert.equal((await fetchRaw('/models/nope.onnx', { 'sec-fetch-site': 'same-origin' })).status, 404)
     // The window's own worker gets them; another web page (an <img> on some site) does not.
     assert.equal((await fetchRaw('/models/turn/silero-vad.onnx', { 'sec-fetch-site': 'same-origin' })).status, 200)
     assert.equal((await fetchRaw('/models/turn/silero-vad.onnx', { 'sec-fetch-site': 'cross-site' })).status, 403)
     assert.equal((await fetchRaw('/vendor/espeak/dist/version.mjs', { 'sec-fetch-site': 'same-site' })).status, 403)
+    // A browser that does not send Sec-Fetch-Site: the window's own loads carry its address as
+    // Referer (or the window key); a page elsewhere, or one that hides its Referer, gets nothing.
+    assert.equal((await fetchRaw('/models/turn/silero-vad.onnx')).status, 403)
+    assert.equal((await fetchRaw('/models/turn/silero-vad.onnx', { referer: 'https://evil.example/page' })).status, 403)
+    assert.equal((await fetchRaw('/models/turn/silero-vad.onnx', { referer: `http://127.0.0.1:${p}.evil.example/` })).status, 403)
+    assert.equal((await fetchRaw('/vendor/espeak/dist/version.mjs', { referer: `http://127.0.0.1:${p}/engines/voice-worker.js` })).status, 200)
+    assert.equal((await fetchRaw('/models/turn/silero-vad.onnx', { 'x-luke-key': WINDOW })).status, 200)
+    assert.equal((await fetchRaw('/models/turn/silero-vad.onnx', { 'x-luke-key': 'wrong' })).status, 403)
     assert.equal(asked.includes('native/qwen3-asr-0.6b-q8_0.gguf'), false)
-    assert.equal((await fetchRaw('/models/native/qwen3-asr-0.6b-q8_0.gguf')).status, 404)
+    assert.equal((await fetchRaw('/models/native/qwen3-asr-0.6b-q8_0.gguf', { 'sec-fetch-site': 'same-origin' })).status, 404)
     assert.equal(asked.includes('native/qwen3-asr-0.6b-q8_0.gguf'), false, 'the native models are never fetched for the window')
-    const page = await fetchRaw(`/?k=${WINDOW}`)
+    const page = await fetchRaw('/')
     assert.equal(page.headers['cross-origin-opener-policy'], 'same-origin')
     assert.equal(page.headers['cross-origin-embedder-policy'], 'credentialless')
     assert.equal((await fetchRaw('/engines/voice-worker.js')).headers['cross-origin-embedder-policy'], 'credentialless')
@@ -701,8 +749,64 @@ test('the engine is prepared again when it never was, misses a file, or LUKE_VOI
   assert.equal(needsPrepare({ profile: 'gpu' }, { isReady: ready, override: 'turbo' }), false)
 })
 
+test('a setup over an engine start still running supersedes it: the old run starts no server and writes no state', async () => {
+  const prepares = []
+  const started = []
+  const downloads = []
+  let stops = 0
+  let up = { tts: false, asr: false }
+  const engine = { start: async (_names, { exe }) => (started.push(exe), (up = { tts: true, asr: true })), warm: async () => {}, stop: () => stops++, status: () => up }
+  const prepare = options =>
+    new Promise((resolve, reject) => prepares.push({ resolve, reject, onProgress: options.onProgress }))
+  const runner = createEngineRunner({ engine, setDownload: next => downloads.push(next), read: () => null, prepare, isReady: () => false, env: {}, voice: 'missing.wav' })
+  const settle = () => new Promise(resolve => setTimeout(resolve, 20))
+
+  runner.startOnce()
+  await settle()
+  assert.equal(runner.state(), 'starting')
+  assert.deepEqual(runner.setup(), { started: true })
+  assert.equal(stops, 1)
+  await settle()
+  assert.equal(prepares.length, 2)
+
+  // The old run ends after setup began, either way: nothing of it lands.
+  const before = downloads.length
+  prepares[0].onProgress(5, 10, 'old')
+  prepares[0].reject(new Error('old run failed'))
+  await settle()
+  assert.equal(downloads.length, before, 'no progress or error from the old run')
+  assert.equal(runner.state(), 'starting')
+  runner.startOnce()
+  await settle()
+  assert.equal(prepares.length, 2, 'the setup run is still the one in flight')
+
+  prepares[1].resolve({ profile: 'gpu', exe: 'new' })
+  await settle()
+  assert.deepEqual(started, ['new'])
+  assert.equal(runner.state(), 'ready')
+})
+
+test('an engine start that resolves after a setup superseded it starts nothing', async () => {
+  const prepares = []
+  const started = []
+  const engine = { start: async (_names, { exe }) => started.push(exe), warm: async () => {}, stop: () => {}, status: () => ({ tts: true, asr: true }) }
+  const prepare = () => new Promise(resolve => prepares.push(resolve))
+  const runner = createEngineRunner({ engine, setDownload: () => {}, read: () => null, prepare, isReady: () => false, env: {}, voice: 'missing.wav' })
+  const settle = () => new Promise(resolve => setTimeout(resolve, 20))
+  runner.startOnce()
+  await settle()
+  runner.setup()
+  await settle()
+  prepares[0]({ profile: 'gpu', exe: 'old' })
+  await settle()
+  assert.deepEqual(started, [], 'the old exe is never started')
+  prepares[1]({ profile: 'gpu', exe: 'new' })
+  await settle()
+  assert.deepEqual(started, ['new'])
+})
+
 test('without Chrome, the default browser gets the whole URL (on Windows not through cmd, which cuts it at "&")', () => {
-  const url = 'http://127.0.0.1:4860/?k=abc&call=1'
+  const url = 'http://127.0.0.1:4860/?n=abc&call=1'
   const [cmd, args] = windowCommand(url, { chrome: null, platform: 'win32' })
   assert.equal(cmd, 'rundll32')
   assert.deepEqual(args, ['url.dll,FileProtocolHandler', url])
@@ -725,11 +829,11 @@ test('the app window opens in Chrome, else Chromium, else Edge: on Windows, snap
   assert.equal(chromePath({ platform: 'linux', home: '/home/ana', exists: () => false }), null)
   assert.equal(browserCandidates({ platform: 'linux', home: '/home/ana' })[0], '/usr/bin/google-chrome')
   // The same --app flags for every one of them.
-  assert.equal(windowCommand('http://x/?k=1', { chrome: edge, platform: 'win32', profile: 'P' })[1][0], '--app=http://x/?k=1')
+  assert.equal(windowCommand('http://x/?n=1', { chrome: edge, platform: 'win32', profile: 'P' })[1][0], '--app=http://x/?n=1')
 })
 
 test('in WSL the call opens in Windows\' browser: wslview when there, else rundll32.exe, with the whole URL', () => {
-  const url = 'http://127.0.0.1:4848/?k=abc&call=1'
+  const url = 'http://127.0.0.1:4848/?n=abc&call=1'
   assert.equal(isWsl({ platform: 'linux', read: () => 'Linux version 5.15.153.1-microsoft-standard-WSL2' }), true)
   assert.equal(isWsl({ platform: 'linux', read: () => 'Linux version 6.8.0-45-generic (buildd@lcy02)' }), false)
   assert.equal(isWsl({ platform: 'linux', read: () => { throw new Error('ENOENT') } }), false)
@@ -746,7 +850,8 @@ test('opening the window says whether it opened: an opener that fails or exits w
 })
 
 test('when the window cannot be opened, show tells the mod and gives it the address to open by hand', async () => {
-  const hub5 = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: async () => false })
+  let now = 1_000_000
+  const hub5 = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: async () => false, clock: () => now })
   await new Promise(resolve => hub5.listen(0, '127.0.0.1', resolve))
   const saved = port
   port = hub5.address().port
@@ -755,7 +860,13 @@ test('when the window cannot be opened, show tells the mod and gives it the addr
     const shown = (await call('POST', '/show', { auth: s.token, body: { call: true } })).body
     assert.equal(shown.isOpened, false)
     assert.equal(shown.isWindowOpen, false)
-    assert.match(shown.url, new RegExp(`k=${WINDOW}&call=1$`))
+    assert.match(shown.url, /[?&]n=[\w-]+&call=1$/)
+    assert.ok(!shown.url.includes(WINDOW))
+    // Opened by hand, maybe minutes later: its code lasts longer than two minutes, and works once.
+    const nonce = /n=([\w-]+)/.exec(shown.url)[1]
+    now += 10 * 60_000
+    const traded = await call('POST', '/launch', { body: { nonce }, origin: `http://127.0.0.1:${port}` })
+    assert.equal(traded.body.key, WINDOW)
     await call('POST', '/unsubscribe', { auth: s.token })
   } finally {
     port = saved
@@ -766,7 +877,7 @@ test('when the window cannot be opened, show tells the mod and gives it the addr
 
 test('with no program to open the window (no xdg-open), the hub keeps running and says why', async () => {
   const said = []
-  openWindow('http://127.0.0.1:1/?k=x', { command: ['luke-voice-no-such-browser', []], log: line => said.push(line) })
+  openWindow('http://127.0.0.1:1/?n=x', { command: ['luke-voice-no-such-browser', []], log: line => said.push(line) })
   for (let i = 0; i < 100 && said.length === 0; i++) await new Promise(resolve => setTimeout(resolve, 20))
   assert.match(said[0] ?? '', /could not be opened: .*ENOENT/)
 })

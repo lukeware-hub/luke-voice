@@ -159,6 +159,54 @@ test('a lock left by a process that is gone, or by a download that stopped, is t
   }
 })
 
+test('a live owner whose download stalls is waited for while it keeps its lock fresh, not joined by a second writer', async () => {
+  const dir = fresh()
+  const other = liveProcess()
+  try {
+    await withEntry(BYTES, async () => {
+      const { utimesSync, rmSync } = await import('node:fs')
+      const file = join(dir, ...PATH.split('/'))
+      mkdirSync(join(dir, 'test'), { recursive: true })
+      writeFileSync(`${file}.lock`, String(other.pid))
+      writeFileSync(`${file}.part`, BYTES.subarray(0, 100))
+      // The owner's heartbeat: its .part does not grow (a network stall), but its lock stays fresh.
+      const beat = setInterval(() => existsSync(`${file}.lock`) && utimesSync(`${file}.lock`, new Date(), new Date()), 30)
+      const { request, asked } = server(BYTES)
+      const done = ensureModel(PATH, { dir, request, pollMs: 20, staleMs: 150 })
+      try {
+        await sleepMs(600)
+        assert.deepEqual(asked, [], 'no second writer while the owner is alive and its lock fresh')
+      } finally {
+        clearInterval(beat)
+      }
+      writeFileSync(file, BYTES)
+      rmSync(`${file}.part`)
+      rmSync(`${file}.lock`)
+      assert.equal(await done, file)
+      assert.deepEqual(asked, [])
+    })
+  } finally {
+    other.kill()
+  }
+})
+
+test('a download whose lock another process took over leaves that lock in place', async () => {
+  const dir = fresh()
+  const other = liveProcess()
+  try {
+    await withEntry(BYTES, async () => {
+      const file = join(dir, ...PATH.split('/'))
+      const { request: serve } = server(BYTES)
+      // While this download runs, another process takes its lock.
+      const request = async (url, init) => (writeFileSync(`${file}.lock`, String(other.pid)), serve(url, init))
+      assert.equal(await ensureModel(PATH, { dir, request, pollMs: 20 }), file)
+      assert.equal(readFileSync(`${file}.lock`, 'utf8'), String(other.pid), 'only our own lock is removed')
+    })
+  } finally {
+    other.kill()
+  }
+})
+
 test('two processes asking for the same file at once both get it whole (installer and hub)', async () => {
   const SIZE = 1024 * 1024
   const blob = Buffer.alloc(SIZE)

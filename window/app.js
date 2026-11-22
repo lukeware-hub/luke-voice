@@ -14,8 +14,33 @@ import {
 } from '/guard.js'
 
 const params = new URLSearchParams(location.search)
-const KEY = params.get('k') ?? ''
 const STALE_WINDOW = 'Esta janela ficou desatualizada. Feche-a e digite /luke-voice window no Claude Code.'
+const KEY_ITEM = 'luke-voice-key'
+
+// The window key never stays in the address: the hub opens this page with a one-time launch code
+// (?n=), traded here once for the key. The key is kept in this tab's sessionStorage, so a reload
+// still works, and the code leaves the address bar. ?k= is a window opened by a hub before 0.10.4.
+async function windowKey() {
+  const code = params.get('n')
+  let key = params.get('k') ?? ''
+  if (code) {
+    const res = await fetch('/launch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ nonce: code }) }).catch(() => null)
+    key = res?.ok ? String((await res.json().catch(() => ({}))).key ?? '') : ''
+  }
+  try {
+    if (key) sessionStorage.setItem(KEY_ITEM, key)
+    else key = sessionStorage.getItem(KEY_ITEM) ?? ''
+  } catch {
+    // No storage (a locked-down browser): the key lives in this page only, and a reload loses it.
+  }
+  if (params.has('n') || params.has('k')) {
+    params.delete('n')
+    params.delete('k')
+    history.replaceState(null, '', `${location.pathname}${params.size ? `?${params}` : ''}${location.hash}`)
+  }
+  return key
+}
+const KEY = await windowKey()
 const SPEAK_AFTER_SILENCE_MS = 1500
 const ACTIVITY_FLUSH_MS = 3000
 const MIC_TIMEOUT_MS = 10_000
@@ -451,6 +476,7 @@ async function startCall() {
     if (!isCurrent()) return
     const started = await voice.startSession({
       hub,
+      windowKey: KEY,
       prepare: microphone,
       clientTools,
       onStatus: (text, { isWarning = false } = {}) => {
@@ -648,10 +674,10 @@ if (window.outerWidth < 640 && window.outerHeight > 0 && document.body.dataset.c
   }
 }
 
-setCall('idle')
+setCall(KEY ? 'idle' : 'error', KEY ? undefined : STALE_WINDOW)
 renderRoster()
 syncMaxIcon()
-connectStream()
+if (KEY) connectStream()
 setInterval(flushActivity, ACTIVITY_FLUSH_MS)
 setInterval(speakWhenQuiet, 500)
 requestAnimationFrame(animate)

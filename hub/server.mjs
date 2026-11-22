@@ -33,6 +33,11 @@ const STT_WAIT_MS = 20_000
 const BRAIN_WAIT_MS = 40_000
 const NO_SESSION_SAY = 'Nenhuma sessão do Claude está ligada. Ligue o luke-voice no Claude Code e me chame de novo.'
 const STALE_SESSION_MS = 90_000
+// The window is opened with a one-time launch code, not the window key: the address is on the
+// browser's command line, which other users of the computer can read. The code lasts long enough
+// for the browser to start; one handed to the user to open by hand lasts longer.
+const LAUNCH_MS = 120_000
+const MANUAL_LAUNCH_MS = 15 * 60_000
 // A session whose luke-voice is older than 0.9.5 cannot think for the free voice: it would hand
 // the command to Claude as a prompt. It says which session to restart instead.
 const oldSessionSay = name => `A sessão ${name} está com uma versão antiga do luke-voice. Feche o Claude Code e abra de novo para atualizar.`
@@ -245,8 +250,80 @@ export function needsPrepare(chosen, { isReady, override = '' }) {
   return ['gpu', 'light'].includes(override) && chosen.profile !== override
 }
 
-export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, engine = null, profile = () => null, voiceRef = null, onLocalVoice = () => {}, onSetup = () => ({ started: false }), engineState = () => 'off', log = () => {}, onShutdown = () => process.exit(0), questionsDir = join(stateDir(), 'cache', 'questions'), staleMs = STALE_SESSION_MS, sweepMs = 10_000, sttWaitMs = STT_WAIT_MS }) {
+// Starts the native engine for the hub, once, or again for /luke-voice setup. A setup supersedes a
+// start still running (it stops the engine and begins anew): the old run, which may still be
+// downloading or starting, then starts no server (it would use the old exe) and writes no state.
+export function createEngineRunner({ engine, setDownload, warmQuestions = () => {}, log = () => {}, read = readProfile, prepare = prepareEngine, isReady = profileReady, env = process.env, voice = join(ROOT, 'agent', 'ceci-voice.wav') }) {
+  let engineStart = null
+  let isSetupRunning = false
+  // Bumped by every run: only the latest one may change the state or start servers.
+  let generation = 0
+  // What the window waits for: 'off' (not started), 'starting', 'ready', 'light' (no native engine
+  // on this machine) or 'failed'.
+  let state = 'off'
+  // The native engine: started when setup chose the gpu profile; prepared here (in the background,
+  // with progress for the window) when setup never ran, as after a marketplace update.
+  const startEngine = async ({ isForced = false, isCurrent }) => {
+    state = 'starting'
+    let chosen = read()
+    if (isForced || needsPrepare(chosen, { isReady, override: env.LUKE_VOICE_PROFILE })) {
+      setDownload({ loaded: 0, total: 0, label: 'preparando' })
+      chosen = await prepare({ onProgress: (loaded, total, label) => isCurrent() && setDownload({ loaded, total, label }) })
+      if (!isCurrent()) return
+      setDownload(null)
+    }
+    if (chosen.profile !== 'gpu') {
+      state = 'light'
+      return
+    }
+    await engine.start(undefined, { exe: chosen.exe })
+    if (!isCurrent()) return
+    const transcript = voice.replace(/\.wav$/, '.txt')
+    await engine.warm({
+      speakerRefB64: existsSync(voice) ? readFileSync(voice).toString('base64') : '',
+      speakerRefText: existsSync(transcript) ? readFileSync(transcript, 'utf8').trim() : '',
+    })
+    if (!isCurrent()) return
+    warmQuestions()
+    const up = engine.status()
+    state = up.tts && up.asr ? 'ready' : 'failed'
+    // The next use of the free voice tries again (servers still starting are waited for, not doubled).
+    if (state === 'failed') engineStart = null
+  }
+  const run = options => {
+    const mine = ++generation
+    const isCurrent = () => mine === generation
+    return startEngine({ ...options, isCurrent }).catch(error => {
+      if (!isCurrent()) return
+      log(`native engine: ${error.message}`)
+      setDownload({ error: String(error.message) })
+      state = 'failed'
+      engineStart = null
+    })
+  }
+  return {
+    // The free voice is used: start the native engine once (a no-op after).
+    startOnce: () => {
+      if (env.LUKE_VOICE_ENGINE === 'off') return
+      engineStart ??= run()
+    },
+    setup: () => {
+      if (env.LUKE_VOICE_ENGINE === 'off') return { started: false, reason: 'off' }
+      if (isSetupRunning) return { started: false, reason: 'running' }
+      isSetupRunning = true
+      // Setup again over a running engine: stop it, so the profile and models are read anew.
+      engine.stop()
+      engineStart = run({ isForced: true }).finally(() => (isSetupRunning = false))
+      return { started: true }
+    },
+    // A server that came up after its start timed out is used: the window sees it ready.
+    state: () => (state === 'failed' && engine.status().tts && engine.status().asr ? 'ready' : state),
+  }
+}
+
+export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, engine = null, profile = () => null, voiceRef = null, onLocalVoice = () => {}, onSetup = () => ({ started: false }), engineState = () => 'off', log = () => {}, onShutdown = () => process.exit(0), questionsDir = join(stateDir(), 'cache', 'questions'), staleMs = STALE_SESSION_MS, sweepMs = 10_000, sttWaitMs = STT_WAIT_MS, clock = Date.now }) {
   const sessions = new Map() // token -> session
+  const launches = new Map() // one-time launch code -> when it expires
   const replaced = new Set() // tokens a newer subscription of the same Claude session took over
   const streams = new Set() // window SSE responses
   const acks = new Map() // command id -> resolve
@@ -295,6 +372,15 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
   }
 
   const sendRoster = () => broadcast({ type: 'roster', sessions: roster(), focused, call })
+
+  // The address that opens the window: a fresh launch code, traded once at POST /launch for the key.
+  const launchUrl = (startCall, lasts = LAUNCH_MS) => {
+    const now = clock()
+    for (const [code, until] of launches) if (until <= now) launches.delete(code)
+    const code = newSecret()
+    launches.set(code, now + lasts)
+    return `http://127.0.0.1:${PORT}/?n=${code}${startCall ? '&call=1' : ''}`
+  }
 
   function uniqueName(cwd) {
     const base = (basename(cwd || '') || 'session').toLowerCase().replace(/[^a-z0-9-]+/g, '-').slice(0, 24) || 'session'
@@ -392,11 +478,13 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       focused = session.name
       const startCall = Boolean(body.call)
       if (streams.size === 0) {
-        const url = `http://127.0.0.1:${PORT}/?k=${windowKey}${startCall ? '&call=1' : ''}`
-        // Never "the window is opening" when nothing could open it: the mod gets the address instead.
+        const url = launchUrl(startCall)
+        // Never "the window is opening" when nothing could open it: the mod gets the address
+        // instead, with a code of its own that lasts while the user gets to it.
         if ((await open(url, { log })) === false) {
+          launches.delete(new URL(url).searchParams.get('n'))
           sendRoster()
-          return [200, { ok: true, isWindowOpen: false, isOpened: false, url }]
+          return [200, { ok: true, isWindowOpen: false, isOpened: false, url: launchUrl(startCall, MANUAL_LAUNCH_MS) }]
         }
       } else {
         broadcast({ type: 'focus', name: session.name, startCall })
@@ -664,10 +752,15 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
 
   // A browser marks every request another web page makes (an <img>, a script tag) with the site it
   // came from. Model and vendor files download on first use, so a page on another site must not be
-  // able to start gigabytes of downloads. The window and its workers are same-origin.
-  const isFromOtherSite = req => {
+  // able to start gigabytes of downloads. The window and its workers are same-origin. A browser that
+  // does not send Sec-Fetch-Site still sends the window's own address as Referer (its module
+  // imports and its workers' fetches carry no custom header); the window key works too.
+  const isFromWindow = (req, hosts) => {
     const site = req.headers['sec-fetch-site']
-    return Boolean(site) && site !== 'same-origin'
+    if (site) return site === 'same-origin'
+    if (sameSecret(req.headers['x-luke-key'], windowKey)) return true
+    const from = req.headers.origin ?? req.headers.referer
+    return typeof from === 'string' && hosts.some(host => from === `http://${host}` || from.startsWith(`http://${host}/`))
   }
 
   async function readBody(req) {
@@ -756,8 +849,9 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
         return send(res, status, out)
       }
 
+      // The page holds no secret, so a reload (its address no longer has the launch code) still
+      // loads; without the key, from its launch code or this tab's storage, it can do nothing.
       if (route === 'GET /') {
-        if (!sameSecret(url.searchParams.get('k'), windowKey)) return send(res, 403, { error: 'key' })
         const page = readFileSync(join(root, 'window', 'index.html'))
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...ISOLATION })
         return res.end(page)
@@ -770,7 +864,18 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
         return res.end(content)
       }
 
-      if (req.method === 'GET' && (url.pathname.startsWith('/vendor/') || url.pathname.startsWith('/models/')) && isFromOtherSite(req)) {
+      // The window trades its one-time launch code for the window key. Only its own page may ask (a
+      // browser always sends Origin with a POST); a code works once, and only until it expires.
+      if (route === 'POST /launch') {
+        if (!origin || (req.headers['sec-fetch-site'] && req.headers['sec-fetch-site'] !== 'same-origin')) return send(res, 403, { error: 'origin' })
+        const code = String((await readBody(req)).nonce ?? '')
+        const until = launches.get(code)
+        launches.delete(code)
+        if (!until || until <= clock()) return send(res, 403, { error: 'launch' })
+        return send(res, 200, { key: windowKey })
+      }
+
+      if (req.method === 'GET' && (url.pathname.startsWith('/vendor/') || url.pathname.startsWith('/models/')) && !isFromWindow(req, hosts)) {
         return send(res, 403, { error: 'only the call window may load these' })
       }
 
@@ -864,6 +969,7 @@ if (isMainModule(import.meta.url, process.argv[1])) {
   const { serviceToken, windowKey } = loadSecrets()
   const log = line => console.log(line)
   const engine = createEngine({ log })
+  const runner = createEngineRunner({ engine, log, setDownload: next => hub.setEngineDownload(next), warmQuestions: () => hub.warmQuestions() })
   const hub = createHub({
     serviceToken,
     windowKey,
@@ -872,64 +978,11 @@ if (isMainModule(import.meta.url, process.argv[1])) {
     engine,
     profile: () => readProfile(),
     voiceRef: join(ROOT, 'agent', 'ceci-voice.wav'),
-    onLocalVoice: () => startOnce(),
-    // A server that came up after its start timed out is used: the window sees it ready.
-    engineState: () => (state === 'failed' && engine.status().tts && engine.status().asr ? 'ready' : state),
-    onSetup: () => {
-      if (process.env.LUKE_VOICE_ENGINE === 'off') return { started: false, reason: 'off' }
-      if (isSetupRunning) return { started: false, reason: 'running' }
-      isSetupRunning = true
-      // Setup again over a running engine: stop it, so the profile and models are read anew.
-      engine.stop()
-      engineStart = run({ isForced: true }).finally(() => (isSetupRunning = false))
-      return { started: true }
-    },
+    onLocalVoice: runner.startOnce,
+    engineState: runner.state,
+    onSetup: runner.setup,
     log,
   })
-  let engineStart = null
-  let isSetupRunning = false
-  // What the window waits for: 'off' (not started), 'starting', 'ready', 'light' (no native engine
-  // on this machine) or 'failed'.
-  let state = 'off'
-  const run = options =>
-    startEngine(options).catch(error => {
-      log(`native engine: ${error.message}`)
-      hub.setEngineDownload({ error: String(error.message) })
-      state = 'failed'
-      engineStart = null
-    })
-  // The free voice is used: start the native engine once (a no-op after).
-  const startOnce = () => {
-    if (process.env.LUKE_VOICE_ENGINE === 'off') return
-    engineStart ??= run()
-  }
-  // The native engine: started when setup chose the gpu profile; prepared here (in the background,
-  // with progress for the window) when setup never ran, as after a marketplace update.
-  const startEngine = async ({ isForced = false } = {}) => {
-    state = 'starting'
-    let chosen = readProfile()
-    if (isForced || needsPrepare(chosen, { isReady: profileReady, override: process.env.LUKE_VOICE_PROFILE })) {
-      hub.setEngineDownload({ loaded: 0, total: 0, label: 'preparando' })
-      chosen = await prepareEngine({ onProgress: (loaded, total, label) => hub.setEngineDownload({ loaded, total, label }) })
-      hub.setEngineDownload(null)
-    }
-    if (chosen.profile !== 'gpu') {
-      state = 'light'
-      return
-    }
-    await engine.start(undefined, { exe: chosen.exe })
-    const voice = join(ROOT, 'agent', 'ceci-voice.wav')
-    const transcript = voice.replace(/\.wav$/, '.txt')
-    await engine.warm({
-      speakerRefB64: existsSync(voice) ? readFileSync(voice).toString('base64') : '',
-      speakerRefText: existsSync(transcript) ? readFileSync(transcript, 'utf8').trim() : '',
-    })
-    hub.warmQuestions()
-    const up = engine.status()
-    state = up.tts && up.asr ? 'ready' : 'failed'
-    // The next use of the free voice tries again (servers still starting are waited for, not doubled).
-    if (state === 'failed') engineStart = null
-  }
   process.on('exit', () => engine.stop())
   // Two launchers can race to start a hub; the one that finds the port taken leaves quietly.
   hub.on('error', error => {
@@ -942,7 +995,7 @@ if (isMainModule(import.meta.url, process.argv[1])) {
   hub.listen(PORT, '127.0.0.1', () => {
     console.log(`luke-voice hub on 127.0.0.1:${PORT}`)
     // The free voice is the choice: warm the native engine up now, so the first call has it.
-    if (hub.voiceProvider() === 'local') startOnce()
+    if (hub.voiceProvider() === 'local') runner.startOnce()
   })
   setInterval(() => {
     if (hub.idleFor() > 10 * 60_000) process.exit(0)
