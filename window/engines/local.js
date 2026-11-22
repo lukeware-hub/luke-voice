@@ -2,6 +2,7 @@
 // voice detector, Whisper writes down what the user said, the brain decides what to do and say,
 // and Kokoro speaks it. Only the brain leaves the machine (through the hub, to Claude).
 // It gives the window the same session the ElevenLabs engine does.
+import { decide, liveAction } from '/engines/confirm.js'
 import { isConfirm, isDeny, isStopClaude, isStopOnly } from '/engines/fast-path.js'
 import { speechChunks } from '/engines/speech-text.js'
 import { createTurnJoiner, createTurnLog } from '/engines/turn-join.js'
@@ -34,8 +35,6 @@ const ACK_AFTER_MS = 600
 const TURN_CANDIDATE_FRAMES = 22
 const TURN_END_FRAMES = 62
 const TURN_DONE = 0.7
-// A "posso?" waits this long for its "sim".
-const PENDING_TTL_MS = 90_000
 // Tool answers that mean it worked; anything else goes back to the brain to explain.
 const TOOL_OK = /^(Started|Claude started|Added as a note|Queued|Stopped|Sent)/i
 
@@ -318,6 +317,8 @@ export async function startSession({
   let nextAck = 0
   // Jobs in the turn queue (user turns and notices), and the acknowledgement being made now.
   let jobs = 0
+  // User turns queued or running: until each is written down and answered, a notice waits (app.js).
+  let userJobs = 0
   let ackWarm = null
 
   // Aborts the native voice's stream when Ceci is cut off.
@@ -620,12 +621,12 @@ export async function startSession({
     const reply = await askBrain(request)
     clearTimeout(ack)
     if (isEnded || isStale()) return
-    if (request.kind === 'user') {
-      commitTurn()
-      pendingAction = reply.pending ? { tool: reply.pending, at: Date.now() } : null
-    }
-    if (!reply.tool) return say(reply.say)
-    return runTool(reply.tool, reply.say)
+    // An acting tool never runs from here: it waits for the user's "sim" (confirm.js).
+    const next = decide({ kind: request.kind, reply, now: Date.now() })
+    if (request.kind === 'user') commitTurn()
+    pendingAction = next.pending
+    if (next.action !== 'run') return say(next.say)
+    return runTool(next.tool, next.say)
   }
 
   async function stopNow() {
@@ -655,7 +656,8 @@ export async function startSession({
   function onTurnEnd(ended, wasInterruption = false) {
     if (!ended) return
     if (ended.isJoined) console.info('[luke-voice] resumed: joined with the previous part')
-    queue(() => onUtterance(ended.audio, wasInterruption), ended.turn)
+    userJobs++
+    queue(() => onUtterance(ended.audio, wasInterruption).finally(() => userJobs--), ended.turn)
   }
 
   async function onUtterance(audio, wasInterruption = false) {
@@ -674,7 +676,7 @@ export async function startSession({
     // Any words answer the last "posso?": a plain yes runs it, a plain no drops it, anything else
     // goes to the brain, which may ask again. It is let go only once this turn stands: a turn
     // joined with what the user says next ("é..." then "sim, pode") still answers it.
-    const action = pendingAction && Date.now() - pendingAction.at < PENDING_TTL_MS ? pendingAction : null
+    const action = liveAction(pendingAction, Date.now())
     turns.hold(text, () => {
       pendingAction = null
     })
@@ -758,8 +760,9 @@ export async function startSession({
       isMuted = Boolean(next)
       if (isMuted) vad.reset()
     },
-    // The user is mid-utterance: the window holds its spoken notices until they finish.
-    isUserSpeaking: () => vad.inSpeech,
+    // The user is mid-utterance, or what they said is still being written down or answered: the
+    // window holds its spoken notices until they finish.
+    isUserSpeaking: () => vad.inSpeech || userJobs > 0,
     getOutputVolume: () => {
       if (playing.size === 0) return 0
       analyser.getFloatTimeDomainData(levels)
