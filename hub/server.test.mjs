@@ -7,6 +7,7 @@ import { after, before, test } from 'node:test'
 
 process.env.LUKE_VOICE_HOME = mkdtempSync(join(tmpdir(), 'luke-voice-test-'))
 const { browserCandidates, chromeArgs, chromePath, createEngineRunner, createHub, isWsl, loadSecrets, needsPrepare, openWindow, windowCommand } = await import('./server.mjs')
+const { ASR_GLOSSARY } = await import('./engine.mjs')
 
 const SERVICE = 'service-token'
 const WINDOW = 'window-key'
@@ -539,6 +540,66 @@ test('speech goes to the native engine: /stt sends the WAV with the glossary, /t
     // The engine's small context holds ~380 characters: a longer text is capped, not cut mid-audio.
     await post('/tts', JSON.stringify({ text: 'a'.repeat(500) }), 'application/json')
     assert.equal(seen.tts.input.length, 360)
+  } finally {
+    hub2.closeAllConnections()
+    hub2.close()
+    fake.close()
+  }
+})
+
+test('the ears hear with what Ceci said in the last minute: newest words first, capped, then forgotten', async () => {
+  const prompts = []
+  const fake = createHttpServer(async (req, res) => {
+    const chunks = []
+    for await (const c of req) chunks.push(c)
+    if (req.url === '/v1/audio/transcriptions') {
+      prompts.push(Buffer.concat(chunks).toString('utf8').match(/name="prompt"\r\n\r\n([^\r]*)/)[1])
+      res.writeHead(200, { 'content-type': 'application/json' })
+      return res.end(JSON.stringify({ text: 'language Portuguese<asr_text>tenta falar Alcaçuz' }))
+    }
+    res.writeHead(200, { 'content-type': 'audio/wav' })
+    res.end(Buffer.from('RIFF....WAVE\x01\x02\x03\x04'))
+  })
+  await new Promise(resolve => fake.listen(0, '127.0.0.1', resolve))
+  const base = `http://127.0.0.1:${fake.address().port}`
+  const voiceRef = join(mkdtempSync(join(tmpdir(), 'luke-voice-ref-')), 'ceci.wav')
+  writeFileSync(voiceRef, 'CECIVOICE')
+  writeFileSync(voiceRef.replace(/[.]wav$/, '.txt'), 'Oi, eu sou a Ceci.')
+  let now = 1_000_000
+  const engine = { url: () => base, status: () => ({ tts: true, asr: true, router: false }) }
+  const hub2 = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {}, engine, voiceRef, profile: () => ({ profile: 'gpu' }), clock: () => now })
+  await new Promise(resolve => hub2.listen(0, '127.0.0.1', resolve))
+  const p = hub2.address().port
+  const post = (path, body, type) =>
+    new Promise((resolve, reject) => {
+      const req = request({ host: '127.0.0.1', port: p, method: 'POST', path, headers: { host: `127.0.0.1:${p}`, 'content-type': type, 'x-luke-key': WINDOW } }, res => {
+        res.resume()
+        res.on('end', () => resolve(res.statusCode))
+      })
+      req.on('error', reject)
+      req.end(body)
+    })
+  const say = text => post('/tts', JSON.stringify({ text }), 'application/json')
+  const hear = async () => (await post('/stt', Buffer.from('RIFFWAV'), 'audio/wav'), prompts.at(-1))
+  try {
+    // Nothing said yet: the glossary alone, with the model names in it.
+    assert.equal(await hear(), ASR_GLOSSARY)
+    assert.match(ASR_GLOSSARY, /Opus, Sonnet, Haiku, Anthropic, Lukeware/)
+    // Her answer stays after a short acknowledgement made while the call is idle.
+    await say('A Lagoa de Alcaçuz fica em Natal.')
+    now += 5_000
+    await say('Certo.')
+    assert.equal(await hear(), `${ASR_GLOSSARY} Ceci acabou de dizer: A Lagoa de Alcaçuz fica em Natal. Certo.`)
+    // A long answer: only its newest 200 characters, cut at a word.
+    const long = Array.from({ length: 30 }, (_, i) => `palavra${i}`).join(' ')
+    await say(long)
+    const said = (await hear()).split('Ceci acabou de dizer: ')[1]
+    assert.ok(said.length <= 200, said)
+    assert.ok(said.endsWith('palavra29'))
+    assert.match(said, /^palavra\d+ /)
+    // A minute later it is forgotten.
+    now += 61_000
+    assert.equal(await hear(), ASR_GLOSSARY)
   } finally {
     hub2.closeAllConnections()
     hub2.close()
