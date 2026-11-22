@@ -135,14 +135,14 @@ async function endOfTurn(audio) {
   return out.logits.data[0]
 }
 
-// How many 32 ms frames of the utterance Silero hears as speech.
-async function speechFrames(audio) {
+// How many 32 ms frames of the utterance Silero hears as speech, stopping once it reaches `limit`.
+async function speechFrames(audio, limit = Infinity) {
   const { ort, silero } = turn
   const sr = new ort.Tensor('int64', BigInt64Array.from([16_000n]), [])
   let state = new ort.Tensor('float32', new Float32Array(2 * 128), [2, 1, 128])
   let context = new Float32Array(64)
   let count = 0
-  for (let i = 0; i + 512 <= audio.length; i += 512) {
+  for (let i = 0; i + 512 <= audio.length && count < limit; i += 512) {
     const frame = audio.subarray(i, i + 512)
     const input = new Float32Array(576)
     input.set(context)
@@ -307,7 +307,7 @@ async function synthesizePiper(text, speed = 1) {
 }
 
 async function transcribe(audio, language = 'portuguese') {
-  const out = await stt(audio, { language, task: 'transcribe', max_new_tokens: 128 })
+  const out = await stt(audio, { language, task: 'transcribe', max_new_tokens: 224 })
   return String(out?.text ?? '').trim()
 }
 
@@ -329,7 +329,7 @@ self.onmessage = async ({ data }) => {
       const started = performance.now()
       // Noise with no speech in it (a fan, typing) never reaches Whisper, which would invent words.
       if (turn) {
-        const frames = await speechFrames(data.audio)
+        const frames = await speechFrames(data.audio, MIN_SPEECH_FRAMES)
         if (frames < MIN_SPEECH_FRAMES) return post('text', { id, text: '', noSpeech: true, ms: Math.round(performance.now() - started) })
       }
       const text = await transcribe(data.audio, data.language)
