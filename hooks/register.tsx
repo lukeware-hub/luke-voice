@@ -769,6 +769,60 @@ async function setupCommand($: EngineInterface) {
   return `Voz leve pronta, no navegador (${result.reason || 'sem placa de vídeo com 6 GB'}). Nada mais para baixar.`
 }
 
+const UNINSTALL_SH = 'curl -fsSL https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/uninstall.sh | bash'
+const UNINSTALL_WINDOWS =
+  'powershell -NoProfile -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/uninstall-luke-voice-windows.cmd | iex"'
+// Copies install/uninstall.sh out of the plugin folder (it deletes that folder) and starts it in a
+// session of its own, so it outlives this call and Claude Code closing. $.process.run waits for
+// the children until its timeout, then resolves and leaves the uninstaller running.
+const UNINSTALL_RUN = [
+  'd="$2"; mkdir "$d" && cp "$1" "$d/uninstall.sh" || exit 1',
+  'if command -v setsid >/dev/null 2>&1; then set -- setsid',
+  "elif command -v perl >/dev/null 2>&1; then set -- perl -MPOSIX=setsid -e 'setsid(); exec @ARGV'",
+  'else set --; fi',
+  'LUKE_VOICE_NO_PROMPT=1 nohup "$@" bash "$d/uninstall.sh" >"$d/uninstall.log" 2>&1 </dev/null &',
+].join('\n')
+
+// /luke-voice uninstall: says what goes and asks for `confirmar`, since the voice (GBs) is deleted.
+// With it: ends the call, turns off (so this session does not start the hub again) and runs
+// install/uninstall.sh apart from Claude Code. On Windows, the line to paste.
+async function uninstallCommand($: EngineInterface, options: Record<string, unknown>, isConfirmed: boolean) {
+  const { platform } = await $.session.info()
+  if (platform === 'windows') {
+    return ['Para remover o luke-voice no Windows, feche o Claude Code, aperte Windows + R, cole esta linha e aperte Enter:', '', `  ${UNINSTALL_WINDOWS}`].join('\n')
+  }
+  if (!isConfirmed) {
+    return [
+      'Isto remove o luke-voice deste computador:',
+      '  - o mod luke-voice do Claude Code',
+      `  - a pasta ${await lukeHome($)}, com a voz baixada (até 3,3 GB) e o Node.js que o instalador trouxe`,
+      '  - o link do node que o instalador criou',
+      'O resto do computador não muda, e não dá para desfazer.',
+      '',
+      'Para continuar: /luke-voice uninstall confirmar',
+      'Para remover só o mod e manter a voz: /plugin, escolha luke-voice e Uninstall.',
+    ].join('\n')
+  }
+  if (token) await hubFetch($, 'POST', '/end', {}).catch(() => undefined)
+  await toggle($, options, false)
+  const dir = `${((await $.env.get('TMPDIR')) || '/tmp').replace(/\/+$/, '')}/luke-voice-uninstall-${await $.clock.now()}`
+  const log = `${dir}/uninstall.log`
+  const started = await $.process
+    .run(['/bin/sh', '-c', UNINSTALL_RUN, 'sh', `${$.plugin.root}/install/uninstall.sh`, dir], { timeoutMs: 3_000 })
+    .then(
+      out => out.exitCode === 0,
+      () => null,
+    )
+  if (started === false) return `Não consegui começar a desinstalação. Cole isto no Terminal:\n\n  ${UNINSTALL_SH}`
+  return [
+    'Desinstalando o luke-voice. Feche o Claude Code e abra de novo.',
+    `O andamento fica em ${log}.`,
+    started === null ? `Se o log não aparecer, cole isto no Terminal: ${UNINSTALL_SH}` : null,
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
 // The installed plugin's version, to tell when the running hub is an older one.
 async function pluginVersion($: EngineInterface) {
   try {
@@ -847,6 +901,7 @@ async function helpText($: EngineInterface) {
     '  /luke-voice setup    baixa e testa a voz gratuita agora (se a instalação não baixou)',
     '  /luke-voice status   mostra o estado técnico',
     '  /luke-voice help     mostra esta ajuda',
+    '  /luke-voice uninstall  remove o luke-voice e a voz baixada (pede confirmação)',
     '',
     'Bom saber:',
     '  - A janela usa um Chrome só dela, com o microfone e o som já liberados. O seu Chrome normal não muda.',
@@ -879,7 +934,7 @@ export const register: Register = (on, options) => {
     // The hub's port follows LUKE_VOICE_PORT, like the hub (hub/paths.mjs).
     const port = Number(await $.env.get('LUKE_VOICE_PORT'))
     if (Number.isInteger(port) && port > 0 && port < 65536) HUB = `http://127.0.0.1:${port}`
-    await $.command.register({ name: NAME, description: 'Ceci, voice assistant: on/off, call, end, window, voz, setup, status, help' })
+    await $.command.register({ name: NAME, description: 'Ceci, voice assistant: on/off, call, end, window, voz, setup, status, help, uninstall' })
     // Redraw the pane while a task runs, so its elapsed time moves.
     $.clock.every(15_000, () => {
       void read($, running)
@@ -896,6 +951,8 @@ export const register: Register = (on, options) => {
     const arg = e.args.trim().toLowerCase()
     const voiceArg = arg.match(/^(voz|voice)(\s+(.*))?$/)
     if (voiceArg) return { text: await voiceCommand($, opts, voiceArg[3] ?? '') }
+    const uninstallArg = arg.match(/^(uninstall|desinstalar)(\s+(.*))?$/)
+    if (uninstallArg) return { text: await uninstallCommand($, opts, uninstallArg[3] === 'confirmar') }
     switch (arg) {
       case '':
         return { text: (await toggle($, opts)) ? 'luke-voice: ligado. Iniciando a chamada.' : 'luke-voice: desligado' }

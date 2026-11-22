@@ -113,6 +113,7 @@ Say **"pare"** (or "para tudo", "Ceci, para") to stop Claude at once.
 | `/luke-voice setup` | download and check Ceci's free voice (for people who update through the marketplace) |
 | `/luke-voice status` | technical status: hub, voice, profile, call, key, queue, setup progress |
 | `/luke-voice help` | everything you need to know, plus a check of what is missing |
+| `/luke-voice uninstall` | remove luke-voice and the downloaded voice (asks for `/luke-voice uninstall confirmar` first) |
 
 It starts **off**, and remembers your choice. When Claude Code opens with it already on, it only reconnects: it never starts a call you did not ask for.
 
@@ -203,6 +204,8 @@ With no choice at all, luke-voice uses ElevenLabs while a key is saved, and the 
 ## Uninstall
 
 One line removes everything: luke-voice from Claude Code, the downloaded voice, and the Node.js and Git the installer brought (and takes them off the PATH). It asks before it starts, and asks you to close Claude Code first (while it is open, luke-voice would start again); nothing else on the computer changes.
+
+From inside Claude Code (macOS or Linux): type `/luke-voice uninstall`. It says what will be removed and asks for `/luke-voice uninstall confirmar`; then it ends the call, turns luke-voice off and runs the uninstaller below in the background. Close Claude Code and open it again when it says so. On Windows it gives you the line below.
 
 - **Windows:** press **Windows + R**, paste this line and press **Enter**:
 

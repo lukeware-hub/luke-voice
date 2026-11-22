@@ -101,6 +101,8 @@ In Claude Code, `/luke-voice voz local` or `/luke-voice voz elevenlabs` switches
 
 One line removes everything: luke-voice from Claude Code, the downloaded voice, and the Node.js and Git the installer brought. It asks before it starts, and asks you to close Claude Code first: while Claude Code is open, luke-voice would start again and make its folder again.
 
+From inside Claude Code (macOS or Linux): `/luke-voice uninstall` says what will be removed, and `/luke-voice uninstall confirmar` ends the call, turns luke-voice off and runs `install/uninstall.sh` in the background (log in a temporary folder it names). On Windows it answers with the line below.
+
 - Windows (Windows + R, or PowerShell):
   ```
   powershell -NoProfile -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/uninstall-luke-voice-windows.cmd | iex"
