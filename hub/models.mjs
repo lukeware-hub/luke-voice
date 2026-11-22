@@ -2,7 +2,7 @@
 // ~/.luke-voice/models (at install time by setup.mjs, or on first use), resumed when a download is
 // cut, and checked before use. The hub serves them to the call window at /models/.
 import { createHash } from 'node:crypto'
-import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -12,10 +12,9 @@ import { stateDir } from './paths.mjs'
 const HF = 'https://huggingface.co'
 const SMART_TURN = `${HF}/pipecat-ai/smart-turn-v3/resolve/f766f81d3cfdf7737ac64aad813d91bbfd56bf93`
 const SILERO = `${HF}/onnx-community/silero-vad/resolve/e71cae966052b992a7eca6b17738916ce0eca4ec`
-const QWEN_TTS = `${HF}/mradermacher/Qwen3-TTS-12Hz-0.6B-Base-GGUF/resolve/0762b31e9cd99274d49dca4e895bd81863134f08`
 const QWEN_ASR = `${HF}/ggml-org/Qwen3-ASR-0.6B-GGUF/resolve/928ab958557df9aa2ef1c93e0e83c7ad0933fae2`
 // Files converted for luke-voice and published on its own GitHub release (see the release notes).
-const LUKE_MODELS = 'https://github.com/lukeware-hub/luke-voice/releases/download/voice-models-v1'
+const LUKE_MODELS = 'https://github.com/lukeware-hub/luke-voice/releases/download/voice-models-v2'
 const ROUTER = `${HF}/unsloth/Qwen3.5-0.8B-GGUF/resolve/6ab461498e2023f6e3c1baea90a8f0fe38ab64d0`
 
 // Served path (under /models/) -> source, sha256 and size. `group` says which feature needs it.
@@ -143,27 +142,33 @@ export const MODELS = {
   },
 
   // The native engine (gpu profile), all run by llama.cpp's llama-server (hub/engine.mjs).
-  // Qwen3-TTS 0.6B Base (Apache-2.0): Ceci's voice, cloned from agent/ceci-voice.wav, streamed.
-  'native/qwen3-tts-0.6b-base-q8_0.gguf': {
-    url: `${QWEN_TTS}/Qwen3-TTS-12Hz-0.6B-Base.Q8_0.gguf`,
-    sha256: '59b28b4ab6a1c4e24e6701fc871a427c1fb3e8333f0ed5cebec3bb67a699ae8e',
-    size: 646211264,
+  // Qwen3-TTS 1.7B Base (Apache-2.0): Ceci's voice, cloned from agent/ceci-voice.wav, streamed.
+  // Converted with llama.cpp b12556 from Qwen/Qwen3-TTS-12Hz-1.7B-Base (revision
+  // fd4b254389122332181a7c3db7f27e918eec64e3) and quantized to Q5_K_M: Q4 said 4 to 10 points fewer
+  // English tech words right over 5 seeds. The owner heard it as clearly better than the 0.6B.
+  'native/qwen3-tts-1.7b-base-q5_k_m.gguf': {
+    url: `${LUKE_MODELS}/qwen3-tts-1.7b-base-q5_k_m.gguf`,
+    sha256: '244e74cd46ba8c6aa4851723b667799ddb08b81839ce61b8bd0c8e247c7b6006',
+    size: 1226118112,
     group: 'native',
   },
-  // Its projector with the speech tokenizer's reference encoder (converted with llama.cpp b12556):
-  // cloning from the reference clip AND its transcript keeps Ceci's accent Brazilian; the public
-  // projector clones from the speaker embedding only, which pulled her toward European Portuguese.
-  'native/qwen3-tts-0.6b-base-mmproj-icl-q8_0.gguf': {
-    url: `${LUKE_MODELS}/qwen3-tts-0.6b-base-mmproj-icl-q8_0.gguf`,
-    sha256: 'a49882472bb035b349ade86821a4c7999852d8f6d51f2f2681b0ce653fa0baaf',
-    size: 587081344,
+  // Its projector with the speech tokenizer's reference encoder: cloning from the reference clip AND
+  // its transcript keeps Ceci's accent Brazilian; the public projector clones from the speaker
+  // embedding only, which pulled her toward European Portuguese.
+  'native/qwen3-tts-1.7b-base-mmproj-icl-q8_0.gguf': {
+    url: `${LUKE_MODELS}/qwen3-tts-1.7b-base-mmproj-icl-q8_0.gguf`,
+    sha256: 'd57d1a06a37e0d3f550ffec25977ac457fe0415b0885609a6c315a0e9f09f631',
+    size: 632374944,
     group: 'native',
   },
-  // Qwen3-ASR 0.6B (Apache-2.0): what the user said, ~90 ms per sentence on a mid-range GPU.
-  'native/qwen3-asr-0.6b-q8_0.gguf': {
-    url: `${QWEN_ASR}/Qwen3-ASR-0.6B-Q8_0.gguf`,
-    sha256: 'bca259818b50ca7c4c05e9bdb35a5dc04fa039653a6d6f3f0f331f96f6aa1971',
-    size: 804749248,
+  // Qwen3-ASR 0.6B (Apache-2.0): what the user said, ~120 ms per sentence on a mid-range GPU.
+  // Quantized to Q6_K from ggml-org's BF16 (revision b98bf4381df3b400b929dcaff0dc83b6dafe221b): the
+  // same tech words heard as Q8 (43 of 50) and the same word errors on 150 real pt-BR clips, with
+  // ~300 MiB less video memory.
+  'native/qwen3-asr-0.6b-q6_k.gguf': {
+    url: `${LUKE_MODELS}/qwen3-asr-0.6b-q6_k.gguf`,
+    sha256: 'dabec98fbedb9e9707c2d81bc7c1fbcb92a675ea1b23a63efaa01b067a77b7a1',
+    size: 622729440,
     group: 'native',
   },
   'native/qwen3-asr-0.6b-mmproj-q8_0.gguf': {
@@ -310,6 +315,25 @@ export async function ensureModel(path, { dir = modelsDir(), ...options } = {}) 
   const entry = MODELS[path]
   if (!entry) return null
   return ensureFile(entry, join(dir, ...path.split('/')), options)
+}
+
+// Native model files the manifest no longer names (the 0.6B voice and the Q8 ears after 0.10.0),
+// removed once the new ones are in: they are gigabytes nobody reads. Only the native folder is
+// touched, and only GGUF files and their partial downloads. Returns the removed paths.
+export function pruneModels({ dir = modelsDir() } = {}) {
+  const folder = join(dir, 'native')
+  if (!existsSync(folder)) return []
+  const removed = []
+  for (const name of readdirSync(folder)) {
+    if (!/.gguf(.part|.lock)?$/.test(name) || MODELS[`native/${name}`]) continue
+    try {
+      rmSync(join(folder, name), { force: true })
+      removed.push(`native/${name}`)
+    } catch {
+      // In use (an old server still running on Windows): removed on a later prepare.
+    }
+  }
+  return removed
 }
 
 // What is on disk for a group of models (or all): how many files and bytes, of how many.

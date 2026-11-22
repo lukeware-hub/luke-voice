@@ -22,11 +22,11 @@ O luke-voice escolhe o perfil sozinho, na hora da instalação:
 | | perfil gpu ("voz natural") | perfil light ("voz leve") |
 | --- | --- | --- |
 | Quando | O llama.cpp enxerga uma GPU com pelo menos 6 GB de memória de vídeo (NVIDIA, AMD ou Intel pelo Vulkan no Windows e no Linux; Apple Silicon pelo Metal no macOS arm64). | Todo o resto. |
-| Fala | Qwen3-TTS 12Hz 0.6B Base, clonada na hora a partir de `agent/ceci-voice.wav` e da transcrição `agent/ceci-voice.txt`. | Kokoro-82M no navegador. O Piper `pt_BR-faber` é o plano B em computadores lentos. |
-| Ouve | Qwen3-ASR 0.6B. | Whisper base no navegador. |
+| Fala | Qwen3-TTS 12Hz 1.7B Base, clonada na hora a partir de `agent/ceci-voice.wav` e da transcrição `agent/ceci-voice.txt`. | Kokoro-82M no navegador. O Piper `pt_BR-faber` é o plano B em computadores lentos. |
+| Ouve | Qwen3-ASR 0.6B (Q6). | Whisper base no navegador. |
 | Conversa rápida | Um roteador local instantâneo, o Qwen3.5 0.8B na CPU. | Vai para o Claude Haiku como todo o resto. |
 | Download | Cerca de 2,8 GB, uma vez só. Sem Python, sem PyTorch. | Cerca de 320 MB, uma vez só (cerca de 480 MB numa máquina com GPU pequena, onde o Kokoro roda em fp32 no WebGPU). |
-| Memória de vídeo numa chamada | Cerca de 5,0 GB para a voz e os ouvidos juntos (medido numa RTX 3060 Ti). | Nada além do que o navegador usa. |
+| Memória de vídeo numa chamada | Cerca de 5,4 GB para a voz e os ouvidos juntos, e cerca de 3,2 GB de RAM para o motor inteiro (medido numa RTX 3060 Ti). | Nada além do que o navegador usa. |
 
 No perfil gpu, o hub baixa a versão oficial b12556 do llama.cpp (fixada por sha256, cerca de 39 MB) e roda três processos `llama-server` locais: a voz da Ceci, os ouvidos dela e o roteador.
 
@@ -73,7 +73,7 @@ O instalador tem 6 etapas:
 3. Instala o luke-voice no Claude Code.
 4. Pergunta a voz.
 5. Confere que o luke-voice está instalado e ativado.
-6. **Baixando a voz da Ceci (até 3 GB, só uma vez)** roda `node hub/setup.mjs`. Ela escolhe o perfil, baixa tudo e confere cada arquivo por sha256. Se o download for cortado, ele continua de onde parou. No perfil gpu, ela também faz um teste curto: a Ceci fala uma frase, os ouvidos dela escrevem de volta e o roteador responde a um cumprimento. Se o teste falhar, o setup baixa também a voz leve (de 320 a 480 MB) e as chamadas usam ela até o `/luke-voice setup` passar no teste.
+6. **Baixando a voz da Ceci (até 3,5 GB, só uma vez)** roda `node hub/setup.mjs`. Ela escolhe o perfil, baixa tudo e confere cada arquivo por sha256. Se o download for cortado, ele continua de onde parou. No perfil gpu, ela também faz um teste curto: a Ceci fala uma frase, os ouvidos dela escrevem de volta e o roteador responde a um cumprimento. Se o teste falhar, o setup baixa também a voz leve (de 320 a 480 MB) e as chamadas usam ela até o `/luke-voice setup` passar no teste.
 
 **Deu certo quando:** aparece a mensagem verde **Instalação concluída**. Se ele parar com **A instalação parou**, leia a linha **O que fazer**, resolva aquilo e rode de novo. Rodar de novo é sempre seguro.
 
@@ -144,13 +144,19 @@ A voz foi escolhida pelo dono, ouvindo:
 - O trecho foi deixado mais alegre (um pouco mais agudo, com mais melodia e 8% mais rápido), porque a leitura original soava sonolenta.
 - O dono comparou as candidatas de ouvido e escolheu esta.
 
-Em 40 frases em pt-BR pelo caminho de produção:
-- nenhuma frase falhou nem entrou em repetição;
-- os erros de palavras ficaram em 8% (Whisper large-v3-turbo), quase todos em palavras técnicas em inglês ("branch", "main") e em números escritos com algarismos.
+Desde a 0.10.0 a voz é o modelo 1.7B, que o dono ouviu como claramente melhor que o 0.6B. Em 40 frases em pt-BR pelo caminho de produção:
+- nenhuma frase falhou nem entrou em repetição (nenhuma em mais 100 gerações com 5 sementes também);
+- os erros de palavras ficaram em 8,9% (os ouvidos de produção), quase todos em palavras técnicas em inglês ("branch", "main") e em números escritos com algarismos.
 
-Palavras técnicas em inglês: a voz fala português, então lê algumas delas com regras do português ("token" vira "toque", "cache" vira "caixa"). O `speech-text.js` dá a ela uma grafia própria para 15 delas, escolhida de ouvido: várias grafias por palavra, e só ficou a que trazia a palavra em inglês de volta mais vezes. Em 10 frases novas ditas inteiras, o reconhecedor ouviu 12 de 24 termos em inglês (antes 7), sem perder nenhuma palavra em português. Pelo caminho real da janela, que corta a primeira oração mais curta, ouviu 10 de 24 (antes 9), e as leituras claramente em português ("caixa", "toque", "mergulho", "rei de mim") sumiram. Nenhuma grafia ajudou "branch", "main", "commit", "hooks" ou "TypeScript" neste modelo, então elas ficam como estão.
+No começo ela soava robótica, porque o tom quase não variava. Um painel automático (variação de tom e detectores de voz sintética, com gravações reais em pt-BR = 10 e o Kokoro = 3) deu 2,9 de 10 para a variação de tom dela. Com temperatura 0,9 em vez de 0,75, a melodia volta (6,2 de 10; a nota do painel foi de 7,6 para 8,8), e a nota do dono foi de 6 para 8,5.
 
-As perguntas terminam subindo, do jeito brasileiro: a janela sobe o tom do último meio segundo de uma pergunta depois que ela é gerada, sem mudar a duração (`window/engines/question-rise.js`). Em 20 perguntas, o fim agora sobe +3,4 semitons (antes +2,0, como uma afirmação), e o Whisper reconhece 9 de 20 como perguntas (antes 6). O dono escolheu essa versão de ouvido, entre três. `?voice-question=0` desliga.
+Palavras técnicas em inglês: a voz fala português, então lê algumas delas com regras do português ("changelog" vira "chão geloso", "cache" vira "caixa"). O `speech-text.js` dá a ela uma grafia própria para 11 delas. 34 palavras ganharam várias grafias cada, ditas em três frases e julgadas pelos ouvidos, depois conferidas em quatro frases novas. Uma grafia só fica quando trouxe a palavra em inglês de volta pelo menos duas vezes a mais nas sete frases. Com 5 sementes em 10 frases, os ouvidos acertaram 79 de 125 termos em inglês com as grafias, contra 63 sem elas. Nenhuma grafia ajudou "main", "README", "branch", "commit", "push" ou "lint", então elas ficam como estão.
+
+Perguntas: no português do Brasil, a pergunta de sim ou não sobe no fim, e a pergunta com palavra interrogativa ("o que", "quando") desce, como uma afirmação. A voz costuma terminar as duas retas. Subir o tom depois da geração (da 0.9.3 à 0.9.9) soou robótico para o dono. Cerca de 1 em 4 gerações do próprio modelo termina com a subida natural, e o dono deu 8,5 de 10 para a melhor entre 4 gerações. Cada geração leva cerca de 1 s e o motor faz uma por vez, então o hub (`hub/question-pick.mjs`) só faz gerações extras num tempo em que ninguém espera:
+- enquanto a frase antes da pergunta ainda toca (a janela diz quanto falta);
+- em segundo plano, com o motor parado, começando pelas perguntas que a Ceci mais faz. Qualquer fala de verdade interrompe na hora.
+
+A melhor geração de cada pergunta fica guardada em disco (`~/.luke-voice/cache/questions`) e sai na hora da próxima vez. Em 7 perguntas, nenhuma esperou mais do que antes. 2 de 7 subiram naturalmente na primeira vez, e 7 de 7 depois de um minuto parado. `?voice-question=0` desliga.
 
 ### Trocar a voz
 
@@ -209,7 +215,7 @@ A janela da chamada fala com o hub (`hub/server.mjs`, em 127.0.0.1:4848). Na voz
 - **Navegador (perfil light):** microfone, detector de voz, Whisper, `POST /brain`, Kokoro (ou Piper) para falar.
 - **Motor nativo (perfil gpu):** microfone, Silero VAD e Smart Turn, depois o hub (`/stt`, `/tts`, `/route`) e os `llama-server` locais: Qwen3-ASR (ouvidos), Qwen3-TTS (voz) e Qwen3.5 0.8B (roteador). Os pedidos vão para o `/brain`.
 
-O hub serve todos os arquivos de modelo a partir de `~/.luke-voice/models`, fixados por revisão do Hugging Face e sha256 (o projetor convertido do Qwen3-TTS, `qwen3-tts-0.6b-base-mmproj-icl-q8_0.gguf`, vem do prerelease `voice-models-v1` deste repositório no GitHub). A janela da chamada não baixa nada do Hugging Face. O manifesto é o `hub/models.mjs`; o manifesto e o motor do llama.cpp ficam em `hub/engine.mjs`; o `hub/setup.mjs` é o CLI de setup; o `hub/router.mjs` é o roteador.
+O hub serve todos os arquivos de modelo a partir de `~/.luke-voice/models`, fixados por revisão do Hugging Face e sha256 (a voz Qwen3-TTS 1.7B e o projetor convertidos, e o Qwen3-ASR em Q6, vêm do prerelease `voice-models-v2` deste repositório no GitHub). A janela da chamada não baixa nada do Hugging Face. O manifesto é o `hub/models.mjs`; o manifesto e o motor do llama.cpp ficam em `hub/engine.mjs`; o `hub/setup.mjs` é o CLI de setup; o `hub/router.mjs` é o roteador.
 
 ## Segurança
 
@@ -248,7 +254,7 @@ MIT. Escrito do zero; não divide código com outros mods de voz.
 
 A voz gratuita baixa na instalação partes de terceiros; nenhuma delas está neste repositório:
 - llama.cpp: MIT.
-- Qwen3-TTS 0.6B Base, Qwen3-ASR 0.6B e Qwen3.5 0.8B: Apache-2.0.
+- Qwen3-TTS 1.7B Base, Qwen3-ASR 0.6B e Qwen3.5 0.8B: Apache-2.0.
 - Pipecat Smart Turn v3.2: BSD-2-Clause.
 - Silero VAD: MIT.
 - Kokoro-82M: Apache-2.0.

@@ -191,7 +191,7 @@ ok "luke-voice $version instalado e ativado."
 
 voice_ready=false
 if [ "$provider" = 'local' ]; then
-  step 6 'Baixando a voz da Ceci (até 3 GB, só uma vez)'
+  step 6 'Baixando a voz da Ceci (até 3,5 GB, só uma vez)'
   install_path=$(printf '%s' "$list" | json "(Array.isArray(j)?j:[]).find(p=>p.id==='$PLUGIN')?.installPath") || install_path=''
   if [ -n "$install_path" ] && [ -f "$install_path/hub/setup.mjs" ]; then
     if node "$install_path/hub/setup.mjs"; then

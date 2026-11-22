@@ -180,3 +180,15 @@ try { await ensureFile(entry, ${JSON.stringify(file)}, { pollMs: 50 }); console.
     slow.close()
   }
 })
+
+test('native files the manifest no longer names are removed; current ones and other folders stay', async () => {
+  const { pruneModels, MODELS } = await import('./models.mjs')
+  const dir = mkdtempSync(join(tmpdir(), 'luke-voice-prune-'))
+  mkdirSync(join(dir, 'native'), { recursive: true })
+  mkdirSync(join(dir, 'turn'), { recursive: true })
+  const current = Object.keys(MODELS).find(p => p.startsWith('native/'))
+  for (const p of [current, 'native/qwen3-tts-0.6b-base-q8_0.gguf', 'native/qwen3-asr-0.6b-q8_0.gguf.part', 'native/notes.txt', 'turn/old.onnx']) writeFileSync(join(dir, ...p.split('/')), 'x')
+  assert.deepEqual(pruneModels({ dir }).sort(), ['native/qwen3-asr-0.6b-q8_0.gguf.part', 'native/qwen3-tts-0.6b-base-q8_0.gguf'])
+  for (const p of [current, 'native/notes.txt', 'turn/old.onnx']) assert.ok(existsSync(join(dir, ...p.split('/'))), p)
+  assert.deepEqual(pruneModels({ dir: join(dir, 'none') }), [])
+})

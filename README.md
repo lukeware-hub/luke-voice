@@ -22,11 +22,11 @@ luke-voice picks the profile by itself at install time:
 | | gpu profile ("natural voice") | light profile ("light voice") |
 | --- | --- | --- |
 | When | llama.cpp sees a GPU with at least 6 GB of video memory (NVIDIA, AMD or Intel through Vulkan on Windows and Linux; Apple Silicon through Metal on macOS arm64). | Everything else. |
-| Speaks | Qwen3-TTS 12Hz 0.6B Base, cloned at run time from `agent/ceci-voice.wav` and its transcript `agent/ceci-voice.txt`. | Kokoro-82M in the browser. Piper `pt_BR-faber` is the fallback on slow computers. |
-| Listens | Qwen3-ASR 0.6B. | Whisper base in the browser. |
+| Speaks | Qwen3-TTS 12Hz 1.7B Base, cloned at run time from `agent/ceci-voice.wav` and its transcript `agent/ceci-voice.txt`. | Kokoro-82M in the browser. Piper `pt_BR-faber` is the fallback on slow computers. |
+| Listens | Qwen3-ASR 0.6B (Q6). | Whisper base in the browser. |
 | Small talk | An instant local router, Qwen3.5 0.8B on the CPU. | Goes to Claude Haiku like everything else. |
 | Download | About 2.8 GB, once. No Python, no PyTorch. | About 320 MB, once (about 480 MB on a machine with a small GPU, where Kokoro runs in fp32 on WebGPU). |
-| Video memory in a call | About 5.0 GB for the voice and the ears together (measured on an RTX 3060 Ti). | None beyond the browser's. |
+| Video memory in a call | About 5.4 GB for the voice and the ears together, and about 3.2 GB of RAM for the whole engine (measured on an RTX 3060 Ti). | None beyond the browser's. |
 
 On the gpu profile, the hub downloads llama.cpp's official release build b12556 (pinned by sha256, about 39 MB) and runs three local `llama-server` processes: Ceci's voice, her ears and the router.
 
@@ -73,7 +73,7 @@ The installer has 6 steps:
 3. Installs the luke-voice mod into Claude Code.
 4. Asks for the voice.
 5. Checks the mod is installed and turned on.
-6. **Baixando a voz da Ceci (até 3 GB, só uma vez)** (downloading Ceci's voice) runs `node hub/setup.mjs`. It picks the profile, downloads everything and checks each file by sha256. Downloads can resume if they are cut. On the gpu profile it also runs a short test: Ceci says a line, her ears write it back, and the router answers a greeting. If the test fails, setup downloads the light voice too (320 to 480 MB) and calls use it until `/luke-voice setup` passes the test.
+6. **Baixando a voz da Ceci (até 3,5 GB, só uma vez)** (downloading Ceci's voice) runs `node hub/setup.mjs`. It picks the profile, downloads everything and checks each file by sha256. Downloads can resume if they are cut. On the gpu profile it also runs a short test: Ceci says a line, her ears write it back, and the router answers a greeting. If the test fails, setup downloads the light voice too (320 to 480 MB) and calls use it until `/luke-voice setup` passes the test.
 
 **Done when:** it ends with the green message **Instalação concluída** (installation complete). If it stops with **A instalação parou**, read the **O que fazer** (what to do) line, fix that one thing and run it again. Running it again is always safe.
 
@@ -144,13 +144,19 @@ The voice was chosen by the owner, listening:
 - The clip was made brighter (a little higher, more pitch movement, 8% faster), because the plain reading sounded sleepy.
 - The owner compared candidates by ear and picked this one.
 
-On 40 pt-BR sentences through the production path:
-- no sentence failed or looped;
-- word errors were 8% (Whisper large-v3-turbo), mostly English tech words ("branch", "main") and numbers written as digits.
+Since 0.10.0 the voice is the 1.7B model, which the owner heard as clearly better than the 0.6B. On 40 pt-BR sentences through the production path:
+- no sentence failed or looped (none in 100 more takes over 5 seeds either);
+- word errors were 8.9% (the production ears), mostly English tech words ("branch", "main") and numbers written as digits.
 
-English tech words: the voice speaks Portuguese, so it reads some of them with Portuguese rules ("token" as "toque", "cache" as "caixa"). `speech-text.js` gives it its own spelling for 15 of them, picked by ear: several spellings per word, kept only when the English word came back more often. On 10 new sentences said whole, the ASR heard 12 of 24 English terms (was 7), with no Portuguese word lost. Through the window's real path, which cuts the first clause short, it heard 10 of 24 (was 9), and the plainly Portuguese readings ("caixa", "toque", "mergulho", "rei de mim") were gone. No spelling helped "branch", "main", "commit", "hooks" or "TypeScript" on this model, so they stay as written.
+She sounded robotic at first, because her pitch barely moved. An automatic panel (pitch spread and synthetic-speech detectors, anchored on real pt-BR recordings = 10 and Kokoro = 3) rated her pitch spread 2.9 of 10. Sampling at temperature 0.9 instead of 0.75 gives her melody back (6.2 of 10; the panel's score went from 7.6 to 8.8), and the owner's rating went from 6 to 8.5.
 
-Questions end with a Brazilian rise: the window raises the pitch of the last half second of a question after it is made, keeping its length (`window/engines/question-rise.js`). On 20 questions the end now rises +3.4 semitones (was +2.0, like a statement), and Whisper hears 9 of 20 as questions (was 6). The owner picked this by ear among three versions. `?voice-question=0` turns it off.
+English tech words: the voice speaks Portuguese, so it reads some of them with Portuguese rules ("changelog" as "chão geloso", "cache" as "caixa"). `speech-text.js` gives it its own spelling for 11 of them. 34 words got several spellings each, said in three sentences and judged by the ears, then checked on four new sentences. A spelling is kept only when it brought the English word back at least twice more over the seven sentences. Over 5 seeds on 10 sentences, the ears heard 79 of 125 English terms right with the spellings, against 63 without. No spelling helped "main", "README", "branch", "commit", "push" or "lint", so they stay as written.
+
+Questions: a Brazilian yes/no question rises at the end, and one with a question word ("o que", "quando") falls, like a statement. The voice usually ends both flat. Raising the pitch after synthesis (0.9.3 to 0.9.9) sounded robotic to the owner. About 1 in 4 takes of the model itself ends with a natural rise, and the owner rated the best of 4 takes 8.5 of 10. A take costs about 1 s and the engine makes one at a time, so the hub (`hub/question-pick.mjs`) only makes more takes in time nobody waits for:
+- while the line before the question still plays (the window says how long);
+- in the background when the engine is idle, starting with the questions Ceci asks most. Any live line stops it at once.
+
+The best take of each question is kept on disk (`~/.luke-voice/cache/questions`) and served at once next time. On 7 questions, none waited longer than before. 2 of 7 rose naturally the first time, and 7 of 7 after a minute idle. `?voice-question=0` turns it off.
 
 ### Switching the voice
 
@@ -239,7 +245,7 @@ Claude session ── luke-voice mod ── events, long-poll ──┤
 - `hub/launch.mjs` starts the hub detached when it is down. The hub exits after ten idle minutes. `LUKE_VOICE_PORT` moves it (and the mod follows).
 - `hub/agent.mjs` creates or updates the ElevenLabs agent from `agent/agent.json` and `agent/prompt.md` (plain REST, no packages). Change those files and the next ElevenLabs call syncs the agent. The free voice's brain reads `agent/brain-prompt.md`.
 - Models and engine, for the free voice:
-  - `hub/models.mjs` is the manifest of every model file, pinned by Hugging Face revision and sha256 (the converted Qwen3-TTS projector `qwen3-tts-0.6b-base-mmproj-icl-q8_0.gguf` comes from this repo's GitHub prerelease `voice-models-v1`).
+  - `hub/models.mjs` is the manifest of every model file, pinned by Hugging Face revision and sha256 (the converted Qwen3-TTS 1.7B voice and projector, and the Q6 Qwen3-ASR, come from this repo's GitHub prerelease `voice-models-v2`).
   - `hub/engine.mjs` holds the llama.cpp build manifest and starts the `llama-server` processes.
   - `hub/setup.mjs` is the setup CLI the installers and `/luke-voice setup` run.
   - `hub/router.mjs` is the instant local router for small talk.
@@ -299,7 +305,7 @@ MIT. Written from scratch; it shares no code with other voice mods.
 
 The free voice downloads third-party parts at install time; none of them is in this repository:
 - llama.cpp: MIT.
-- Qwen3-TTS 0.6B Base, Qwen3-ASR 0.6B and Qwen3.5 0.8B: Apache-2.0.
+- Qwen3-TTS 1.7B Base, Qwen3-ASR 0.6B and Qwen3.5 0.8B: Apache-2.0.
 - Pipecat Smart Turn v3.2: BSD-2-Clause.
 - Silero VAD: MIT.
 - Kokoro-82M: Apache-2.0.

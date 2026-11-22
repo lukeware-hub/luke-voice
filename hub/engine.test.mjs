@@ -23,7 +23,8 @@ test('every llama.cpp build is an official GitHub release asset pinned by sha256
   assert.equal(platformKey('darwin', 'x64'), null)
 })
 
-test('every native service names models that exist in the manifest, and the gpu download stays under 3 GB', () => {
+// The 1.7B voice (0.10.0) took the gpu download from ~2.5 to ~3.3 GB.
+test('every native service names models that exist in the manifest, and the gpu download stays under 3.5 GB', () => {
   let bytes = 0
   for (const [name, spec] of Object.entries(SERVICES)) {
     for (const path of spec.models) {
@@ -33,13 +34,18 @@ test('every native service names models that exist in the manifest, and the gpu 
   }
   bytes += Object.values(MODELS).filter(m => m.group === 'turn').reduce((n, m) => n + m.size, 0)
   bytes += Math.max(...Object.values(BINARIES).map(b => b.size))
-  assert.ok(bytes < 3e9, `${(bytes / 1e9).toFixed(2)} GB`)
+  assert.ok(bytes < 3.5e9, `${(bytes / 1e9).toFixed(2)} GB`)
 })
 
-test('the voice runs with a small context and batch, which saves video memory and keeps the audio identical', () => {
-  const args = SERVICES.tts.args(['m.gguf', 'mm.gguf'])
-  const flag = name => args[args.indexOf(name) + 1]
-  assert.deepEqual([flag('-c'), flag('-ub'), flag('-np'), flag('-ngl')], ['1024', '256', '1', '99'])
+test('the servers run lean: small contexts, no busy-waiting, no prompt cache, few CPU threads on the GPU ones', () => {
+  const flags = name => {
+    const args = SERVICES[name].args(['m.gguf', 'mm.gguf'])
+    return Object.fromEntries(['-c', '-ub', '-np', '-ngl', '--poll', '-cram', '-t', '-lm'].map(f => [f, args.includes(f) ? args[args.indexOf(f) + 1] : null]))
+  }
+  assert.deepEqual(flags('tts'), { '-c': '1024', '-ub': '256', '-np': '1', '-ngl': '99', '--poll': '0', '-cram': '0', '-t': '2', '-lm': 'none' })
+  assert.deepEqual(flags('asr'), { '-c': '1536', '-ub': '256', '-np': '1', '-ngl': '99', '--poll': '0', '-cram': '0', '-t': '2', '-lm': 'none' })
+  // The router runs on the CPU: all its threads, and its file stays mapped.
+  assert.deepEqual(flags('router'), { '-c': '2048', '-ub': null, '-np': '1', '-ngl': '0', '--poll': '0', '-cram': '0', '-t': null, '-lm': null })
 })
 
 test('each profile downloads its own groups at install time, within budget', () => {
@@ -47,7 +53,7 @@ test('each profile downloads its own groups at install time, within budget', () 
   assert.deepEqual(profileGroups('light', []), ['turn', 'light', 'light-cpu'])
   assert.deepEqual(profileGroups('light', [{ name: 'Vulkan0' }]), ['turn', 'light', 'light-webgpu'])
   const build = Math.max(...Object.values(BINARIES).map(b => b.size))
-  assert.ok(groupBytes(profileGroups('gpu')) + build < 3e9)
+  assert.ok(groupBytes(profileGroups('gpu')) + build < 3.5e9) // the 1.7B voice: ~3.3 GB
   // The light profile on the CPU: about a third of a gigabyte; with WebGPU, Kokoro is fp32.
   assert.ok(groupBytes(profileGroups('light', [])) < 350e6, String(groupBytes(profileGroups('light', []))))
   assert.ok(groupBytes(profileGroups('light', [{}])) + build < 550e6)
