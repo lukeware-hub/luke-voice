@@ -2,7 +2,7 @@
 // ~/.luke-voice/models (at install time by setup.mjs, or on first use), resumed when a download is
 // cut, and checked before use. The hub serves them to the call window at /models/.
 import { createHash } from 'node:crypto'
-import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { statfs } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { Readable } from 'node:stream'
@@ -250,11 +250,34 @@ async function isGood(entry, file) {
   return true
 }
 
+// The pid a lock file holds, or 0 when it is gone or unreadable.
+const lockOwner = lock => {
+  try {
+    return Number(readFileSync(lock, 'utf8')) || 0
+  } catch {
+    return 0
+  }
+}
+
+const lockAge = lock => {
+  try {
+    return Date.now() - statSync(lock).mtimeMs
+  } catch {
+    return 0
+  }
+}
+
+// Removes the lock only while it still holds this pid: another process may have taken it over.
+const releaseLock = (lock, pid) => {
+  if (lockOwner(lock) === pid) rmSync(lock, { force: true })
+}
+
 // Another process can download the same file at the same time: the hub on a first call, and
 // setup.mjs from the installer or /luke-voice setup. Both would write the same `.part`, and both
-// downloads would fail their check. `${file}.lock` holds the writer's pid; the other process waits
-// for it (showing its progress), then uses the file. A lock whose process is gone, or whose
-// download stopped growing for `staleMs`, is taken over.
+// downloads would fail their check. `${file}.lock` holds the writer's pid, and the writer touches it
+// while it downloads (a heartbeat: a stalled network can leave its `.part` still for minutes before
+// the download resumes). The other process waits for it (showing its progress), then uses the
+// file. A lock is taken over only when its process is gone, or its heartbeat stopped for `staleMs`.
 async function downloadLocked(entry, file, { request, onProgress, pollMs, staleMs }) {
   const lock = `${file}.lock`
   const part = `${file}.part`
@@ -266,38 +289,44 @@ async function downloadLocked(entry, file, { request, onProgress, pollMs, staleM
     } catch (error) {
       if (error.code !== 'EEXIST') throw error
     }
-    let owner = 0
-    try {
-      owner = Number(readFileSync(lock, 'utf8'))
-    } catch {
-      continue // Released meanwhile.
+    const owner = lockOwner(lock)
+    if (!owner) {
+      // Released meanwhile, or created and not written yet; an empty one a crash left goes once stale.
+      if (lockAge(lock) > staleMs) rmSync(lock, { force: true })
+      else if (existsSync(lock)) await sleep(Math.min(pollMs, 50))
+      continue
     }
-    if (owner && (owner === process.pid || !isAlive(owner))) {
-      rmSync(lock, { force: true })
+    if (owner === process.pid || !isAlive(owner) || lockAge(lock) > staleMs) {
+      releaseLock(lock, owner)
       continue
     }
     let seen = sizeOf(part)
-    let grewAt = Date.now()
-    while (existsSync(lock)) {
+    while (lockOwner(lock) === owner && isAlive(owner) && lockAge(lock) <= staleMs) {
       await sleep(pollMs)
       const now = sizeOf(part)
       if (now !== seen) {
         seen = now
-        grewAt = Date.now()
         if (now) onProgress?.(now, entry.size)
-      } else if (Date.now() - grewAt > staleMs) {
-        rmSync(lock, { force: true })
       }
     }
     if (await isGood(entry, file)) return file
   }
+  const heartbeat = setInterval(() => {
+    try {
+      if (lockOwner(lock) === process.pid) utimesSync(lock, new Date(), new Date())
+    } catch {
+      // Gone meanwhile: the waiters see that.
+    }
+  }, Math.max(pollMs, Math.floor(staleMs / 4)))
+  heartbeat.unref()
   try {
     // The other process may have finished just before this one took the lock.
     if (await isGood(entry, file)) return file
     rmSync(file, { force: true })
     return await download(entry, file, { request, onProgress })
   } finally {
-    rmSync(lock, { force: true })
+    clearInterval(heartbeat)
+    releaseLock(lock, process.pid)
   }
 }
 

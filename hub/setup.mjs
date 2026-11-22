@@ -22,6 +22,18 @@ import { route } from './router.mjs'
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const VOICE = join(ROOT, 'agent', 'ceci-voice.wav')
 const TEST_LINE = 'Oi, eu sou a Ceci. Estou pronta!'
+// The voice must be made faster than it is spoken, with margin, or Ceci stutters in a call. An
+// integrated GPU (shared memory reported as video memory) can pass every other check and still be
+// too slow; a discrete one makes the test line in about half its length.
+const MAX_REAL_TIME = 0.9
+
+// How long a WAV lasts, in ms: its bytes after the header at the header's byte rate (Qwen3-TTS
+// writes 24 kHz 16-bit mono, assumed when there is no header).
+function wavMs(wav) {
+  const hasHeader = wav.length > 44 && wav.toString('latin1', 0, 4) === 'RIFF' && wav.toString('latin1', 8, 12) === 'WAVE'
+  const byteRate = hasHeader ? wav.readUInt32LE(28) : 0
+  return ((wav.length - (hasHeader ? 44 : 0)) / (byteRate || 48_000)) * 1000
+}
 
 const gb = bytes => `${(bytes / 1e9).toFixed(2)} GB`
 const mb = bytes => `${Math.round(bytes / 1e6)} MB`
@@ -104,9 +116,12 @@ export async function smokeTest(profile, { engine = createEngine(), voice = VOIC
     const tts = engine.url('tts')
     if (tts) {
       const body = { input: TEST_LINE, lang: 'pt', response_format: 'wav', n_predict: maxFrames(TEST_LINE), ...VOICE_SETTINGS, ...(refB64 ? { speaker_ref_b64: refB64, speaker_ref_text: refText } : {}) }
+      const asked = Date.now()
       const res = await fetch(`${tts}/v1/audio/speech`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
       const wav = Buffer.from(await res.arrayBuffer())
+      const madeMs = Date.now() - asked
       if (!res.ok || wav.length < 24_000) problems.push('a voz não gerou áudio')
+      else if (madeMs > MAX_REAL_TIME * wavMs(wav)) problems.push(`a placa de vídeo é lenta demais para a voz natural (${(madeMs / 1000).toFixed(1)} s para ${(wavMs(wav) / 1000).toFixed(1)} s de fala)`)
       const asr = engine.url('asr')
       if (asr && res.ok) {
         const form = new FormData()

@@ -273,7 +273,9 @@ Claude session ── luke-voice mod ── events, long-poll ──┤
 - Three secrets:
   - the service token in `~/.luke-voice/hub.json` (mode 600) lets a mod subscribe;
   - each subscription gets its own session token for its inbox;
-  - the window key (in the window URL) can send commands but cannot read an inbox. The hub's `/stt`, `/tts` and `/route` also need the window key.
+  - the window key can send commands but cannot read an inbox. The hub's `/stt`, `/tts` and `/route` also need the window key.
+- The window key never goes on a command line, where other users of the computer could read it. The hub opens the window with a one-time launch code that expires in two minutes (fifteen when the user has to open the address by hand). The window trades it once for the key, keeps the key in its tab's sessionStorage so a reload still works, and removes the code from the address bar.
+- The model and vendor files (`/models/`, `/vendor/`) start large downloads, so they are served only to the window: a same-origin `Sec-Fetch-Site`, or, from a browser that does not send it, the window's own address as `Origin` or `Referer`, or the window key.
 - The agent requires signed tokens, so its id alone cannot start a call.
 - Prompts reach Claude framed as relayed by luke-voice, and the pane lists each one.
 - The call window loads the ElevenLabs client from a pinned CDN file checked with Subresource Integrity.

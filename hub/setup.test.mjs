@@ -136,6 +136,39 @@ test('the install test asks the ears with the glossary, so they write "Ceci" and
   }
 })
 
+test('a voice made slower than real time (an integrated GPU) fails the install test, so the light voice is used', async () => {
+  const { createServer } = await import('node:http')
+  // 0.3 s of 48 kHz 16-bit mono speech, by its WAV header (at 24 kHz it would last twice as long).
+  const wav = Buffer.alloc(44 + 28_800)
+  wav.write('RIFF', 0)
+  wav.write('WAVEfmt ', 8)
+  wav.writeUInt32LE(96_000, 28)
+  wav.write('data', 36)
+  let delayMs = 0
+  const server = createServer((req, res) => {
+    req.resume()
+    req.on('end', () => {
+      if (req.url === '/v1/audio/speech') return setTimeout(() => res.end(wav), delayMs)
+      if (req.url === '/v1/audio/transcriptions') return res.end(JSON.stringify({ text: 'language Portuguese<asr_text>Oi, eu sou a Ceci. Estou pronta!' }))
+      res.end(JSON.stringify({ choices: [{ message: { content: '{"intent":"greeting"}' } }] }))
+    })
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const url = `http://127.0.0.1:${server.address().port}`
+  const engine = { start: async () => {}, status: () => ({ tts: true, asr: true, router: true }), warm: async () => {}, url: () => url, stop: () => {} }
+  try {
+    delayMs = 450
+    const slow = await smokeTest({ profile: 'gpu' }, { engine, voice: 'missing.wav' })
+    assert.equal(slow.ok, false)
+    assert.match(slow.problems.join('; '), /a placa de vídeo é lenta demais para a voz natural/)
+    delayMs = 0
+    const fast = await smokeTest({ profile: 'gpu' }, { engine, voice: 'missing.wav' })
+    assert.equal(fast.ok, true, fast.problems.join('; '))
+  } finally {
+    server.close()
+  }
+})
+
 test('a first failed test is run again: one failure alone does not switch the calls to the light voice', async () => {
   const gpu = { profile: 'gpu', reason: 'RTX, 8192 MiB', devices: [{ name: 'Vulkan0', mib: 8192 }], exe: 'llama-server' }
   const results = [{ ok: false, ms: 1, heard: '', problems: ['o servidor tts não iniciou'] }, { ok: true, ms: 4000, heard: 'Oi, eu sou a Ceci.', problems: [] }]

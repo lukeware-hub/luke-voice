@@ -561,13 +561,13 @@ test('the Node.js on the PATH runs the hub when the installer brought none', asy
 })
 
 test('when no browser could open the call window, the mod gives the address instead of "opening"', async ($, on) => {
-  showBody = { ok: true, isWindowOpen: false, isOpened: false, url: 'http://127.0.0.1:4848/?k=abc&call=1' }
+  showBody = { ok: true, isWindowOpen: false, isOpened: false, url: 'http://127.0.0.1:4848/?n=abc&call=1' }
   engine(on)
 
   const text = (await $.command.run(run('call'))).text
 
   expect(text).toContain('Não consegui abrir a janela da chamada')
-  expect(text).toContain('http://127.0.0.1:4848/?k=abc&call=1')
+  expect(text).toContain('http://127.0.0.1:4848/?n=abc&call=1')
   expect(text).not.toContain('está abrindo')
   await $.command.run(run('off'))
 })
@@ -649,6 +649,26 @@ test('the status line under the prompt shows only when something needs attention
   // Connected and healthy: the line is cleared, never filled.
   expect(JSON.stringify(shown)).not.toContain('Claude is')
   expect(JSON.stringify(shown)).not.toContain('working')
+})
+
+test('only a permission prompt or a question for the user marks the session "Precisa de você"; an idle reminder does not', async ($, on) => {
+  const { calls } = engine(on, [], { status: 200, body: { commands: [] } })
+  on('classic.Notification', () => ({}))
+
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/subscribe'))
+  // After a finished turn, Claude Code reminds the user it is waiting: nothing needs them.
+  await $.classic.Notification({ message: 'Claude is waiting for your input', notification_type: 'idle_prompt' })
+  await $.classic.Notification({ message: 'luke-voice: chamada encerrada', notification_type: 'plugin_notification' })
+  await $.classic.Notification({ message: 'Claude needs your permission to use Bash', notification_type: 'permission_prompt' })
+  await $.classic.Notification({ message: 'The MCP server asks for your answer', notification_type: 'elicitation_dialog' })
+  await until(() => calls.some(c => c.path === '/events' && JSON.stringify(c.body).includes('MCP server')))
+  await $.command.run(run('off'))
+
+  const attention = calls.filter(c => c.path === '/events').map(c => JSON.stringify(c.body)).filter(b => b.includes('"attention"'))
+  expect(attention.length).toBe(2)
+  expect(attention[0]).toContain('needs your permission')
+  expect(attention[1]).toContain('MCP server')
 })
 
 const REQUEST: BrainRequest = {

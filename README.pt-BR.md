@@ -233,6 +233,8 @@ O hub serve todos os arquivos de modelo a partir de `~/.luke-voice/models`, fixa
 - Todo arquivo de modelo é fixado por revisão e sha256 e conferido antes do uso.
 - Os servidores nativos escutam só em 127.0.0.1, em portas aleatórias.
 - O `/stt`, o `/tts` e o `/route` do hub exigem a chave da janela.
+- A chave da janela nunca vai na linha de comando, onde outros usuários do computador poderiam lê-la. O hub abre a janela com um código de uso único que expira em dois minutos (quinze quando o usuário precisa abrir o endereço à mão). A janela troca o código pela chave uma vez, guarda a chave no sessionStorage da aba para que recarregar continue funcionando, e tira o código da barra de endereço.
+- Os arquivos de modelo e de terceiros (`/models/`, `/vendor/`) disparam downloads grandes, então só são servidos para a janela: `Sec-Fetch-Site` da mesma origem, ou, num navegador que não o envia, o endereço da própria janela como `Origin` ou `Referer`, ou a chave da janela.
 
 Os demais detalhes de segurança estão no [README.md](README.md#security), em inglês.
 

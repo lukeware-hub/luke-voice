@@ -976,9 +976,12 @@ export const register: Register = (on, options) => {
     return result
   })
 
+  // "Precisa de você" only when Claude waits on the user: a permission prompt or a question
+  // (elicitation_dialog). Not the reminder after a finished turn (idle_prompt), nor a mod's own
+  // notification (plugin_notification). Without a type, the message says whether it is a permission.
   on('classic.Notification', async ($, e, next) => {
-    const message = (e as unknown as { message?: string }).message
-    if (message) report($, { kind: 'attention', text: short(message, 300) })
+    const { message, notification_type: type } = e as unknown as { message?: string; notification_type?: string }
+    if (message && /permission|elicitation/i.test(type || message)) report($, { kind: 'attention', text: short(message, 300) })
     return next(e)
   }).catch(($, e, next) => next(e))
 
