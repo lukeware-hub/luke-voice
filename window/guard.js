@@ -32,10 +32,12 @@ const normalize = text =>
     .trim()
 
 // A short utterance asking for silence: "silenciar", "pode silenciar", "modo silêncio".
-// Long sentences that only mention the word (a task about silent mode) do not count.
+// Long sentences that only mention the word (a task about silent mode) do not count, nor asking to
+// leave it ("sai do modo silêncio", "chega de silêncio"): that is the user speaking, which ends it.
+const LEAVE = /\b(sai|sair|saia|desliga|desligar|desativa|desativar|tira|tirar|acaba|acabar|chega de)\b/
 export function asksForSilence(message) {
   const words = normalize(message).split(/\s+/).filter(Boolean)
-  if (words.length === 0 || words.length > 4) return false
+  if (words.length === 0 || words.length > 4 || LEAVE.test(words.join(' '))) return false
   return words.includes('silenciar') || words.includes('silencio') || words.includes('silencia')
 }
 

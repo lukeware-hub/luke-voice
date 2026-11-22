@@ -90,7 +90,9 @@ export function createVad(options = {}) {
     push(frame, { isSpeaking = false } = {}) {
       const level = rms(frame)
       const normalBar = Math.max(o.minLevel, floor * o.ratio)
-      const bar = normalBar * (isSpeaking ? o.bargeRatio : 1)
+      // The higher bar only keeps Ceci's voice from starting a turn: once the user is talking, Ceci
+      // starting a line must not make their words count as quiet and end the turn under them.
+      const bar = normalBar * (isSpeaking && !inSpeech ? o.bargeRatio : 1)
       const isLoud = level >= bar
 
       // The room got louder: every frame above the bar for creepFrames, and Ceci quiet (her voice
