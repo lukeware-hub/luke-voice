@@ -261,7 +261,7 @@ Ok "luke-voice $($entry.version) instalado e ativado."
 
 $voiceReady = $false
 if ($provider -eq 'local') {
-  Step 6 'Baixando a voz da Ceci (até 3 GB, só uma vez)'
+  Step 6 'Baixando a voz da Ceci (até 3,5 GB, só uma vez)'
   $setup = if ($entry.installPath) { Join-Path $entry.installPath 'hub\setup.mjs' } else { '' }
   if ($setup -and (Test-Path $setup)) {
     & node $setup

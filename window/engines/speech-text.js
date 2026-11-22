@@ -48,29 +48,25 @@ const RESPELL = {
   elevenlabs: 'éleven labs',
 }
 
-// The native voice (Qwen3-TTS, told to speak Portuguese) reads some English tech words with
-// Portuguese rules ("token" as "toque", "cache" as "caixa", "merge" as "méxico"). Each spelling here
-// was picked by ear: several spellings per word in three sentences, kept only when the English word
-// came back more often, then checked on new sentences (whole: English terms heard 7/24 before,
-// 12/24 after; cut into chunks as the window does: 9/24 and 10/24, with "caixa", "toque" and
-// "mergulho" gone; no Portuguese word lost). A capital letter alone is enough for some. Words that no spelling
-// helped (branch, main, commit, hooks, TypeScript) stay as written. Keys are lower case.
+// The native voice (Qwen3-TTS 1.7B, told to speak Portuguese) reads some English tech words with
+// Portuguese rules ("changelog" as "chão geloso", "cache" as "caixa"). Each spelling here was
+// picked on the production path: several spellings per word in three sentences, judged by the ears
+// (Qwen3-ASR, no glossary), then checked on four new sentences. A spelling is kept only when it
+// brought the English word back at least twice more over the seven sentences and did not lose on
+// the new ones (34 words, 11 kept). A capital letter alone is enough for some. Words that no
+// spelling helped (main, README, branch, commit, push, lint) stay as written. Keys are lower case.
 const NATIVE_RESPELL = {
-  merge: 'Merge',
   feature: 'Feature',
-  'pull request': 'Pull Request',
-  backend: 'back-end',
-  frontend: 'Front End',
-  staging: 'Staging',
+  review: 'Riviú',
+  backend: 'Back End',
   endpoint: 'end-point',
-  token: 'tôquen',
-  cache: 'quéche',
-  docker: 'dócker',
+  token: 'touken',
+  cache: 'Cache',
   changelog: 'tchêindj log',
-  state: 'stêit',
-  store: 'Store',
-  'force push': 'fórce push',
-  readme: 'Read Me',
+  framework: 'Framework',
+  hooks: 'ruks',
+  state: 'State',
+  rebase: 're base',
 }
 const NATIVE_RE = new RegExp(
   `(?<![\\p{L}\\d-])(${Object.keys(NATIVE_RESPELL).sort((a, b) => b.length - a.length).map(k => k.replace(' ', '\\s+')).join('|')})(?![\\p{L}\\d-])`,

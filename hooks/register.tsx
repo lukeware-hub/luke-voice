@@ -625,7 +625,7 @@ function profileText(h: EngineHealth) {
 }
 
 // /luke-voice setup: downloads and checks the free voice now (as the installer does), instead of
-// on the first call. With luke-voice on, the hub does it in the background (up to 3 GB with a GPU)
+// on the first call. With luke-voice on, the hub does it in the background (up to 3.5 GB with a GPU)
 // and /luke-voice status shows the progress; with it off, hub/setup.mjs runs here, for at most ten
 // minutes, and a cut download resumes on the next run.
 async function setupCommand($: EngineInterface) {

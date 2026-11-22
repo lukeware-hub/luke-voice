@@ -10,8 +10,9 @@ import { fileURLToPath } from 'node:url'
 
 import { conversationToken, credits, ensureAgent, outOfCreditsMessage } from './agent.mjs'
 import { PORT, isMainModule, stateDir, stateFile } from './paths.mjs'
-import { ASR_GLOSSARY, VOICE_SETTINGS, createEngine, maxFrames, prepareEngine, profileReady, readProfile } from './engine.mjs'
+import { ASR_GLOSSARY, SERVICES, VOICE_SETTINGS, createEngine, maxFrames, prepareEngine, profileReady, readProfile } from './engine.mjs'
 import { ensureModel } from './models.mjs'
+import { COMMON_QUESTIONS, MAX_PICK_CHARS, createQuestionTakes, isYesNoQuestion } from './question-pick.mjs'
 import { route as routeUtterance } from './router.mjs'
 import { contentType, vendorFile } from './vendor.mjs'
 
@@ -41,7 +42,6 @@ const STATIC = {
   '/engines/speech-text.js': ['engines/speech-text.js', 'text/javascript; charset=utf-8'],
   '/engines/fast-path.js': ['engines/fast-path.js', 'text/javascript; charset=utf-8'],
   '/engines/turn-join.js': ['engines/turn-join.js', 'text/javascript; charset=utf-8'],
-  '/engines/question-rise.js': ['engines/question-rise.js', 'text/javascript; charset=utf-8'],
   '/engines/progress.js': ['engines/progress.js', 'text/javascript; charset=utf-8'],
   '/engines/vad.js': ['engines/vad.js', 'text/javascript; charset=utf-8'],
   '/engines/piper-ids.js': ['engines/piper-ids.js', 'text/javascript; charset=utf-8'],
@@ -140,7 +140,7 @@ export function needsPrepare(chosen, { isReady, override = '' }) {
   return ['gpu', 'light'].includes(override) && chosen.profile !== override
 }
 
-export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, engine = null, profile = () => null, voiceRef = null, onLocalVoice = () => {}, onSetup = () => ({ started: false }), engineState = () => 'off', log = () => {}, onShutdown = () => process.exit(0) }) {
+export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, engine = null, profile = () => null, voiceRef = null, onLocalVoice = () => {}, onSetup = () => ({ started: false }), engineState = () => 'off', log = () => {}, onShutdown = () => process.exit(0), questionsDir = join(stateDir(), 'cache', 'questions') }) {
   const sessions = new Map() // token -> session
   const replaced = new Set() // tokens a newer subscription of the same Claude session took over
   const streams = new Set() // window SSE responses
@@ -434,27 +434,19 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     return send(res, 200, { text: String(text).replace(/^[\s\S]*<asr_text>/, '').trim(), ms: Date.now() - started })
   }
 
-  // Ceci's voice on the native engine (Qwen3-TTS), streamed as WAV while it is made.
+  // Ceci's voice on the native engine (Qwen3-TTS), streamed as WAV while it is made. A short yes/no
+  // question is served from its kept takes when one rises naturally (question-pick.mjs).
   let voiceRefB64 = null
   let voiceRefText = null
-  async function nativeTts(req, res) {
-    const url = engine?.url('tts')
-    if (!url) return send(res, 503, { error: 'The native voice engine is not running.' })
-    const body = await readBody(req)
-    // The window sends chunks of at most 220 characters. The engine's 1024 context holds the
-    // reference plus ~380 characters; past that the audio would be cut short.
-    const text = String(body.text ?? '').slice(0, MAX_TTS_CHARS).trim()
-    if (!text) return send(res, 400, { error: 'Nothing to say.' })
+  let questions = null
+  const loadVoiceRef = () => {
     voiceRefB64 ??= voiceRef && existsSync(voiceRef) ? readFileSync(voiceRef).toString('base64') : ''
     // The transcript of the reference: with it, llama.cpp clones Ceci from the reference codes (ICL).
     voiceRefText ??= voiceRef && existsSync(voiceRef.replace(/\.wav$/, '.txt')) ? readFileSync(voiceRef.replace(/\.wav$/, '.txt'), 'utf8').trim() : ''
-    // The window hangs up when the user talks over Ceci: stop the generation with it, so the
-    // engine's single slot is free for the next answer. The request already closed after its body
-    // was read, so it is the response that tells.
-    const stop = new AbortController()
-    res.on('close', () => stop.abort())
-    // /tts streams with stream:true (on /v1/audio/speech it would need stream_format).
-    const upstream = await fetch(`${url}/tts`, {
+  }
+  // /tts streams with stream:true (on /v1/audio/speech it would need stream_format).
+  const speak = (url, text, signal, seed) =>
+    fetch(`${url}/tts`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -463,15 +455,71 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
         stream: true,
         response_format: 'wav',
         ...VOICE_SETTINGS,
+        ...(seed === undefined ? {} : { seed }),
         n_predict: maxFrames(text),
         ...(voiceRefB64 ? { speaker_ref_b64: voiceRefB64, ...(voiceRefText ? { speaker_ref_text: voiceRefText } : {}) } : {}),
       }),
-      signal: stop.signal,
+      signal,
     }).catch(() => null)
+  const questionTakes = () => {
+    loadVoiceRef()
+    questions ??= createQuestionTakes({
+      dir: questionsDir,
+      // A take belongs to one voice: the model, the sampling and the reference clip.
+      voiceKey: [...SERVICES.tts.models, JSON.stringify(VOICE_SETTINGS), createHash('sha1').update(voiceRefB64 + voiceRefText).digest('hex')].join('\n'),
+      log,
+      say: async (text, seed, signal) => {
+        const url = engine?.url('tts')
+        const take = url ? await speak(url, text, signal, seed) : null
+        if (!take?.ok || !take.body) return null
+        try {
+          return Buffer.from(await take.arrayBuffer())
+        } catch {
+          return null // stopped
+        }
+      },
+    })
+    return questions
+  }
+  async function nativeTts(req, res) {
+    const url = engine?.url('tts')
+    if (!url) return send(res, 503, { error: 'The native voice engine is not running.' })
+    const body = await readBody(req)
+    // The window sends chunks of at most 220 characters. The engine's 1024 context holds the
+    // reference plus ~380 characters; past that the audio would be cut short.
+    const text = String(body.text ?? '').slice(0, MAX_TTS_CHARS).trim()
+    if (!text) return send(res, 400, { error: 'Nothing to say.' })
+    loadVoiceRef()
+    // A live line: the background question search stops until the engine is idle again.
+    const done = questionTakes().live()
+    // The window hangs up when the user talks over Ceci: stop the generation with it, so the
+    // engine's single slot is free for the next answer. The request already closed after its body
+    // was read, so it is the response that tells.
+    const stop = new AbortController()
+    res.on('close', () => {
+      stop.abort()
+      done()
+    })
+    const isQuestion = body.pick !== false && isYesNoQuestion(text) && text.length <= MAX_PICK_CHARS
+    if (isQuestion) {
+      const wav = await questionTakes().take(text, { budget: Math.max(0, Number(body.budget) || 0), signal: stop.signal })
+      if (stop.signal.aborted) return res.end()
+      if (wav) {
+        res.writeHead(200, { 'content-type': 'audio/wav', 'cache-control': 'no-store' })
+        return res.end(wav)
+      }
+    }
+    const upstream = await speak(url, text, stop.signal)
     if (!upstream?.ok || !upstream.body) return send(res, 502, { error: `voice engine ${upstream?.status ?? 'unreachable'}` })
     res.writeHead(200, { 'content-type': 'audio/wav', 'cache-control': 'no-store' })
+    const said = []
     try {
-      for await (const chunk of upstream.body) res.write(chunk)
+      for await (const chunk of upstream.body) {
+        res.write(chunk)
+        if (isQuestion) said.push(chunk)
+      }
+      // The live take of a question is kept too: it may already rise, and the search goes on from it.
+      if (isQuestion && !stop.signal.aborted) questionTakes().remember(text, VOICE_SETTINGS.seed, Buffer.concat(said))
     } catch {
       // The window hung up (barge-in): the generation was aborted with it.
     }
@@ -662,6 +710,9 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
   server.on('close', () => clearInterval(sweep))
   server.idleFor = () => Date.now() - lastBusy
   server.setEngineDownload = setEngineDownload
+  // Once the engine is up: the questions Ceci asks most get their natural takes in the background.
+  server.warmQuestions = () => questionTakes().warm(COMMON_QUESTIONS)
+  server.on('close', () => questions?.stop())
   server.voiceProvider = voiceProvider
   return server
 }
@@ -731,6 +782,7 @@ if (isMainModule(import.meta.url, process.argv[1])) {
       speakerRefB64: existsSync(voice) ? readFileSync(voice).toString('base64') : '',
       speakerRefText: existsSync(transcript) ? readFileSync(transcript, 'utf8').trim() : '',
     })
+    hub.warmQuestions()
     const up = engine.status()
     state = up.tts && up.asr ? 'ready' : 'failed'
     // The next use of the free voice tries again (servers still starting are waited for, not doubled).

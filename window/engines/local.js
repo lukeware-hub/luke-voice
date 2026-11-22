@@ -5,7 +5,6 @@
 import { isConfirm, isDeny, isStopOnly } from '/engines/fast-path.js'
 import { speechChunks } from '/engines/speech-text.js'
 import { createTurnJoiner } from '/engines/turn-join.js'
-import { riseQuestion } from '/engines/question-rise.js'
 import { risingPercent } from '/engines/progress.js'
 import { FRAME, RATE, createVad, rms } from '/engines/vad.js'
 
@@ -79,12 +78,9 @@ function ask(type, data = {}, transfer = []) {
 // ?voice-device=wasm, ?voice-dtype= and ?voice-threads= override the defaults, to measure a machine.
 const query = new URLSearchParams(location.search)
 const isDebug = query.get('voice-debug') === '1'
-// Questions end with a Brazilian rise (question-rise.js); ?voice-question=0 turns it off.
-const isQuestionRise = query.get('voice-question') !== '0'
-const isQuestion = text => isQuestionRise && /\?\s*$/.test(text)
-// The native voice holds back the end of a question this long, to raise its pitch before it plays.
-const QUESTION_HOLD_SECONDS = 0.7
-const QUESTION_CONTEXT_SECONDS = 0.6
+// The hub picks, for a yes/no question, the take whose end rises like a Brazilian question
+// (hub/question-pick.mjs); ?voice-question=0 turns that off.
+const isQuestionPick = query.get('voice-question') !== '0'
 const overrides = Object.fromEntries(
   [['device', query.get('voice-device')], ['dtype', query.get('voice-dtype')], ['threads', Number(query.get('voice-threads')) || null], ['sttDtype', query.get('voice-stt-dtype')], ['tts', query.get('voice-tts')], ['sttDevice', query.get('voice-stt-device')]].filter(([, v]) => v),
 )
@@ -362,10 +358,13 @@ export async function startSession({
     for (let i = 0; i < parts.length; i++) {
       if (mine !== speech || isEnded) return
       const started = performance.now()
+      // How long what is queued still plays: the hub may use that time for more takes of a
+      // question, so picking one never makes Ceci wait.
+      const budget = playing.size ? Math.max(0, Math.round((playhead - outContext.currentTime) * 1000)) : 0
       const response = await fetch('/tts', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-luke-key': KEY },
-        body: JSON.stringify({ text: parts[i] }),
+        body: JSON.stringify({ text: parts[i], budget, ...(isQuestionPick ? {} : { pick: false }) }),
         signal: stop.signal,
       }).catch(() => null)
       if (mine !== speech || isEnded) return
@@ -377,46 +376,16 @@ export async function startSession({
       let pendingLength = 0
       let isFirst = true
       let rate = 24_000
-      // A question keeps its last QUESTION_HOLD_SECONDS back until the stream ends; `played` keeps
-      // the end of what already played, as pitch context for the rise.
-      const question = isQuestion(parts[i])
-      let played = new Float32Array(0)
-      const joined = () => {
+      const flush = () => {
+        if (!pendingLength) return
         const audio = new Float32Array(pendingLength)
         let at = 0
         for (const piece of pending) {
           audio.set(piece, at)
           at += piece.length
         }
-        return audio
-      }
-      const flush = (isEnd = false) => {
-        if (!pendingLength) return
-        let audio = joined()
-        if (question && !isEnd) {
-          const hold = Math.round(rate * QUESTION_HOLD_SECONDS)
-          if (audio.length <= hold) return
-          pending = [audio.subarray(audio.length - hold)]
-          pendingLength = hold
-          audio = audio.subarray(0, audio.length - hold)
-        } else {
-          pending = []
-          pendingLength = 0
-        }
-        if (question && isEnd) {
-          const context = played.subarray(Math.max(0, played.length - Math.round(rate * QUESTION_CONTEXT_SECONDS)))
-          const whole = new Float32Array(context.length + audio.length)
-          whole.set(context)
-          whole.set(audio, context.length)
-          audio = riseQuestion(whole, rate, { keep: context.length }).slice(context.length)
-        } else if (question) {
-          const keep = Math.round(rate * QUESTION_CONTEXT_SECONDS)
-          const next = new Float32Array(Math.min(keep, played.length + audio.length))
-          const tail = audio.subarray(Math.max(0, audio.length - next.length))
-          next.set(played.subarray(played.length - (next.length - tail.length)))
-          next.set(tail, next.length - tail.length)
-          played = next
-        }
+        pending = []
+        pendingLength = 0
         lastNode = play(audio, rate, mine, false)
       }
       await readWavStream(
@@ -425,16 +394,15 @@ export async function startSession({
           rate = sampleRate
           pending.push(piece)
           pendingLength += piece.length
-          const held = question ? rate * QUESTION_HOLD_SECONDS : 0
-          if (isFirst && pendingLength >= rate * 0.08 + held) {
+          if (isFirst && pendingLength >= rate * 0.08) {
             if (i === 0) timing('speak', Math.round(performance.now() - started), 'to first audio (native)')
             isFirst = false
             flush()
-          } else if (pendingLength >= rate * 0.3 + held) flush()
+          } else if (pendingLength >= rate * 0.3) flush()
         },
         () => mine !== speech || isEnded,
       )
-      flush(true)
+      flush()
     }
     if (mine !== speech || isEnded) return
     // Back to listening when the last piece ends (or now, if nothing played).
@@ -461,7 +429,7 @@ export async function startSession({
         if (i === parts.length - 1 && playing.size === 0) setMode('listening')
         continue
       }
-      play(isQuestion(parts[i]) ? riseQuestion(audio, sampleRate) : audio, sampleRate, mine, i === parts.length - 1)
+      play(audio, sampleRate, mine, i === parts.length - 1)
     }
   }
 

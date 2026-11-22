@@ -49,17 +49,17 @@ test('the native voice keeps most English tech words as they are; the browser vo
 })
 
 test('the native voice gets its own spelling for the tech words it says in Portuguese, in any case', () => {
-  assert.equal(respellNative('O TOKEN fica no cache, e o Backend chama o endpoint.'), 'O tôquen fica no quéche, e o back-end chama o end-point.')
-  assert.equal(respellNative('Abri o pull  request da feature e fiz o merge.'), 'Abri o Pull Request da Feature e fiz o Merge.')
-  assert.equal(respellNative('Sem force push; atualizei o README e o changelog.'), 'Sem fórce push; atualizei o Read Me e o tchêindj log.')
-  assert.deepEqual(speechChunks('O frontend lê o state do store.', { isNative: true }), ['O Front End lê o stêit do Store.'])
+  assert.equal(respellNative('O TOKEN fica no cache, e o Backend chama o endpoint.'), 'O touken fica no Cache, e o Back End chama o end-point.')
+  assert.equal(respellNative('Abri o pull request da feature e pedi um review.'), 'Abri o pull request da Feature e pedi um Riviú.')
+  assert.equal(respellNative('Rodei os hooks, fiz o rebase e atualizei o changelog.'), 'Rodei os ruks, fiz o re base e atualizei o tchêindj log.')
+  assert.deepEqual(speechChunks('O framework lê o state do store.', { isNative: true }), ['O Framework lê o State do store.'])
 })
 
 test('the native spelling touches whole words only, and leaves the rest of the sentence alone', () => {
-  for (const text of ['Os tokens e o cached ficam no back-end.', 'A mergeada do dockerfile.', 'A casa é azul, e o estado é bom.', 'O caché do cachecol.']) {
+  for (const text of ['Os tokens e o cached ficam no back-end.', 'O hook e o reviewer.', 'A casa é azul, e o estado é bom.', 'O caché do cachecol.']) {
     assert.equal(respellNative(text), text)
   }
-  assert.equal(respellNative('Docker, token.'), 'dócker, tôquen.')
+  assert.equal(respellNative('Hooks, token.'), 'ruks, touken.')
 })
 
 test('the native voice starts on one short clause, so the first audio comes sooner', () => {

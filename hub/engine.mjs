@@ -1,5 +1,5 @@
 // The native engine (gpu profile). llama.cpp's llama-server runs three local servers: Ceci's voice
-// (Qwen3-TTS 0.6B, streamed, cloned from agent/ceci-voice.wav), her ears (Qwen3-ASR 0.6B) and the
+// (Qwen3-TTS 1.7B, streamed, cloned from agent/ceci-voice.wav), her ears (Qwen3-ASR 0.6B) and the
 // instant router of the hybrid brain (Qwen3.5 0.8B, on the CPU). The binaries are llama.cpp's
 // official release builds (Vulkan on Windows and Linux, Metal on macOS), pinned by sha256; the
 // models are in hub/models.mjs. No Python, no PyTorch.
@@ -9,7 +9,7 @@ import { createServer } from 'node:net'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { MODELS, ensureFile, ensureModel, modelsDir } from './models.mjs'
+import { MODELS, ensureFile, ensureModel, modelsDir, pruneModels } from './models.mjs'
 import { stateDir } from './paths.mjs'
 import { routerBody } from './router.mjs'
 
@@ -40,29 +40,39 @@ export const BINARIES = {
 
 // The three servers: their models and llama-server flags. The voice and the ears use the GPU;
 // the router stays on the CPU, so it never competes with them for video memory.
+// Flags every server gets, none of which changes what it says or hears (same audio, transcripts and
+// routes on a fixed workload): no busy-waiting for work (--poll 0) and no prompt cache in RAM
+// (-cram 0). The voice and the ears also run on 2 CPU threads (they run on the GPU) and do not keep
+// their model files mapped in RAM once loaded (-lm none). Measured on the whole engine: RAM in use
+// 5.0 to 3.2 GB, CPU time 73 to 52 s on the same work, video memory 5.85 to 5.41 GB (with the Q6
+// ears). The router keeps its file mapped: on the CPU, a copy would cost more RAM.
+const LEAN = ['--poll', '0', '-cram', '0']
+const ON_GPU = [...LEAN, '-t', '2', '-lm', 'none']
 export const SERVICES = {
   tts: {
-    models: ['native/qwen3-tts-0.6b-base-q8_0.gguf', 'native/qwen3-tts-0.6b-base-mmproj-icl-q8_0.gguf'],
-    // One slot: every request reuses the cached reference voice, so the first audio comes in ~100 ms.
-    // A 1024 context and 256 batch fit the reference plus the longest chunk (220 characters) and
-    // save ~420 MiB of video memory (3.7 to 3.3 GiB) with byte-identical audio and the same speed.
-    args: ([model, mmproj]) => ['-m', model, '-mm', mmproj, '-ngl', '99', '-c', '1024', '-ub', '256', '-np', '1'],
+    models: ['native/qwen3-tts-1.7b-base-q5_k_m.gguf', 'native/qwen3-tts-1.7b-base-mmproj-icl-q8_0.gguf'],
+    // One slot: every request reuses the cached reference voice, so the first audio comes in ~250 ms.
+    // A 1024 context and 256 batch fit the reference plus the longest chunk (220 characters).
+    args: ([model, mmproj]) => ['-m', model, '-mm', mmproj, '-ngl', '99', '-c', '1024', '-ub', '256', '-np', '1', ...ON_GPU],
   },
   asr: {
-    models: ['native/qwen3-asr-0.6b-q8_0.gguf', 'native/qwen3-asr-0.6b-mmproj-q8_0.gguf'],
-    args: ([model, mmproj]) => ['-m', model, '-mm', mmproj, '-ngl', '99', '-c', '2048', '-np', '1'],
+    models: ['native/qwen3-asr-0.6b-q6_k.gguf', 'native/qwen3-asr-0.6b-mmproj-q8_0.gguf'],
+    // 1536 context and 256 batch: the same transcripts as 2048, ~270 MiB less video memory.
+    args: ([model, mmproj]) => ['-m', model, '-mm', mmproj, '-ngl', '99', '-c', '1536', '-ub', '256', '-np', '1', ...ON_GPU],
   },
   router: {
     models: ['native/qwen3.5-0.8b-q4_k_m.gguf'],
-    args: ([model]) => ['-m', model, '-ngl', '0', '-c', '4096', '-np', '1', '--jinja'],
+    // The few-shot prompt and a 300-character utterance fit in 2048.
+    args: ([model]) => ['-m', model, '-ngl', '0', '-c', '2048', '-np', '1', '--jinja', ...LEAN],
   },
 }
 
 // How Ceci's voice is sampled. With the reference clip in agent/ceci-voice.wav (a real Brazilian
-// speaker, picked by the owner by ear), 40 pt-BR sentences ran with no failed or looping sentence
-// and 8% word errors (Whisper large-v3-turbo). The fixed seed makes the same sentence always sound
-// the same.
-export const VOICE_SETTINGS = { temperature: 0.75, top_p: 0.9, seed: 7 }
+// speaker, picked by the owner by ear). At 0.75 her pitch barely moved (pitch spread 2.9 of 10 on
+// the naturalness panel, anchored on real pt-BR recordings) and the owner heard her as robotic;
+// 0.9 gives her melody back (6.2 of 10, panel 7.6 to 8.8). The fixed seed makes the same sentence
+// always sound the same.
+export const VOICE_SETTINGS = { temperature: 0.9, top_p: 0.9, seed: 7 }
 
 // What Qwen3-ASR is told, so English tech words, Ceci's name and session names come out right.
 // The same prompt warms the engine up, so the first real transcription is not a cold one.
@@ -197,6 +207,7 @@ export async function prepareEngine({ dir = engineDir(), models = modelsDir(), r
     done += MODELS[path].size
   }
   onProgress(total, total, 'modelos')
+  if (profile.profile === 'gpu') pruneModels({ dir: models })
   return profile
 }
 

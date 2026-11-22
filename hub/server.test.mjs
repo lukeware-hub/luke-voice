@@ -93,7 +93,7 @@ test('every external script on the page carries an integrity hash, and the page 
     assert.match(tag, /\bintegrity="sha(256|384|512)-[A-Za-z0-9+/=]+"/)
     assert.match(tag, /\bcrossorigin="anonymous"/)
   }
-  for (const path of ['/app.js', '/guard.js', '/engines/elevenlabs.js', '/engines/local.js', '/engines/speech-text.js', '/engines/fast-path.js', '/engines/turn-join.js', '/engines/question-rise.js', '/engines/progress.js', '/engines/vad.js', '/engines/piper-ids.js', '/engines/mic-worklet.js', '/engines/voice-worker.js']) {
+  for (const path of ['/app.js', '/guard.js', '/engines/elevenlabs.js', '/engines/local.js', '/engines/speech-text.js', '/engines/fast-path.js', '/engines/turn-join.js', '/engines/progress.js', '/engines/vad.js', '/engines/piper-ids.js', '/engines/mic-worklet.js', '/engines/voice-worker.js']) {
     const res = await call('GET', path)
     assert.equal(res.status, 200)
     assert.doesNotMatch(res.body, /\bfrom\s*['"]https?:|import\s*\(\s*['"]https?:/)
@@ -473,12 +473,66 @@ test('speech goes to the native engine: /stt sends the WAV with the glossary, /t
     assert.equal(Buffer.from(seen.tts.speaker_ref_b64, 'base64').toString(), 'CECIVOICE')
     // Cloned with the reference transcript (Brazilian accent), Ceci's sampling, and a cap against loops.
     assert.equal(seen.tts.speaker_ref_text, 'Oi, eu sou a Ceci.')
-    assert.deepEqual([seen.tts.temperature, seen.tts.top_p, seen.tts.seed], [0.75, 0.9, 7])
+    assert.deepEqual([seen.tts.temperature, seen.tts.top_p, seen.tts.seed], [0.9, 0.9, 7])
     assert.equal(seen.tts.n_predict, Math.ceil('Comecei, te aviso quando terminar.'.length * 1.5) + 25)
     assert.equal((await post('/tts', JSON.stringify({ text: '  ' }), 'application/json')).status, 400)
     // The engine's small context holds ~380 characters: a longer text is capped, not cut mid-audio.
     await post('/tts', JSON.stringify({ text: 'a'.repeat(500) }), 'application/json')
     assert.equal(seen.tts.input.length, 360)
+  } finally {
+    hub2.closeAllConnections()
+    hub2.close()
+    fake.close()
+  }
+})
+
+test('a yes/no question gets more takes only while the line before still plays, and its natural take is kept', async () => {
+  const { take, wav } = await import('./test-audio.mjs')
+  // Ceci's seed (7) and the first extra seed end flat; the next one rises +6 semitones.
+  const flat = wav(take(1.5, 0))
+  const rising = wav(take(1.5, 6))
+  const seeds = []
+  const fake = createHttpServer(async (req, res) => {
+    const chunks = []
+    for await (const c of req) chunks.push(c)
+    const { seed } = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+    seeds.push(seed)
+    res.writeHead(200, { 'content-type': 'audio/wav' })
+    res.end(seed === 7 || seed === 101 ? flat : rising)
+  })
+  await new Promise(resolve => fake.listen(0, '127.0.0.1', resolve))
+  const base = `http://127.0.0.1:${fake.address().port}`
+  const engine = { url: () => base, status: () => ({ tts: true, asr: true, router: false }) }
+  const questionsDir = mkdtempSync(join(tmpdir(), 'luke-voice-questions-'))
+  const hub2 = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {}, engine, profile: () => ({ profile: 'gpu' }), questionsDir })
+  await new Promise(resolve => hub2.listen(0, '127.0.0.1', resolve))
+  const p = hub2.address().port
+  const say = body =>
+    new Promise((resolve, reject) => {
+      const req = request({ host: '127.0.0.1', port: p, method: 'POST', path: '/tts', headers: { host: `127.0.0.1:${p}`, 'content-type': 'application/json', 'x-luke-key': WINDOW } }, res => {
+        const parts = []
+        res.on('data', c => parts.push(c))
+        res.on('end', () => resolve(Buffer.concat(parts)))
+      })
+      req.on('error', reject)
+      req.end(JSON.stringify(body))
+    })
+  try {
+    // First in a line (nothing plays before it): said live, with Ceci's seed, at once.
+    assert.ok((await say({ text: 'Faço o commit agora?', budget: 0 })).equals(flat))
+    assert.deepEqual(seeds.splice(0), [7])
+    // After a line that still plays for 3 s: more takes, until one rises.
+    assert.ok((await say({ text: 'Posso começar?', budget: 3000 })).equals(rising))
+    assert.deepEqual(seeds.splice(0), [101, 102])
+    // Next time it is served from the kept takes, with no wait and no engine work.
+    assert.ok((await say({ text: 'Posso começar?', budget: 0 })).equals(rising))
+    assert.deepEqual(seeds.splice(0), [])
+    // A question with a question word falls in pt-BR: said once, live.
+    await say({ text: 'O que vamos fazer hoje?', budget: 3000 })
+    assert.deepEqual(seeds.splice(0), [7])
+    // ?voice-question=0 in the window.
+    await say({ text: 'Tudo bem?', budget: 3000, pick: false })
+    assert.deepEqual(seeds.splice(0), [7])
   } finally {
     hub2.closeAllConnections()
     hub2.close()

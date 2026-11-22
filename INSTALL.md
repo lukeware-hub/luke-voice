@@ -69,7 +69,7 @@ These steps install luke-voice with no questions. Run them in a terminal on the 
      curl -fsSL https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/install.sh | LUKE_VOICE_NO_PROMPT=1 bash
      ```
    - The voice: a new install gets the free voice; an existing one keeps the voice it has (someone with an ElevenLabs key stays on ElevenLabs). Set `LUKE_VOICE_PROVIDER=local` or `elevenlabs` only when the user asked for that voice.
-   - It can take several minutes (step 6 downloads up to 3 GB). Allow a timeout of at least 30 minutes, or run it in the background and wait for it to end.
+   - It can take several minutes (step 6 downloads up to 3.5 GB). Allow a timeout of at least 30 minutes, or run it in the background and wait for it to end.
 3. **Check the result:**
    - The output ends with `Instalação concluída: luke-voice <version>`.
    - `claude plugin list --json` has the entry `"id": "luke-voice@luke-voice"` with `"enabled": true`.
