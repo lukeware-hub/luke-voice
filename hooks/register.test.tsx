@@ -43,6 +43,7 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
   const calls: Call[] = []
   const sent: string[] = []
   const stored: unknown[] = []
+  const sleeps: unknown[] = []
   let polls = 0
 
   on('command.register', (_, e) => ({ value: { command: e.name } }))
@@ -83,7 +84,7 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
   })
   on('ui.status', (_, e) => (statuses.push(e.text), { value: undefined }))
   on('ui.toast', () => ({ value: undefined }))
-  on('clock.sleep', () => ({ value: undefined }))
+  on('clock.sleep', (_, e) => (sleeps.push(e), { value: undefined }))
   on('clock.now', () => ({ value: clockNow }))
   on('clock.every', () => ({ value: undefined }))
   on('prompt.submit', (_, e) => (sent.push(e.text), { text: e.text }))
@@ -104,7 +105,7 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
     return { value: { status, ok: status < 400, headers: {}, text: JSON.stringify(body) } }
   })
 
-  return { calls, sent, stored, launches, statuses, completes }
+  return { calls, sent, stored, launches, statuses, completes, sleeps }
 }
 
 // The hooks answer in promise turns: yield until the check holds.
@@ -210,6 +211,18 @@ test('a poll answered 409 (a reload took over) ends the loop without subscribing
 
   expect(calls.filter(c => c.path === '/subscribe').length).toBe(1)
   expect(calls.filter(c => c.path === '/inbox').length).toBe(1)
+})
+
+test('a hub that keeps failing is retried less and less often, up to a minute, and a good poll resets it', async ($, on) => {
+  const fail = async () => ({ status: 500, body: {} })
+  const { calls, sleeps } = engine(on, [fail, fail, fail, fail, fail, fail, async () => ({ status: 200, body: { commands: [] } }), fail], { status: 409, body: { error: 'replaced' } })
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.command.run(run('window'))
+  await until(() => calls.filter(c => c.path === '/inbox').length >= 9)
+  await until(() => false)
+
+  expect(sleeps.map(e => (e as { ms: number }).ms)).toEqual([3_000, 6_000, 12_000, 24_000, 48_000, 60_000, 3_000])
 })
 
 test('a voice task runs in a Claude Code subagent, and its answer is reported as task_done', async ($, on) => {

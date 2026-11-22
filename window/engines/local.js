@@ -5,6 +5,7 @@
 import { decide, liveAction } from '/engines/confirm.js'
 import { isConfirm, isDeny, stopTarget } from '/engines/fast-path.js'
 import { speechChunks } from '/engines/speech-text.js'
+import { trimContext } from '/engines/context.js'
 import { createCutReply, createTurnJoiner, createTurnLog } from '/engines/turn-join.js'
 import { risingPercent } from '/engines/progress.js'
 import { isNotSpeech } from '/engines/transcript.js'
@@ -12,9 +13,6 @@ import { FRAME, RATE, createVad, rms } from '/engines/vad.js'
 
 export const name = 'local'
 
-// The brain reads the latest context on every turn: keep it short, it is paid in tokens.
-const MAX_CONTEXT = 8
-const MAX_CONTEXT_CHARS = 3000
 const GREETING = 'Oi! Eu sou a Ceci. O que vamos fazer hoje?'
 const BRAIN_FAILED = 'Não consegui pensar numa resposta agora. Tente de novo.'
 const STOPPED = 'Parei o Claude.'
@@ -72,6 +70,8 @@ function voiceWorker() {
 }
 
 function ask(type, data = {}, transfer = []) {
+  // The worker crashed and a new one starts empty: load its models again before anything else.
+  if (type !== 'load' && !workerLoad && workerKind) return loadVoice(workerKind).then(() => ask(type, data, transfer))
   const id = nextId++
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject })
@@ -572,8 +572,7 @@ export async function startSession({
   }
 
   function remember(text) {
-    context.push(text)
-    while (context.length > MAX_CONTEXT || context.join('\n').length > MAX_CONTEXT_CHARS) context.shift()
+    trimContext(context, text)
   }
 
   // One turn with the brain: what to do (a tool) and what to say.

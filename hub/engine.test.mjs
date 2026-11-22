@@ -507,3 +507,19 @@ test("Ceci's original voice comes with every install: the same clip, transcript,
   // Her sampling: the fixed seed makes the same sentence sound the same everywhere.
   assert.deepEqual(VOICE_SETTINGS, { temperature: 0.9, top_p: 0.9, seed: 7 })
 })
+
+test('the profile is read from disk again only when another process rewrites it', async () => {
+  const { readProfile } = await import('./engine.mjs')
+  const { utimesSync } = await import('node:fs')
+  const dir = fresh()
+  assert.equal(readProfile(dir), null, 'no profile yet')
+  const file = join(dir, 'profile.json')
+  writeFileSync(file, JSON.stringify({ profile: 'light' }))
+  const first = readProfile(dir)
+  assert.equal(first.profile, 'light')
+  assert.equal(readProfile(dir), first, 'unchanged: the cached profile')
+  // setup.mjs rewrites it from another process.
+  writeFileSync(file, JSON.stringify({ profile: 'gpu' }))
+  utimesSync(file, new Date(), new Date(Date.now() + 5000))
+  assert.equal(readProfile(dir).profile, 'gpu')
+})

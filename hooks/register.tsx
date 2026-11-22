@@ -8,7 +8,9 @@ const NAME = 'luke-voice'
 let HUB = 'http://127.0.0.1:4848'
 const PANE = 'luke-voice'
 const POLL_WAIT_MS = 20_000
+// A hub that keeps failing is retried less often: 3 s, doubled each time, up to a minute.
 const RETRY_MS = 3_000
+const MAX_RETRY_MS = 60_000
 
 // Off until the user turns it on: while off, nothing about the session leaves the machine.
 const isOn = atom({ plugin: 'luke-voice', key: 'isOn' } as const, false)
@@ -501,9 +503,14 @@ function subscribe($: EngineInterface, options: Record<string, unknown>): Promis
 
 // Long-polls this session's inbox until the mod is turned off or reloaded.
 async function pollLoop($: EngineInterface, options: Record<string, unknown>, gen: number) {
+  let retryMs = RETRY_MS
+  const backOff = async () => {
+    await $.clock.sleep(retryMs)
+    retryMs = Math.min(retryMs * 2, MAX_RETRY_MS)
+  }
   while (gen === generation) {
     if (!(await subscribe($, options))) {
-      await $.clock.sleep(RETRY_MS)
+      await backOff()
       continue
     }
     try {
@@ -517,12 +524,13 @@ async function pollLoop($: EngineInterface, options: Record<string, unknown>, ge
         continue
       }
       if (!res.ok) throw new Error(`inbox ${res.status}`)
+      retryMs = RETRY_MS
       for (const command of (res.json.commands ?? []) as Command[]) await onCommand($, command)
     } catch (error) {
       if (gen !== generation) return
       token = null
       await setLink($, { state: 'down', reason: `a conexão com o servidor local caiu (${messageOf(error)})` })
-      await $.clock.sleep(RETRY_MS)
+      await backOff()
     }
   }
 }

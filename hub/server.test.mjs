@@ -143,7 +143,7 @@ test('the page loads no remote script; the ElevenLabs client is loaded on demand
   assert.match(eleven, /CLIENT_INTEGRITY = 'sha384-[A-Za-z0-9+/=]{64}'/)
   assert.match(eleven, /script\.integrity = CLIENT_INTEGRITY/)
   assert.match(eleven, /script\.crossOrigin = 'anonymous'/)
-  for (const path of ['/app.js', '/guard.js', '/engines/elevenlabs.js', '/engines/local.js', '/engines/speech-text.js', '/engines/fast-path.js', '/engines/turn-join.js', '/engines/confirm.js', '/engines/progress.js', '/engines/vad.js', '/engines/piper-ids.js', '/engines/transcript.js', '/engines/mic-worklet.js', '/engines/voice-worker.js']) {
+  for (const path of ['/app.js', '/guard.js', '/engines/elevenlabs.js', '/engines/local.js', '/engines/speech-text.js', '/engines/fast-path.js', '/engines/turn-join.js', '/engines/confirm.js', '/engines/progress.js', '/engines/context.js', '/engines/vad.js', '/engines/piper-ids.js', '/engines/transcript.js', '/engines/mic-worklet.js', '/engines/voice-worker.js']) {
     const res = await call('GET', path)
     assert.equal(res.status, 200)
     assert.doesNotMatch(res.body, /\bfrom\s*['"]https?:|import\s*\(\s*['"]https?:/)
@@ -173,6 +173,26 @@ test('a reload of the same Claude session takes over its row: same name, old tok
   assert.equal((await call('GET', '/inbox', { auth: first.token })).status, 409)
   assert.equal((await call('GET', '/inbox?wait=0', { auth: second.token })).status, 200)
   assert.equal((await call('GET', '/health')).body.sessions, 1)
+  await call('POST', '/unsubscribe', { auth: second.token })
+})
+
+test('a reload keeps the commands waiting for the old row, and the old token may still ack one it pulled', async () => {
+  const first = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/reload', sessionId: 's-2' } })).body
+  // Pulled by the old mod, not acked yet.
+  const pulledTask = call('POST', '/command', { key: WINDOW, body: { type: 'task', session: first.name, task: 'primeira' } })
+  const pulled = (await call('GET', '/inbox?wait=2000', { auth: first.token })).body.commands[0]
+  // Queued, never pulled, when the mod reloads.
+  const waitingTask = call('POST', '/command', { key: WINDOW, body: { type: 'task', session: first.name, task: 'segunda' } })
+  await new Promise(resolve => setTimeout(resolve, 50))
+  const second = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/reload', sessionId: 's-2' } })).body
+  const inbox = (await call('GET', '/inbox?wait=0', { auth: second.token })).body.commands
+  assert.deepEqual(inbox.map(c => c.task), ['segunda'])
+  assert.equal((await call('POST', '/ack', { auth: first.token, body: { id: pulled.id, ok: true, message: 'Started.' } })).status, 200)
+  await call('POST', '/ack', { auth: second.token, body: { id: inbox[0].id, ok: true, message: 'Started.' } })
+  assert.deepEqual((await pulledTask).body, { ok: true, message: 'Started.' })
+  assert.deepEqual((await waitingTask).body, { ok: true, message: 'Started.' })
+  // The old token still does nothing else.
+  assert.equal((await call('GET', '/inbox?wait=0', { auth: first.token })).status, 409)
   await call('POST', '/unsubscribe', { auth: second.token })
 })
 

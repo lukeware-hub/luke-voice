@@ -186,9 +186,18 @@ export async function listDevices(exe, run = runFile) {
   return parseDevices(`${out.stdout}\n${out.stderr}`)
 }
 
+// The hub reads the profile on every request; setup.mjs rewrites it from another process, so the
+// file is parsed again only when its mtime or size changes.
+const profiles = new Map() // file -> { mtimeMs, size, profile }
 export function readProfile(dir = engineDir()) {
+  const file = profileFile(dir)
   try {
-    return JSON.parse(readFileSync(profileFile(dir), 'utf8'))
+    const { mtimeMs, size } = statSync(file)
+    const cached = profiles.get(file)
+    if (cached?.mtimeMs === mtimeMs && cached.size === size) return cached.profile
+    const profile = JSON.parse(readFileSync(file, 'utf8'))
+    profiles.set(file, { mtimeMs, size, profile })
+    return profile
   } catch {
     return null
   }

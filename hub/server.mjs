@@ -57,6 +57,7 @@ const STATIC = {
   '/engines/turn-join.js': ['engines/turn-join.js', 'text/javascript; charset=utf-8'],
   '/engines/confirm.js': ['engines/confirm.js', 'text/javascript; charset=utf-8'],
   '/engines/progress.js': ['engines/progress.js', 'text/javascript; charset=utf-8'],
+  '/engines/context.js': ['engines/context.js', 'text/javascript; charset=utf-8'],
   '/engines/vad.js': ['engines/vad.js', 'text/javascript; charset=utf-8'],
   '/engines/piper-ids.js': ['engines/piper-ids.js', 'text/javascript; charset=utf-8'],
   '/engines/transcript.js': ['engines/transcript.js', 'text/javascript; charset=utf-8'],
@@ -878,7 +879,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
           replaced.add(previous.token)
           wake(previous)
         }
-        const session = { token, sessionId, name: previous?.name ?? uniqueName(body.cwd), cwd: String(body.cwd ?? ''), canThink: typeof body.version === 'string' || typeof body.provider === 'string', inbox: [], waiters: [], activity: [], isBusy: false, needsYou: false, seenAt: Date.now() }
+        const session = { token, sessionId, name: previous?.name ?? uniqueName(body.cwd), cwd: String(body.cwd ?? ''), canThink: typeof body.version === 'string' || typeof body.provider === 'string', inbox: previous?.inbox ?? [], waiters: [], activity: [], isBusy: false, needsYou: false, seenAt: Date.now() }
         sessions.set(token, session)
         focused ??= session.name
         sendRoster()
@@ -895,7 +896,9 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
 
       if (sessionRoutes[route]) {
         const session = sessions.get(bearer)
-        if (!session) return send(res, replaced.has(bearer) ? 409 : 401, { error: replaced.has(bearer) ? 'replaced' : 'session' })
+        // A reloaded mod may still ack a command it pulled before the reload: acks are by command id.
+        const isLateAck = route === 'POST /ack' && replaced.has(bearer)
+        if (!session && !isLateAck) return send(res, replaced.has(bearer) ? 409 : 401, { error: replaced.has(bearer) ? 'replaced' : 'session' })
         const body = req.method === 'POST' ? await readBody(req) : {}
         const [status, out] = await sessionRoutes[route](session, body, url, res)
         return send(res, status, out)
