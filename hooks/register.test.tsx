@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Args, On } from 'claude-code'
 
-import { brainArgs, brainInput, classifyTask, parseBrain, parseBrainText, preview, TIERS } from './register'
+import { brainArgs, brainInput, classifyTask, NO_NODE, parseBrain, parseBrainText, preview, TIERS } from './register'
 import type { BrainRequest } from './register'
 
 const FOOTER = { plugin: 'luke-voice', component: 'SessionMode', props: { modes: [] } } as const
@@ -27,6 +27,13 @@ let clockNow = 1_700_000_000_000
 // When set, the direct model call throws this, after the clock moved by `brainThrowsAfterMs`.
 let brainThrows: string | null = null
 let brainThrowsAfterMs = 0
+// What hub/launch.mjs prints, and an error starting it throws instead (no Node.js). Reset by engine().
+let launchStdout = '{"ok":true,"serviceToken":"svc"}\n'
+let launchThrows: string | null = null
+// The paths fs.exists finds besides the first-call marker (the installer's Node.js). Reset by engine().
+let existing: RegExp | null = null
+// What the hub answers to /show. Reset by engine().
+let showBody: Record<string, unknown> | null = null
 
 // Stands for the engine and the hub: records each hub request and each submitted prompt.
 function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unknown }>> = [], after = { status: 410, body: {} as unknown }, envKey?: string, health?: Record<string, unknown>) {
@@ -50,7 +57,14 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
   on('store.get', (_, e) => ({ value: get(e) }))
   const marker = firstCall
   firstCall = null
-  on('fs.exists', (_, e) => ({ value: marker !== null && /[\\/]first-call$/.test(String(e.path)) }))
+  const found = existing
+  existing = null
+  const launch = { stdout: launchStdout, throws: launchThrows }
+  launchStdout = '{"ok":true,"serviceToken":"svc"}\n'
+  launchThrows = null
+  const show = showBody
+  showBody = null
+  on('fs.exists', (_, e) => ({ value: (marker !== null && /[\\/]first-call$/.test(String(e.path))) || (found !== null && found.test(String(e.path))) }))
   on('fs.write', (_, e) => (markerWrites.push({ path: String(e.path), text: String(e.text) }), { value: undefined }))
   on('ui.close', () => ({ value: undefined }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
@@ -62,10 +76,11 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
     }
     return { value: brainComplete }
   })
-  on('process.run', (_, e) => (
-    launches.push(e),
-    { value: { exitCode: 0, stdout: e.argv[0] === 'claude' ? brainStdout : String(e.argv[1]).endsWith('setup.mjs') ? setupStdout : '{"ok":true,"serviceToken":"svc"}\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
-  ))
+  on('process.run', (_, e) => {
+    launches.push(e)
+    if (launch.throws && e.argv[0] !== 'claude') return { deny: launch.throws }
+    return { value: { exitCode: 0, stdout: e.argv[0] === 'claude' ? brainStdout : String(e.argv[1]).endsWith('setup.mjs') ? setupStdout : launch.stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
   on('ui.status', (_, e) => (statuses.push(e.text), { value: undefined }))
   on('ui.toast', () => ({ value: undefined }))
   on('clock.sleep', () => ({ value: undefined }))
@@ -81,6 +96,7 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
     if (url.pathname === '/subscribe') body = { token: 'session-1', name: 'api', hasKey: true }
     if (url.pathname === '/health' && health) body = health
     if (url.pathname === '/setup') body = { started: true }
+    if (url.pathname === '/show' && show) body = show
     if (url.pathname === '/inbox') {
       const answer = inbox[polls++]
       ;({ status, body } = answer ? await answer() : after)
@@ -483,6 +499,90 @@ test('the first Claude Code opened after installing turns luke-voice on and star
   await $.command.run(run('off'))
 })
 
+test('a hub that does not start leaves the first call for the next Claude Code opened', async ($, on) => {
+  firstCall = 'pending'
+  markerWrites.length = 0
+  launchStdout = '{"ok":false,"error":"o servidor local não iniciou"}\n'
+  const { launches } = engine(on)
+  on('fs.read', (_, e) => ({ value: /[\\/]first-call$/.test(String(e.path)) ? 'pending\n' : '{"version":"0.10.2"}' }))
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await until(() => launches.length > 0)
+  for (let i = 0; i < 2000; i++) await Promise.resolve()
+
+  expect(markerWrites).toEqual([])
+  await $.command.run(run('off'))
+})
+
+test('without Node.js on the PATH, the mod says so in Portuguese instead of a bare ENOENT', async ($, on) => {
+  launchThrows = 'spawn node ENOENT'
+  engine(on)
+  on('fs.read', () => ({ value: '{"version":"0.10.2"}' }))
+
+  const text = (await $.command.run(run('call'))).text
+
+  expect(text).toBe(NO_NODE)
+  expect(text).not.toContain('ENOENT')
+  await $.command.run(run('off'))
+  // /luke-voice setup, which runs hub/setup.mjs here, says the same.
+  expect((await $.command.run(run('setup'))).text).toBe(NO_NODE)
+})
+
+test("the installer's own Node.js on Windows (node.exe) is found too", async ($, on) => {
+  existing = /[\\/]\.luke-voice[\\/]node[\\/]node\.exe$/
+  const { launches, calls } = engine(on)
+
+  await $.command.run(run(''))
+  await until(() => calls.some(c => c.path === '/subscribe'))
+
+  expect(String(launches[0] && (launches[0] as { argv: string[] }).argv[0])).toMatch(/\.luke-voice[\\/]node[\\/]node\.exe$/)
+  await $.command.run(run(''))
+})
+
+test("the installer's own Node.js runs the hub when it is there, so a Claude Code opened from the Dock finds it", async ($, on) => {
+  existing = /[\\/]\.luke-voice[\\/]node[\\/]bin[\\/]node$/
+  const { launches, calls } = engine(on)
+
+  await $.command.run(run(''))
+  await until(() => calls.some(c => c.path === '/subscribe'))
+
+  expect(String(launches[0] && (launches[0] as { argv: string[] }).argv[0])).toMatch(/\.luke-voice[\\/]node[\\/]bin[\\/]node$/)
+  await $.command.run(run(''))
+})
+
+test('the Node.js on the PATH runs the hub when the installer brought none', async ($, on) => {
+  const { launches, calls } = engine(on)
+
+  await $.command.run(run(''))
+  await until(() => calls.some(c => c.path === '/subscribe'))
+
+  expect((launches[0] as { argv: string[] }).argv[0]).toBe('node')
+  await $.command.run(run(''))
+})
+
+test('when no browser could open the call window, the mod gives the address instead of "opening"', async ($, on) => {
+  showBody = { ok: true, isWindowOpen: false, isOpened: false, url: 'http://127.0.0.1:4848/?k=abc&call=1' }
+  engine(on)
+
+  const text = (await $.command.run(run('call'))).text
+
+  expect(text).toContain('Não consegui abrir a janela da chamada')
+  expect(text).toContain('http://127.0.0.1:4848/?k=abc&call=1')
+  expect(text).not.toContain('está abrindo')
+  await $.command.run(run('off'))
+})
+
+test('the call and its toggles answer in Portuguese', async ($, on) => {
+  engine(on)
+
+  const call = (await $.command.run(run('call'))).text
+  expect(call).toContain('Chamando a Ceci na sessão "api"')
+  expect(call).toContain('A janela da chamada está abrindo.')
+  expect((await $.command.run(run('end'))).text).toBe('Chamada encerrada.')
+  expect((await $.command.run(run('off'))).text).toBe('luke-voice: desligado')
+  expect((await $.command.run(run('status'))).text).toContain('Nada desta sessão sai do seu computador')
+})
+
 test('a claude -p run never takes the first call, and with no marker nothing starts', async ($, on) => {
   firstCall = 'pending'
   markerWrites.length = 0
@@ -806,4 +906,8 @@ test('/luke-voice setup with luke-voice off runs the setup here and says how it 
   expect((await $.command.run(run('setup'))).text).toContain('Voz leve pronta, no navegador (nenhuma placa de vídeo encontrada)')
   setupStdout = '{"ok":false,"error":"Download failed (404)"}\n'
   expect((await $.command.run(run('setup'))).text).toContain('Não consegui preparar a voz: Download failed (404)')
+  setupStdout = '{"ok":false,"error":"sem conexão com a internet (fetch failed)","help":"Confira a internet. Atrás de um proxy, defina HTTPS_PROXY."}\n'
+  expect((await $.command.run(run('setup'))).text).toContain('Atrás de um proxy, defina HTTPS_PROXY.')
+  setupStdout = '{"ok":false,"error":"Falta espaço: a voz precisa de 3,6 GB livres em /home/ana/.luke-voice/models; libere espaço e rode de novo.","help":""}\n'
+  expect((await $.command.run(run('setup'))).text).toBe('Falta espaço: a voz precisa de 3,6 GB livres em /home/ana/.luke-voice/models; libere espaço e rode de novo.')
 })

@@ -20,7 +20,10 @@ test('every llama.cpp build is an official GitHub release asset pinned by sha256
   }
   assert.equal(platformKey('win32', 'x64'), 'win32-x64')
   assert.equal(platformKey('darwin', 'arm64'), 'darwin-arm64')
-  assert.equal(platformKey('darwin', 'x64'), null)
+  assert.equal(platformKey('darwin', 'x64', { isTranslated: () => false }), null)
+  // An Apple silicon Mac in a Rosetta terminal (x64 Node): the arm64 build, not the light voice.
+  assert.equal(platformKey('darwin', 'x64', { isTranslated: () => true }), 'darwin-arm64')
+  assert.equal(platformKey('linux', 'x64', { isTranslated: () => assert.fail('only asked on a Mac') }), 'linux-x64')
 })
 
 // The 1.7B voice (0.10.0) took the gpu download from ~2.5 to ~3.3 GB.

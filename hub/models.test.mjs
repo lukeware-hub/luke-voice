@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { test } from 'node:test'
 
-import { MODELS, ensureModel, modelsStatus } from './models.mjs'
+import { MODELS, ensureModel, freeBytes, modelsStatus, remainingBytes } from './models.mjs'
 
 const PATH = 'test/model.bin'
 const BYTES = Buffer.from('0123456789abcdefghij'.repeat(50))
@@ -31,6 +31,24 @@ function server(bytes) {
   }
   return { request, asked }
 }
+
+test('what is left to download counts a cut download as there, and a finished file as done', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'luke-models-left-'))
+  const [a, b] = ['turn/silero-vad.onnx', 'turn/smart-turn-v3.2-cpu.onnx']
+  mkdirSync(join(dir, 'turn'), { recursive: true })
+  writeFileSync(join(dir, 'turn', 'silero-vad.onnx'), Buffer.alloc(MODELS[a].size))
+  writeFileSync(join(dir, 'turn', 'smart-turn-v3.2-cpu.onnx.part'), Buffer.alloc(1000))
+  assert.equal(remainingBytes([a, b, 'not/a/model'], { dir }), MODELS[b].size - 1000)
+})
+
+test('free space is read from the nearest folder that exists, and unknown is null', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'luke-models-free-'))
+  const asked = []
+  assert.equal(await freeBytes(join(dir, 'models', 'native'), { stat: async at => (asked.push(at), { bavail: 10n, bsize: 4096 }) }), 40960)
+  assert.equal(asked[0], dir)
+  assert.equal(await freeBytes(dir, { stat: async () => { throw new Error('ENOSYS') } }), null)
+  assert.ok((await freeBytes(dir)) > 0)
+})
 
 test('every model is pinned to a Hugging Face revision with a sha256 and a size', () => {
   for (const [path, { url, sha256, size, group }] of Object.entries(MODELS)) {

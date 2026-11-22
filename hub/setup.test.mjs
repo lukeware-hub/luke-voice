@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 
 process.env.LUKE_VOICE_HOME = mkdtempSync(join(tmpdir(), 'luke-voice-setup-'))
-const { hubRunsVoice, progressPrinter, setup, size, smokeTest } = await import('./setup.mjs')
+const { checkSpace, explain, hubRunsVoice, progressPrinter, setup, size, smokeTest } = await import('./setup.mjs')
 // No hub runs the natural voice in these tests (a real one may run on this machine).
 const noHub = async () => false
 
@@ -52,7 +52,47 @@ test('the gpu profile is tested; a failed test says the light voice will be used
   const offline = sink()
   const worse = await setup({ out: offline.out, isVoiceRunning: noHub, prepare: async o => { if (o.override === 'light') throw new Error('fetch failed'); return gpu }, test: async () => ({ ok: false, ms: 1, heard: '', problems: ['x'] }) })
   assert.equal(worse.ok, false)
-  assert.match(offline.lines.join(''), /não pôde ser baixada: fetch failed/)
+  assert.match(offline.lines.join(''), /não pôde ser baixada: sem conexão com a internet.*\(fetch failed\)/)
+})
+
+test('a disk without room for what is left to download stops setup before it, with the size and the folder', async () => {
+  const { MODELS } = await import('./models.mjs')
+  const dir = mkdtempSync(join(tmpdir(), 'luke-voice-space-'))
+  const paths = ['native/qwen3-tts-1.7b-base-q5_k_m.gguf']
+  const needed = MODELS[paths[0]].size * 1.1
+  await assert.rejects(checkSpace({ paths, dir, free: async () => needed - 1 }), error => {
+    assert.equal(error.code, 'LUKE_NO_SPACE')
+    assert.equal(error.message, `Falta espaço: a voz precisa de 1,3 GB livres em ${dir}; libere espaço e rode de novo.`)
+    return true
+  })
+  await checkSpace({ paths, dir, free: async () => needed + 1 })
+  // A system that cannot say how much is free is not stopped.
+  await checkSpace({ paths, dir, free: async () => null })
+  // Through setup: the check runs before any model is downloaded, and the error reaches the caller.
+  let downloaded = false
+  const prepare = async ({ checkSpace: check }) => {
+    await check({ paths, dir })
+    downloaded = true
+    return { profile: 'gpu' }
+  }
+  await assert.rejects(setup({ out: sink().out, isVoiceRunning: noHub, prepare, free: async () => 1 }), /Falta espaço/)
+  assert.equal(downloaded, false)
+})
+
+test('why the voice could not be prepared is said in Portuguese, with what to do', () => {
+  const failed = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ENOTFOUND' } })
+  const offline = explain(failed, { env: {} })
+  assert.match(offline.reason, /sem conexão com a internet.*proxy.*ENOTFOUND/)
+  assert.match(offline.help, /HTTPS_PROXY/)
+  // Behind a proxy: check it, or, on a Node that cannot use one, get the installer's own Node.js.
+  const proxied = { HTTPS_PROXY: 'http://proxy:8080' }
+  assert.match(explain(failed, { env: proxied, versions: { node: '24.22.3' } }).help, /proxy http:\/\/proxy:8080/)
+  assert.match(explain(failed, { env: proxied, versions: { node: '20.19.0' } }).help, /Node\.js 20\.19\.0 não baixa pelo proxy.*instalador de novo/)
+  assert.match(explain(new Error('Download failed (404): https://x')).reason, /respondeu com erro 404/)
+  assert.match(explain(new Error('Integrity check failed: https://x')).reason, /diferente do esperado/)
+  assert.match(explain(Object.assign(new Error('no space'), { code: 'ENOSPC' })).reason, /disco encheu/)
+  assert.equal(explain(Object.assign(new Error('Falta espaço: x'), { code: 'LUKE_NO_SPACE' })).help, '')
+  for (const { help } of [offline, explain(new Error('something else'))]) assert.ok(help.length > 10)
 })
 
 test('the light profile needs no test', async () => {

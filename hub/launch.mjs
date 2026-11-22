@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { ORIGIN, isOlderVersion, stateFile } from './paths.mjs'
+import { proxyEnv } from './proxy.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const VERSION = JSON.parse(readFileSync(join(here, '..', '.claude-plugin', 'plugin.json'), 'utf8')).version
@@ -49,7 +50,7 @@ function done(out) {
 }
 
 let up = await health()
-if (up === 'foreign') done({ ok: false, error: `Another program is using ${ORIGIN}.` })
+if (up === 'foreign') done({ ok: false, error: `outro programa está usando ${ORIGIN}; feche-o ou defina LUKE_VOICE_PORT com outra porta` })
 
 // An older hub is replaced, so an update takes effect at once. A newer one is kept: a mod left
 // over from before an update must not take the hub back to its own, older version.
@@ -71,6 +72,8 @@ if (!up) {
     windowsHide: true,
     env: {
       ...process.env,
+      // Behind a proxy, the hub downloads the voice through it (hub/proxy.mjs).
+      ...proxyEnv(process.env),
       ...(stdinKey ? { ELEVENLABS_API_KEY: stdinKey } : {}),
       ...(stdinProvider ? { LUKE_VOICE_PROVIDER: stdinProvider } : {}),
     },
@@ -79,7 +82,7 @@ if (!up) {
     await sleep(200)
     up = await health()
   }
-  if (!up || up === 'foreign') done({ ok: false, error: `The hub did not start. See ${stateFile('hub.log')}.` })
+  if (!up || up === 'foreign') done({ ok: false, error: `o servidor local não iniciou; veja ${stateFile('hub.log')}` })
 }
 
 const { serviceToken } = JSON.parse(readFileSync(stateFile('hub.json'), 'utf8'))
