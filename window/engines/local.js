@@ -70,6 +70,8 @@ function voiceWorker() {
 }
 
 function ask(type, data = {}, transfer = []) {
+  // The worker crashed and a new one starts empty: load its models again before anything else.
+  if (type !== 'load' && !workerLoad && workerKind) return loadVoice(workerKind).then(() => ask(type, data, transfer))
   const id = nextId++
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject })

@@ -520,8 +520,14 @@ async function microphone() {
   const timeout = new Promise((_, reject) =>
     setTimeout(() => reject(new Error('Microfone indisponível: libere o microfone nesta janela e toque em Chamar.')), MIC_TIMEOUT_MS),
   )
-  const stream = await Promise.race([navigator.mediaDevices.getUserMedia({ audio: true }), timeout])
-  for (const track of stream.getTracks()) track.stop()
+  const stop = stream => stream.getTracks().forEach(track => track.stop())
+  const request = navigator.mediaDevices.getUserMedia({ audio: true })
+  // A stream that arrives after the timeout is stopped too, or the mic stays on with no call.
+  const stream = await Promise.race([request, timeout]).catch(error => {
+    request.then(stop, () => {})
+    throw error
+  })
+  stop(stream)
 }
 
 // Who answers: Ceci, or Luke or Nara when the Mac speaks with its own voice (the hub's persona).
