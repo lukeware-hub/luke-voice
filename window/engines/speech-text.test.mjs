@@ -59,10 +59,11 @@ test('the native voice gets its own spelling for the tech words it says in Portu
 })
 
 test('the native spelling touches whole words only, and leaves the rest of the sentence alone', () => {
-  for (const text of ['Os tokens e o cached ficam no back-end.', 'O hook e o reviewer.', 'A casa é azul, e o estado é bom.', 'O caché do cachecol.']) {
+  for (const text of ['Os tokens e o cached ficam no back-end.', 'O reviewer e o hookah.', 'A casa é azul, e o estado é bom.', 'O caché do cachecol.']) {
     assert.equal(respellNative(text), text)
   }
   assert.equal(respellNative('Hooks, token.'), 'ruks, touken.')
+  assert.equal(respellNative('O hook e o reviewer.'), 'O ruk e o reviewer.')
 })
 
 test('the native voice starts on one short clause, so the first audio comes sooner', () => {
@@ -125,6 +126,18 @@ test('reais and centavos are said in words; big round amounts keep their digits'
   assert.equal(spokenForms('Custa R$ 1.500,00, R$ 2,50, R$1,01 ou R$ 0,99.'), 'Custa mil e quinhentos reais, dois reais e cinquenta centavos, um real e um centavo ou noventa e nove centavos.')
   assert.equal(spokenForms('R$ 1.000.000,00 e R$ 3.250,90.'), 'um milhão de reais e três mil duzentos e cinquenta reais e noventa centavos.')
   assert.equal(spokenForms('Um aporte de R$ 2 milhões e R$ 1,5 mil.'), 'Um aporte de 2 milhões de reais e 1,5 mil reais.')
+  // One digit of cents is tens of cents: "R$ 10,5" is ten reais and fifty.
+  assert.equal(spokenForms('Custa R$ 10,5 ou R$ 0,5.'), 'Custa dez reais e cinquenta centavos ou cinquenta centavos.')
+})
+
+test('a clock with seconds is read whole, and hh:mm still reads as a time of day', () => {
+  assert.equal(spokenForms('O log marca 10:30:45 e 00:05:01.'), 'O log marca 10 horas, 30 minutos e 45 segundos e 5 minutos e 1 segundo.')
+  assert.equal(spokenForms('Às 21:00:00 e às 9:05.'), 'Às vinte e uma horas e às 9 e 05.')
+})
+
+test('a named version is read with "ponto" even where it looks like thousands', () => {
+  assert.equal(spokenForms('Saiu a v1.234, a versão 1.234 e a version 2.500.'), 'Saiu a versão 1 ponto 234, a versão 1 ponto 234 e a version 2 ponto 500.')
+  assert.equal(spokenForms('Instalei a v0.10.13 para 1.500 usuários, e a v2 continua.'), 'Instalei a versão 0 ponto 10 ponto 13 para 1.500 usuários, e a v2 continua.')
 })
 
 test('versions are said with "ponto"; thousands stay; abbreviations the voice misreads are said in full', () => {

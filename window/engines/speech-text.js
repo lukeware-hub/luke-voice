@@ -64,6 +64,7 @@ const NATIVE_RESPELL = {
   cache: 'Cache',
   changelog: 'tchêindj log',
   framework: 'Framework',
+  hook: 'ruk',
   hooks: 'ruks',
   state: 'State',
   rebase: 're base',
@@ -157,6 +158,13 @@ export function numberWords(n, { isFeminine = false } = {}) {
 const hourCount = h => (h % 10 >= 1 && h % 10 <= 2 && h % 100 !== 11 && h % 100 !== 12 ? numberWords(h, { isFeminine: true }) : String(h))
 const hours = h => `${hourCount(h)} ${h === 1 ? 'hora' : 'horas'}`
 const minutes = m => `${m} ${m === 1 ? 'minuto' : 'minutos'}`
+const seconds = s => `${s} ${s === 1 ? 'segundo' : 'segundos'}`
+// A clock with seconds (10:30:45, 00:05:01): each part that is not zero, "10 horas, 30 minutos e 45 segundos".
+function longClock(h, m, s) {
+  const parts = [h && hours(h), m && minutes(m), s && seconds(s)].filter(Boolean)
+  if (!parts.length) return seconds(0)
+  return parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} e ${parts.at(-1)}`
+}
 // A time of day: "17 e 30", "vinte e uma e 15", "18 horas".
 const clock = (h, m) => (m === '00' ? hours(h) : `${hourCount(h)} e ${m}`)
 
@@ -166,7 +174,8 @@ const MONTHS = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'jul
 // "dois reais e cinquenta centavos".
 function reais(whole, cents) {
   const amount = Number(whole.replace(/\./g, ''))
-  const cent = Number(cents ?? 0)
+  // One digit is tens of cents: "R$ 10,5" is ten reais and fifty.
+  const cent = Number((cents ?? '0').padEnd(2, '0'))
   const parts = []
   if (amount > 0 || cent === 0) {
     const big = amount >= 1e6 && amount % 1e6 === 0 ? ' de' : ''
@@ -207,7 +216,7 @@ export function spokenForms(text) {
     out
       // R$ 2 milhões, R$ 1,5 mil: the number stays, "de reais" follows.
       .replace(/(?<![\p{L}\d])R\$\s?(\d+(?:,\d+)?)\s(mil|milhão|milhões|bilhão|bilhões)(?!\p{L})/gu, (_, n, scale) => `${n} ${scale}${scale === 'mil' ? '' : ' de'} reais`)
-      .replace(/(?<![\p{L}\d])R\$\s?(\d{1,3}(?:\.\d{3})+|\d+)(?:,(\d{2}))?(?![\d,.]\d|\d)/gu, (_, whole, cents) => reais(whole, cents))
+      .replace(/(?<![\p{L}\d])R\$\s?(\d{1,3}(?:\.\d{3})+|\d+)(?:,(\d{1,2}))?(?![\d,.]\d|\d)/gu, (_, whole, cents) => reais(whole, cents))
       // Dates: 22/11, 22/11/2026, 01/12/26. A bare "1/2" stays a fraction: a short date needs both
       // parts in two digits, or a day past 12.
       .replace(/(?<![\p{L}\d/.,])(\d{1,2})\/(\d{1,2})(?:\/(\d{4}|\d{2}))?(?![\p{L}\d/])/gu, (match, d, m, y) => {
@@ -219,15 +228,20 @@ export function spokenForms(text) {
       })
       // Durations: "1h30min" always is one; "1h30" too, unless it is a time of day ("às 1h30", or past 12h).
       .replace(/(?<![\p{L}\d.,:])(\d{1,3})h([0-5]\d)\s?min(?![\p{L}\d])/gu, (_, h, m) => `${hours(Number(h))} e ${minutes(Number(m))}`)
-      .replace(/(?<![\p{L}\d.,:])(\d{1,2})([h:])([0-5]\d)(?![\p{L}\d])/gu, (match, h, mark, m, at, whole) => {
+      .replace(/(?<![\p{L}\d.,:])(\d{1,2}):([0-5]\d):([0-5]\d)(?![\p{L}\d]|[.,:]\d)/gu, (_, h, m, s) => longClock(Number(h), Number(m), Number(s)))
+      .replace(/(?<![\p{L}\d.,:])(\d{1,2})([h:])([0-5]\d)(?![\p{L}\d]|:\d)/gu, (match, h, mark, m, at, whole) => {
         const hour = Number(h)
         const isClock = mark === ':' || hour >= 13 || /(?:^|[^\p{L}])(?:às|as|das|até|ate|à)\s+$/iu.test(whole.slice(0, at))
         if (isClock) return hour > 23 ? match : clock(hour, m)
         return m === '00' ? hours(hour) : `${hours(hour)} e ${minutes(Number(m))}`
       })
       .replace(/(?<![\p{L}\d.,:])(\d{1,3})h(?![\p{L}\d])/gu, (_, h) => hours(Number(h)))
+      // "v1.2" is "versão 1.2"; after "versão" or "version" a number is always a version, even 1.234.
+      .replace(/(?<![\p{L}\d])v(?=\d+(?:\.\d+)+(?![\p{L}\d]))/giu, 'versão ')
       // A period between digits is a version (Opus 5.5, 0.8.1), said "5 ponto 5"; "1.500" (thousands) stays.
-      .replace(/(?<![\p{L}\d.,])\d+(?:\.\d+)+(?![\p{L}\d])/gu, n => (/^\d{1,3}(?:\.\d{3})+$/.test(n) ? n : n.split('.').join(' ponto ')))
+      .replace(/(?<![\p{L}\d.,])\d+(?:\.\d+)+(?![\p{L}\d])/gu, (n, at, whole) =>
+        /^\d{1,3}(?:\.\d{3})+$/.test(n) && !/(?:^|[^\p{L}])(?:versão|versao|version)\s+$/iu.test(whole.slice(0, at)) ? n : n.split('.').join(' ponto '),
+      )
       .replace(/(\d)\s?%/g, '$1 por cento')
   )
 }
