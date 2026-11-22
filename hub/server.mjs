@@ -34,7 +34,7 @@ const STT_WAIT_MS = 20_000
 // How much of what Ceci just said goes into the ears' prompt: her last minute, newest 200 characters.
 const RECENT_SAID_MS = 60_000
 const RECENT_SAID_CHARS = 200
-// A brain turn is one short Claude Haiku call (~2.5 s); a cold start can take longer.
+// A brain turn is one short Claude Sonnet call at medium effort (~2–3 s); a cold start can take longer.
 const BRAIN_WAIT_MS = 40_000
 const NO_SESSION_SAY = 'Nenhuma sessão do Claude está ligada. Ligue o luke-voice no Claude Code e me chame de novo.'
 const STALE_SESSION_MS = 90_000
@@ -560,7 +560,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     },
     // The native engine: the profile chosen for this machine, which servers are up, the download.
     'GET /engine': () => [200, { profile: profile(), native: engine ? engine.status() : {}, download: engineDownload }],
-    // The local voice's brain: the focused session's mod asks Claude Haiku and answers { say, tool }.
+    // The local voice's brain: the focused session's mod asks Claude Sonnet and answers { say, tool }.
     'POST /brain': async (_none, body) => {
       const session = target()
       if (!session) return [200, { say: NO_SESSION_SAY, tool: null }]

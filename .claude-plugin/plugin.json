@@ -12,7 +12,7 @@
     "voice_provider": {
       "type": "string",
       "title": "Voice: local (free, default) or elevenlabs",
-      "description": "local: the free voice that runs on your computer (Whisper + Kokoro in the call window; the brain is Claude Haiku on your Claude account). elevenlabs: the ElevenLabs voice agent, which needs the API key below. Empty: ElevenLabs while a key is set, else local. /luke-voice voz switches it too."
+      "description": "local: the free voice that runs on your computer (Whisper + Kokoro in the call window; the brain is Claude Sonnet on your Claude account). elevenlabs: the ElevenLabs voice agent, which needs the API key below. Empty: ElevenLabs while a key is set, else local. /luke-voice voz switches it too."
     },
     "api_key": {
       "type": "string",

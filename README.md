@@ -24,7 +24,7 @@ luke-voice picks the profile by itself at install time:
 | When | llama.cpp sees a GPU with at least 6 GB of video memory (NVIDIA, AMD or Intel through Vulkan on Windows and Linux; Apple Silicon through Metal on macOS arm64). From 3.8 GB (a 4 GB card, a Mac with 8 GB) it is still Ceci's original voice, with her ears on the CPU: about half a second more to hear each turn. | Everything else. |
 | Speaks | Qwen3-TTS 12Hz 1.7B Base, cloned at run time from `agent/ceci-voice.wav` and its transcript `agent/ceci-voice.txt`. | Kokoro-82M in the browser. Piper `pt_BR-faber` is the fallback on slow computers. |
 | Listens | Qwen3-ASR 0.6B (Q6). | Whisper base in the browser. |
-| Small talk | An instant local router, Qwen3.5 0.8B on the CPU. | Goes to Claude Haiku like everything else. |
+| Small talk | An instant local router, Qwen3.5 0.8B on the CPU. | Goes to Claude Sonnet like everything else. |
 | Download | About 3.3 GB, once (3.24 GB of models and the 39 MB llama.cpp engine). No Python, no PyTorch. | About 360 MB, once (about 520 MB on a machine with a small GPU, where Kokoro runs in fp32 on WebGPU). |
 | Video memory in a call | About 5.4 GB for the voice and the ears together, and about 3.2 GB of RAM for the whole engine (measured on an RTX 3060 Ti). | None beyond the browser's. |
 
@@ -120,13 +120,13 @@ It starts **off**, and remembers your choice. When Claude Code opens with it alr
 
 ### A faster brain
 
-Ceci's brain is Claude Haiku 5.5, called directly through the mod engine's `$.model.complete` at effort low, with the prompt cached. The `claude -p` call remains only as a fallback. Measured brain turns take 0.9 to 2.8 s (they took 6 to 28 s before).
+The brain (Ceci, Luke or Nara) is Claude Sonnet 5.5, called directly through the mod engine's `$.model.complete` at medium effort, with the prompt cached. The `claude -p` call remains only as a fallback. Measured brain turns take about 2 to 3 s (Claude Haiku 5.5 at low effort, the brain up to 0.10.9, took about 1.2 to 2.1 s).
 
 Some things need no model call at all:
 - "pare" or "para" stops Claude, with or without her name and as many times as you say it ("Para, Ceci, para!", "chega, Ceci").
 - When Ceci asks "posso?", a plain "sim" runs the pending action at once, and a plain "não" cancels it.
 - When the brain takes more than 600 ms, Ceci says a short acknowledgement ("Certo.", "Deixa eu ver."). They are made once per window, only while nobody is talking, so they never delay her first answer.
-- On the gpu profile, a local router answers small talk (greetings, thanks, goodbyes, "who are you", her age, who created her) in about 0.3 s, with lines written in `hub/router.mjs`, so it never invents anything. Anything else, and any request, goes to Claude Haiku. A word check on top of the small model makes sure a request is never answered locally (0 of 49 test requests were).
+- On the gpu profile, a local router answers small talk (greetings, thanks, goodbyes, "who are you", her age, who created her) in about 0.3 s, with lines written in `hub/router.mjs`, so it never invents anything. Anything else, and any request, goes to Claude Sonnet. A word check on top of the small model makes sure a request is never answered locally (0 of 49 test requests were).
 
 ### Knowing when you finished talking
 
@@ -174,7 +174,7 @@ With no choice at all, luke-voice uses ElevenLabs while a key is saved, and the 
 ### What leaves your computer
 
 - **While it is off:** nothing.
-- **Free voice:** the audio never leaves your computer. Only the text of what you said, a short summary of what happens in the session, and finished task results go to Claude Haiku on your Claude account, which decides what Ceci says. The model files are downloaded once (from Hugging Face and GitHub): at install or setup, or on the first call if neither ran. After that, nothing is downloaded.
+- **Free voice:** the audio never leaves your computer. Only the text of what you said, a short summary of what happens in the session, and finished task results go to Claude Sonnet on your Claude account, which decides what Ceci says. The model files are downloaded once (from Hugging Face and GitHub): at install or setup, or on the first call if neither ran. After that, nothing is downloaded.
 - **ElevenLabs voice:** your voice and what happens in the session (your prompts and Claude's tool calls) go to your agent at ElevenLabs.
 
 ## If something does not work
@@ -184,7 +184,7 @@ With no choice at all, luke-voice uses ElevenLabs while a key is saved, and the 
 | You hear nothing | Check that your computer's sound is on and that the window says **Em chamada**. |
 | The voice was not downloaded at install | Run `/luke-voice setup`. Or start a call: the first call downloads it, with the progress in the window. |
 | Ceci uses the light voice on a computer with a graphics card | The GPU has less than 3.8 GB of video memory, or setup's test failed. `/luke-voice status` shows the profile. `/luke-voice setup` tries again. |
-| Ceci takes a few seconds to answer | Requests that go to Claude Haiku take about 1 to 3 seconds. On the gpu profile, small talk is instant. On the light profile, a computer without a graphics card also takes 1 to 2 seconds longer to listen and speak. |
+| Ceci takes a few seconds to answer | Requests that go to Claude Sonnet take about 2 to 3 seconds. On the gpu profile, small talk is instant. On the light profile, a computer without a graphics card also takes 1 to 2 seconds longer to listen and speak. |
 | The free voice sounds more robotic | On a slow computer, the light profile switches to Piper, a lighter voice, so she does not stutter. **Settings** in the window shows which voice model speaks. |
 | The free voice sounds robotic on a Mac | When the natural voice is too slow for the Mac (as on an M1), the assistant speaks with the Mac's own voice: the Siri voice set as the system voice in Spoken Content, or else a pt-BR Premium or Enhanced voice. The installer asks for **Siri Voz 1** (System Settings > Accessibility > Spoken Content > System Voice); it downloads once, about 230 MB, and not over a phone's hotspot (macOS does not download voices on a network it marks as expensive). With Siri Voz 1 (male) the assistant is **Luke**, a 22-year-old man who speaks of himself in the masculine; with Siri Voz 2 (female) she is **Nara**, Ceci with another name. Another male Mac voice is Luke; any other voice is Ceci. The name follows the voice from the next call. Windows, Linux and ElevenLabs are always Ceci. `LUKE_VOICE_MAC_VOICE=off` turns this off, `LUKE_VOICE_MAC_VOICE=<identifier>` picks a voice. |
 | "Falta a chave da ElevenLabs" or "Chave: faltando" | Save the key with `/plugin configure luke-voice@luke-voice` (or run the installer again) and restart Claude Code. Or use the free voice: `/luke-voice voz local`. |
@@ -246,13 +246,13 @@ Claude session ── luke-voice mod ── events, long-poll ──┤
                                                         ▼
                                                    call window
                          free voice ┌─────────────────────┴─────────────────────┐ ElevenLabs voice
-   light (browser): mic → VAD → Whisper → POST /brain → mod → Haiku            WebRTC ── ElevenLabs agent
+   light (browser): mic → VAD → Whisper → POST /brain → mod → Sonnet           WebRTC ── ElevenLabs agent
                     Kokoro (or Piper) ← what Ceci says ←─────┘
    gpu (native):    mic → Silero VAD + Smart Turn → hub /stt, /tts, /route → llama-server (127.0.0.1)
                     Qwen3-ASR (ears), Qwen3-TTS (voice), Qwen3.5 0.8B (router) → POST /brain for requests
 ```
 
-- `hooks/register.tsx` is the mod. It reports activity, pulls commands from the hub and runs them in its own session. For the free voice it also runs the brain: Claude Haiku 5.5 called directly through the mod engine's `$.model.complete` at effort low with the prompt cached (a `claude -p` call, with no tools, no MCP servers, no settings and no saved session, remains only as a fallback).
+- `hooks/register.tsx` is the mod. It reports activity, pulls commands from the hub and runs them in its own session. For the free voice it also runs the brain: Claude Sonnet 5.5 called directly through the mod engine's `$.model.complete` at medium effort with the prompt cached (a `claude -p` call, with no tools, no MCP servers, no settings and no saved session, remains only as a fallback).
 - `hub/launch.mjs` starts the hub detached when it is down. The hub exits after ten idle minutes. `LUKE_VOICE_PORT` moves it (and the mod follows).
 - `hub/agent.mjs` creates or updates the ElevenLabs agent from `agent/agent.json` and `agent/prompt.md` (plain REST, no packages). Change those files and the next ElevenLabs call syncs the agent. The free voice's brain reads `agent/brain-prompt.md`.
 - Models and engine, for the free voice:

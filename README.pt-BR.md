@@ -24,7 +24,7 @@ O luke-voice escolhe o perfil sozinho, na hora da instalação:
 | Quando | O llama.cpp enxerga uma GPU com pelo menos 6 GB de memória de vídeo (NVIDIA, AMD ou Intel pelo Vulkan no Windows e no Linux; Apple Silicon pelo Metal no macOS arm64). A partir de 3,8 GB (uma placa de 4 GB, um Mac com 8 GB) continua a voz original da Ceci, com os ouvidos no processador: cerca de meio segundo a mais para ouvir cada fala. | Todo o resto. |
 | Fala | Qwen3-TTS 12Hz 1.7B Base, clonada na hora a partir de `agent/ceci-voice.wav` e da transcrição `agent/ceci-voice.txt`. | Kokoro-82M no navegador. O Piper `pt_BR-faber` é o plano B em computadores lentos. |
 | Ouve | Qwen3-ASR 0.6B (Q6). | Whisper base no navegador. |
-| Conversa rápida | Um roteador local instantâneo, o Qwen3.5 0.8B na CPU. | Vai para o Claude Haiku como todo o resto. |
+| Conversa rápida | Um roteador local instantâneo, o Qwen3.5 0.8B na CPU. | Vai para o Claude Sonnet como todo o resto. |
 | Download | Cerca de 3,3 GB, uma vez só (3,24 GB de modelos e o motor llama.cpp de 39 MB). Sem Python, sem PyTorch. | Cerca de 360 MB, uma vez só (cerca de 520 MB numa máquina com GPU pequena, onde o Kokoro roda em fp32 no WebGPU). |
 | Memória de vídeo numa chamada | Cerca de 5,4 GB para a voz e os ouvidos juntos, e cerca de 3,2 GB de RAM para o motor inteiro (medido numa RTX 3060 Ti). | Nada além do que o navegador usa. |
 
@@ -120,13 +120,13 @@ O `/luke-voice setup` faz o mesmo que a etapa 6 do instalador, de dentro do Clau
 
 ### Um cérebro mais rápido
 
-O cérebro da Ceci é o Claude Haiku 5.5, chamado direto pelo `$.model.complete` do motor de mods, com esforço baixo e prompt em cache. A chamada `claude -p` ficou só como plano B. Os turnos do cérebro medidos levam de 0,9 a 2,8 s (levavam de 6 a 28 s).
+O cérebro (Ceci, Luke ou Nara) é o Claude Sonnet 5.5, chamado direto pelo `$.model.complete` do motor de mods, com esforço médio e prompt em cache. A chamada `claude -p` ficou só como plano B. Os turnos do cérebro medidos levam cerca de 2 a 3 s (o Claude Haiku 5.5 com esforço baixo, o cérebro até a 0.10.9, levava cerca de 1,2 a 2,1 s).
 
 Algumas coisas não precisam de chamada ao modelo:
 - "pare" ou "para" para o Claude, com ou sem o nome dela e quantas vezes você disser ("Para, Ceci, para!", "chega, Ceci").
 - Quando a Ceci pergunta "posso?", um "sim" simples roda a ação pendente na hora, e um "não" simples cancela.
 - Quando o cérebro demora mais de 600 ms, a Ceci diz um reconhecimento curto ("Certo.", "Deixa eu ver."). Eles são gerados uma vez por janela, só enquanto ninguém fala, então nunca atrasam a primeira resposta dela.
-- No perfil gpu, um roteador local responde conversa rápida (cumprimentos, agradecimentos, despedidas, "quem é você", a idade dela, quem a criou) em cerca de 0,3 s, com frases escritas em `hub/router.mjs`, então ele nunca inventa nada. Todo o resto, e qualquer pedido, vai para o Claude Haiku. Uma checagem de palavras por cima do modelo pequeno garante que um pedido nunca seja respondido localmente (0 de 49 pedidos de teste foram).
+- No perfil gpu, um roteador local responde conversa rápida (cumprimentos, agradecimentos, despedidas, "quem é você", a idade dela, quem a criou) em cerca de 0,3 s, com frases escritas em `hub/router.mjs`, então ele nunca inventa nada. Todo o resto, e qualquer pedido, vai para o Claude Sonnet. Uma checagem de palavras por cima do modelo pequeno garante que um pedido nunca seja respondido localmente (0 de 49 pedidos de teste foram).
 
 ### Saber quando você terminou de falar
 
@@ -174,7 +174,7 @@ Sem nenhuma escolha, o luke-voice usa a ElevenLabs se houver chave salva, e a vo
 ### O que sai do seu computador
 
 - **Desligado:** nada.
-- **Voz gratuita:** o áudio não sai do seu computador. Só o texto do que você falou, um resumo curto do que acontece na sessão e o resultado das tarefas vão para o Claude Haiku, da sua conta do Claude, que decide o que a Ceci fala. Os arquivos dos modelos são baixados uma vez (do Hugging Face e do GitHub): na instalação ou no setup, ou na primeira chamada se nenhum dos dois rodou. Depois disso, nada é baixado.
+- **Voz gratuita:** o áudio não sai do seu computador. Só o texto do que você falou, um resumo curto do que acontece na sessão e o resultado das tarefas vão para o Claude Sonnet, da sua conta do Claude, que decide o que a Ceci fala. Os arquivos dos modelos são baixados uma vez (do Hugging Face e do GitHub): na instalação ou no setup, ou na primeira chamada se nenhum dos dois rodou. Depois disso, nada é baixado.
 - **Voz ElevenLabs:** a sua voz e o que acontece na sessão (seus pedidos e as ferramentas que o Claude usa) vão para o seu agente na ElevenLabs.
 
 ## Se algo não funcionar
@@ -184,7 +184,7 @@ Sem nenhuma escolha, o luke-voice usa a ElevenLabs se houver chave salva, e a vo
 | Não ouço nada | Veja se o som do computador está ligado e se a janela mostra **Em chamada**. |
 | A voz não foi baixada na instalação | Rode `/luke-voice setup`. Ou comece uma chamada: a primeira chamada baixa a voz, com o progresso na janela. |
 | A Ceci usa a voz leve num computador com placa de vídeo | A GPU tem menos de 3,8 GB de memória de vídeo, ou o teste do setup falhou. O `/luke-voice status` mostra o perfil. O `/luke-voice setup` tenta de novo. |
-| A Ceci demora alguns segundos para responder | Os pedidos que vão para o Claude Haiku levam cerca de 1 a 3 segundos. No perfil gpu, a conversa rápida é instantânea. No perfil light, um computador sem placa de vídeo também leva 1 a 2 segundos a mais para ouvir e falar. |
+| A Ceci demora alguns segundos para responder | Os pedidos que vão para o Claude Sonnet levam cerca de 2 a 3 segundos. No perfil gpu, a conversa rápida é instantânea. No perfil light, um computador sem placa de vídeo também leva 1 a 2 segundos a mais para ouvir e falar. |
 | A voz gratuita ficou mais robótica | Num computador lento, o perfil light troca para o Piper, uma voz mais leve, para não falar travado. **Configurações**, na janela, mostra qual modelo de voz está falando. |
 | A voz gratuita soa robótica no Mac | Quando a voz natural é lenta demais para o Mac (como num M1), a assistente fala com a voz do próprio Mac: a voz Siri escolhida como Voz do Sistema em Conteúdo Falado ou, se não houver, uma voz pt-BR Premium ou Melhorada. O instalador pede a **Siri Voz 1** (Ajustes do Sistema › Acessibilidade › Conteúdo Falado › Voz do Sistema); ela baixa uma vez, cerca de 230 MB, e não pela internet do celular (o macOS não baixa vozes numa rede que ele marca como cara). Com a Siri Voz 1 (masculina) a assistente é o **Luke**, um homem de 22 anos que fala de si no masculino; com a Siri Voz 2 (feminina), é a **Nara**, a Ceci com outro nome. Outra voz masculina do Mac também é o Luke; qualquer outra voz é a Ceci. O nome acompanha a voz a partir da próxima chamada. No Windows, no Linux e na ElevenLabs é sempre a Ceci. `LUKE_VOICE_MAC_VOICE=off` desliga, `LUKE_VOICE_MAC_VOICE=<identificador>` escolhe uma voz. |
 | "Falta a chave da ElevenLabs" ou "Chave: faltando" | Salve a chave com `/plugin configure luke-voice@luke-voice` (ou rode o instalador de novo) e reinicie o Claude Code. Ou use a voz gratuita: `/luke-voice voz local`. |
