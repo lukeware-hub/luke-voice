@@ -198,6 +198,7 @@ const percent = ({ loaded, total }) => Math.min(99, Math.round((loaded / total) 
 
 // How long a call waits for the native engine the hub is starting, before using the light voice.
 const NATIVE_WAIT_MS = 90_000
+const MAC_VOICE_HINT = 'Para a Ceci soar mais natural neste Mac, baixe a voz Luciana (Premium) em Ajustes do Sistema › Acessibilidade › Conteúdo Falado › Voz do Sistema › Gerenciar Vozes. Ela vale a partir da próxima chamada.'
 // A native /stt or /tts request past these is dropped (that turn, or that chunk), so a hung
 // llama-server never holds the turn queue forever.
 const STT_TIMEOUT_MS = 20_000
@@ -239,6 +240,8 @@ export async function startSession({
     config = await hub('GET', '/config').catch(() => ({}))
   }
   const isNative = forceNative === '0' ? false : Boolean(config.native?.tts && config.native?.asr)
+  // No natural voice on this Mac, but a Premium voice of macOS: the hub speaks with it, the page still listens.
+  const isMacVoice = !isNative && forceNative !== '0' && Boolean(config.macVoice)
   if (!isNative && config.download?.total) onStatus(`Preparando a voz natural: ${percent(config.download)}%. Por enquanto, a voz leve.`)
   // The natural voice was expected (this machine has the gpu profile, or the hub was starting it)
   // but failed or did not come up in time: the user is told, never left guessing why she sounds different.
@@ -249,9 +252,10 @@ export async function startSession({
   } finally {
     listeners.delete(showProgress)
   }
-  if (voiceInfo) voiceInfo = { ...voiceInfo, tts: isNative ? 'native' : voiceInfo.tts, stt: isNative ? 'native' : voiceInfo.stt, device: isNative ? 'native' : voiceInfo.device }
+  if (voiceInfo) voiceInfo = { ...voiceInfo, tts: isNative ? 'native' : isMacVoice ? `mac:${config.macVoice}` : voiceInfo.tts, stt: isNative ? 'native' : voiceInfo.stt, device: isNative ? 'native' : voiceInfo.device }
   // The browser voice switched from Kokoro to the lighter Piper (Kokoro too slow here, or it did not load).
   if (!isNative && voiceInfo?.fallback) onStatus(voiceInfo.fallback, { isWarning: true })
+  else if (!isNative && !isMacVoice && config.macVoiceHint) onStatus(MAC_VOICE_HINT, { isWarning: true })
 
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
@@ -305,7 +309,7 @@ export async function startSession({
   const joiner = createTurnJoiner()
   let turnNow = null
   const isStale = () => turnNow !== null && !joiner.isCurrent(turnNow)
-  const ackVoice = isNative ? 'native' : `browser:${voiceInfo?.tts ?? ''}`
+  const ackVoice = isNative ? 'native' : isMacVoice ? `mac:${config.macVoice}` : `browser:${voiceInfo?.tts ?? ''}`
   if (!ackCache.has(ackVoice)) ackCache.set(ackVoice, new Map())
   const ackAudio = ackCache.get(ackVoice)
   let nextAck = 0
@@ -352,7 +356,9 @@ export async function startSession({
   }
 
   // The voice backend: the native engine through the hub, or the in-page worker.
-  const synth = text => (isNative ? nativeSynth(text) : ask('speak', { text }))
+  // The Mac voice falls back to the browser voice for a line `say` could not make.
+  const macSynth = text => nativeSynth(text).then(made => (made.isBroken ? ask('speak', { text }) : made))
+  const synth = text => (isNative ? nativeSynth(text) : isMacVoice ? macSynth(text) : ask('speak', { text }))
   const transcribe = audio => (isNative ? nativeTranscribe(audio) : ask('transcribe', { audio }, [audio.buffer]))
 
   const setMode = next => {
