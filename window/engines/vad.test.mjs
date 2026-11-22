@@ -197,3 +197,22 @@ test('a pause hands the turn model only the last 8 s of a long utterance', () =>
   const end = vad.endNow(candidate.id)
   assert.ok(end.audio.length > 8 * 16_000)
 })
+
+test('when Ceci starts talking while the user is mid-sentence, the user is not cut off', () => {
+  const vad = createVad()
+  feed(vad, Array(20).fill(0).map(silence))
+  // The user starts talking (Ceci quiet), at a level below the barge bar.
+  assert.deepEqual(feed(vad, Array(10).fill(0).map(() => tone(0.02))).map(e => e.type), ['start'])
+  // Ceci starts a line while the user goes on: the turn must not end under them.
+  assert.deepEqual(feed(vad, Array(60).fill(0).map(() => tone(0.02)), { isSpeaking: true }), [])
+  assert.equal(vad.inSpeech, true)
+  // The user stops: silence ends the turn as usual.
+  assert.deepEqual(feed(vad, Array(45).fill(0).map(silence)).map(e => e.type), ['end'])
+})
+
+test('while Ceci talks and the user is not in a turn, the high barge bar still holds', () => {
+  const vad = createVad()
+  feed(vad, Array(20).fill(0).map(silence))
+  assert.deepEqual(feed(vad, Array(60).fill(0).map(() => tone(0.02)), { isSpeaking: true }), [])
+  assert.equal(vad.inSpeech, false)
+})
