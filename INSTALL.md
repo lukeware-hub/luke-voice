@@ -1,6 +1,6 @@
 # Install luke-voice
 
-luke-voice gives Claude Code a voice: Ceci, an assistant you talk to in Brazilian Portuguese. Installing takes a few minutes, and you do not need to know how to program.
+luke-voice gives Claude Code a voice: Ceci, an assistant you talk to in Brazilian Portuguese (on a Mac that speaks with a male voice, she is Luke). Installing takes a few minutes, and you do not need to know how to program.
 
 **The easiest way:** open Claude Code and send it this message:
 
