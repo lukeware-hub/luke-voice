@@ -6,6 +6,7 @@ import { isConfirm, isDeny, isStopClaude, isStopOnly } from '/engines/fast-path.
 import { speechChunks } from '/engines/speech-text.js'
 import { createTurnJoiner, createTurnLog } from '/engines/turn-join.js'
 import { risingPercent } from '/engines/progress.js'
+import { isNotSpeech } from '/engines/transcript.js'
 import { FRAME, RATE, createVad, rms } from '/engines/vad.js'
 
 export const name = 'local'
@@ -667,7 +668,7 @@ export async function startSession({
       return onTurnEnd(joiner.dropped())
     }
     timing('transcribe', ms, `for ${seconds} s of speech`)
-    if (!text || isEnded || isStale() || /^\W*$/.test(text)) return
+    if (!text || isEnded || isStale() || isNotSpeech(text)) return
     // The window's voice gate and quiet mode hear the user now, before the brain is asked: a notice
     // that arrives while the brain thinks must not pass for the user's word.
     onMessage({ source: 'user', message: text })
