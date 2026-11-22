@@ -5,6 +5,7 @@ import { existsSync, openSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { rotateLog } from './engine.mjs'
 import { ORIGIN, isOlderVersion, stateFile } from './paths.mjs'
 import { proxyEnv } from './proxy.mjs'
 
@@ -65,6 +66,8 @@ if (up && isOlderVersion(up.version, VERSION) && existsSync(stateFile('hub.json'
 }
 
 if (!up) {
+  // Past 5 MB the log moves to hub.old.log (the one before is dropped), or it grows forever.
+  rotateLog(stateFile('hub.log'))
   const logFd = openSync(stateFile('hub.log'), 'a')
   spawn(process.execPath, [join(here, 'server.mjs')], {
     detached: true,
