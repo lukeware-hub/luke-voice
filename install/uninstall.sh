@@ -112,6 +112,12 @@ if CLAUDE=$(find_claude); then
     "$CLAUDE" plugin marketplace remove luke-voice >/dev/null 2>"$errfile" || fail 'não consegui remover a origem do luke-voice do Claude Code.' "$(cat "$errfile") Rode o desinstalador de novo."
   fi
   rm -f "$errfile"
+  # `claude plugin uninstall` leaves the plugin's downloaded copy behind: only luke-voice's own
+  # folder in Claude Code's plugin cache is deleted.
+  plugin_cache="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/cache/luke-voice"
+  if [ -d "$plugin_cache" ]; then
+    rm -rf "$plugin_cache" || fail "não consegui apagar $plugin_cache." 'Feche o Claude Code e rode o desinstalador de novo.'
+  fi
   ok 'Removido do Claude Code.'
 else
   ok 'O Claude Code não está neste computador: nada a remover nele.'

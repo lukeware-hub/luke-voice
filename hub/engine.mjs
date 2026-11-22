@@ -303,18 +303,26 @@ function profileBuild(profile, dir) {
 // Everything a profile needs, downloaded and checked: the build and the profile decision, then the
 // models of that profile. onProgress(loaded, total, label) reports bytes over all model files.
 // Returns the profile. `devices` already listed and a `reason` come with a fallback to the light
-// profile (setup.mjs, when the natural voice fails its test). checkSpace({ paths, dir }) runs once
-// the profile is known, before its models are downloaded (setup.mjs fails early on a full disk).
-export async function prepareEngine({ dir = engineDir(), models = modelsDir(), request, onProgress = () => {}, run = runFile, override = process.env.LUKE_VOICE_PROFILE ?? '', devices: known = null, reason = '', checkSpace = null, key = platformKey(), ensure = ensureModel, parallel = 3 } = {}) {
+// profile (setup.mjs, when the natural voice fails its test), with `failed`: the profile then
+// remembers it (naturalFailed), and every later preparation keeps the light voice, whoever runs it
+// (the hub, after an update, while setup still downloads the light models), until `retryNatural`
+// (setup.mjs, which tests the natural voice again) or LUKE_VOICE_PROFILE=gpu asks for it.
+// checkSpace({ paths, dir }) runs once the profile is known, before its models are downloaded
+// (setup.mjs fails early on a full disk).
+export async function prepareEngine({ dir = engineDir(), models = modelsDir(), request, onProgress = () => {}, run = runFile, override = process.env.LUKE_VOICE_PROFILE ?? '', devices: known = null, reason = '', failed = false, retryNatural = false, checkSpace = null, key = platformKey(), ensure = ensureModel, parallel = 3 } = {}) {
   const previous = readProfile(dir)
+  const keepLight = !failed && !retryNatural && override !== 'gpu' && previous?.naturalFailed === true
+  const wanted = keepLight ? 'light' : override
   let exe = null
-  let devices = known ?? []
-  if (key && override !== 'light') {
+  // The devices listed before: the light voice's models depend on them (WebGPU or the CPU).
+  let devices = known ?? (keepLight ? (previous.devices ?? []) : [])
+  if (key && wanted !== 'light') {
     exe = await ensureBinaries({ dir, key, request, run, onProgress: (loaded, total) => onProgress(loaded, total, 'llama.cpp') })
     devices = await listDevices(exe, run)
   }
-  const choice = pickProfile({ key, devices, override })
-  const profile = { ...choice, ...(reason ? { reason } : {}), build: LLAMA_BUILD, exe, devices, at: new Date().toISOString() }
+  const choice = pickProfile({ key, devices, override: wanted })
+  const why = reason || (keepLight ? previous.reason : '')
+  const profile = { ...choice, ...(why ? { reason: why } : {}), ...(failed || keepLight ? { naturalFailed: true } : {}), build: LLAMA_BUILD, exe, devices, at: new Date().toISOString() }
   mkdirSync(dir, { recursive: true })
   writeFileSync(profileFile(dir), JSON.stringify(profile, null, 2))
   const groups = profileGroups(profile.profile, devices)

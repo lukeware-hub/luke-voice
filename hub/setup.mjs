@@ -171,7 +171,8 @@ export async function hubRunsVoice({ origin = ORIGIN } = {}) {
 export async function setup({ out = process.stdout, prepare = prepareEngine, test = smokeTest, isTested = true, isVoiceRunning = hubRunsVoice, free = freeBytes } = {}) {
   const say = line => out.write(`${line}\n`)
   const spaceCheck = options => checkSpace({ ...options, free })
-  const profile = await prepare({ onProgress: progressPrinter(out), checkSpace: spaceCheck })
+  // Setup tests the natural voice, so it may try it again after an earlier failure.
+  const profile = await prepare({ onProgress: progressPrinter(out), checkSpace: spaceCheck, retryNatural: true })
   const bytes = groupBytes(profileGroups(profile.profile, profile.devices))
   if (profile.profile === 'gpu') {
     say(`      Perfil: voz natural na placa de vídeo (${profile.reason}). Modelos: ${size(bytes)} em ${modelsDir()}.`)
@@ -193,7 +194,7 @@ export async function setup({ out = process.stdout, prepare = prepareEngine, tes
       say('      As chamadas vão usar a voz leve, no navegador, até isso ser resolvido. Para tentar de novo: /luke-voice setup.')
       // Saved as the light profile, so the hub and the window do not use the broken natural voice.
       try {
-        const fallback = await prepare({ onProgress: progressPrinter(out), checkSpace: spaceCheck, override: 'light', devices: profile.devices, reason: `a voz natural falhou no teste: ${result.problems.join('; ')}` })
+        const fallback = await prepare({ onProgress: progressPrinter(out), checkSpace: spaceCheck, override: 'light', devices: profile.devices, failed: true, reason: `a voz natural falhou no teste: ${result.problems.join('; ')}` })
         say(`      Voz leve pronta. Modelos: ${size(groupBytes(profileGroups(fallback.profile, fallback.devices)))} em ${modelsDir()}.`)
         return { profile, test: result, ok: false, fallback }
       } catch (error) {
@@ -218,8 +219,9 @@ if (isMainModule(import.meta.url, process.argv[1])) {
   const asJson = process.argv.includes('--json')
   try {
     const result = await setup({ out: asJson ? { write: () => true, isTTY: false } : process.stdout, isTested: !process.argv.includes('--no-test') })
-    if (asJson) process.stdout.write(`${JSON.stringify({ ok: result.ok, profile: result.profile.profile, reason: result.profile.reason ?? '', heard: result.test?.heard ?? '', problems: result.test?.problems ?? [] })}\n`)
-    process.exit(result.ok ? 0 : 1)
+    if (asJson) process.stdout.write(`${JSON.stringify({ ok: result.ok, profile: result.profile.profile, reason: result.profile.reason ?? '', heard: result.test?.heard ?? '', problems: result.test?.problems ?? [], fallback: result.fallback?.profile ?? null })}\n`)
+    // The natural voice failed but the light voice is ready: calls work, so the installers say so.
+    process.exit(result.ok || result.fallback ? 0 : 1)
   } catch (error) {
     const { reason, help } = explain(error)
     if (asJson) process.stdout.write(`${JSON.stringify({ ok: false, error: reason, help })}\n`)
