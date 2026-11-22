@@ -442,12 +442,32 @@ async function ack($: EngineInterface, id: string, ok: boolean, message: string)
   await hubFetch($, 'POST', '/ack', { id, ok, message }).catch(() => undefined)
 }
 
+// "pare" with no main turn running: voice tasks run as background subagents, which aborting the
+// main turn would not reach. Each running one is stopped as the TaskStop tool stops a background
+// agent; its turn.complete (aborted) then writes "Tarefa parada" in the pane.
+async function stopTasks($: EngineInterface, id: string) {
+  const agentIds = (await read($, running)).map(r => r.key).filter(key => tasks.has(key))
+  if (agentIds.length === 0) return ack($, id, false, 'Claude is not working right now.')
+  const problems: string[] = []
+  for (const agentId of agentIds) {
+    try {
+      const result = await $.agent.call({ tool: 'TaskStop', input: { task_id: agentId } })
+      if (result.deny || result.isError) problems.push(result.deny || String(result.text ?? 'failed'))
+    } catch (error) {
+      problems.push(error instanceof Error ? error.message : String(error))
+    }
+  }
+  const stopped = agentIds.length - problems.length
+  if (stopped === 0) return ack($, id, false, `Could not stop the voice tasks: ${problems.join('; ')}`)
+  return ack($, id, true, `Stopped ${stopped} voice task${stopped === 1 ? '' : 's'}.${problems.length ? ` Could not stop ${problems.length}: ${problems.join('; ')}` : ''}`)
+}
+
 async function onCommand($: EngineInterface, command: Command) {
   if (!(await read($, isOn))) return ack($, command.id, false, 'luke-voice is off in that session.')
   // A brain turn takes seconds: run it beside the inbox, so a tool call right after is not held up.
   if (command.type === 'think') return void think($, command)
   if (command.type === 'stop') {
-    if (!isBusy || !turnId) return ack($, command.id, false, 'Claude is not working right now.')
+    if (!isBusy || !turnId) return stopTasks($, command.id)
     try {
       await $.turn.abort({ turnId })
       await addLine($, { kind: 'stop', text: 'Claude parado.' })

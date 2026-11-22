@@ -188,6 +188,8 @@ async function load({ voice = 'pf_dora', language = 'pt-br', device: forced, dty
       ? { encoder_model: 'fp32', decoder_model_merged: 'fp32' }
       : { encoder_model: 'q8', decoder_model_merged: 'q8' }
   sttName = 'whisper-base'
+  // Why the voice is Piper when Kokoro was the plan: said to the user (local.js), never hidden.
+  let fallback = null
   const loadVoice = async () => {
     if (ttsChoice === 'piper') {
       engine = 'piper'
@@ -199,6 +201,7 @@ async function load({ voice = 'pf_dora', language = 'pt-br', device: forced, dty
     } catch (error) {
       // Kokoro did not load (memory, download, GPU): Ceci still speaks, with the lighter voice.
       console.warn(`[luke-voice] Kokoro did not load, using Piper: ${error?.message ?? error}`)
+      fallback = 'A voz Kokoro não carregou neste computador; usando a voz Piper, mais leve.'
       engine = 'piper'
       await loadPiper()
     }
@@ -218,12 +221,21 @@ async function load({ voice = 'pf_dora', language = 'pt-br', device: forced, dty
   await speakChunk('Oi.')
   await transcribe(new Float32Array(16_000))
   // Kokoro slower than real time here: switch to Piper, unless Kokoro was asked for by name.
+  // One run can be slow by chance (a background task, a first-run cost left over): up to three
+  // runs, until two agree, and the median decides.
   if (engine === 'kokoro' && !gpu && ttsChoice !== 'kokoro') {
-    const probeStart = performance.now()
-    const { audio, sampleRate } = await speakChunk(RTF_PROBE)
-    const rtf = (performance.now() - probeStart) / 1000 / Math.max(0.1, audio.length / sampleRate)
+    const rtfs = []
+    while (rtfs.length < 3) {
+      const probeStart = performance.now()
+      const { audio, sampleRate } = await speakChunk(RTF_PROBE)
+      rtfs.push((performance.now() - probeStart) / 1000 / Math.max(0.1, audio.length / sampleRate))
+      const slow = rtfs.filter(r => r > MAX_KOKORO_RTF).length
+      if (slow >= 2 || rtfs.length - slow >= 2) break
+    }
+    const rtf = median(rtfs)
     if (rtf > MAX_KOKORO_RTF) {
-      console.warn(`[luke-voice] Kokoro is slower than real time here (RTF ${rtf.toFixed(2)}), using Piper`)
+      console.warn(`[luke-voice] Kokoro is slower than real time here (RTF ${rtfs.map(r => r.toFixed(2)).join(', ')}), using Piper`)
+      fallback = 'A voz Kokoro está lenta neste computador; usando a voz Piper, mais leve.'
       post('status', { stage: 'loading', device })
       await loadPiper()
       engine = 'piper'
@@ -232,7 +244,14 @@ async function load({ voice = 'pf_dora', language = 'pt-br', device: forced, dty
       await speakChunk('Oi.')
     }
   }
-  post('ready', { device, threads: env.backends.onnx.wasm.numThreads, warmMs: Math.round(performance.now() - started), tts: engine, stt: sttName, turn: Boolean(turn) })
+  post('ready', { device, threads: env.backends.onnx.wasm.numThreads, warmMs: Math.round(performance.now() - started), tts: engine, stt: sttName, turn: Boolean(turn), fallback })
+}
+
+// The middle value (the mean of the two middle ones for an even count).
+const median = values => {
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
 }
 
 const hasNaN = audio => {

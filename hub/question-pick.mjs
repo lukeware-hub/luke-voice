@@ -121,6 +121,10 @@ const MORE_SEEDS = [1, 2, 3, 4, 5, 6, 7, 8].map(s => s + 100)
 const MAX_TAKES = 1 + MORE_SEEDS.length
 // The background search waits this long after the last live line, so it never queues in front of one.
 const IDLE_MS = 1500
+// A background take that comes back empty at once (the voice server down or restarting) is tried
+// again after this long, doubled on each failure up to the cap, instead of in a tight loop.
+const RETRY_MS = 5000
+const MAX_RETRY_MS = 5 * 60_000
 // A cache entry per text; the oldest go past this many.
 const MAX_CACHED = 300
 // How long a whole take of a question takes, roughly (1.7B on a mid-range GPU): 0.5 s + 20 ms a character.
@@ -130,13 +134,19 @@ export const takeMs = text => 500 + 20 * String(text).length
 // more made only in time nobody waits for: while the line before still plays (`budget`), or in the
 // background when the engine is idle. Any live line stops the background search at once.
 // `say(text, seed, signal)` makes one take and resolves to its WAV (or null).
-export function createQuestionTakes({ say, dir, voiceKey, log = () => {}, now = () => Date.now(), idleMs = IDLE_MS }) {
+export function createQuestionTakes({ say, dir, voiceKey, log = () => {}, now = () => Date.now(), idleMs = IDLE_MS, retryMs = RETRY_MS, maxRetryMs = MAX_RETRY_MS }) {
   const memory = new Map() // key -> { text, takes: [{ seed, rise }], best }
   const queue = []
   let lastLive = 0
   let liveCount = 0
   let background = null // { text, stop }
   let timer = null
+  let failures = 0 // background takes in a row that came back empty
+  let retryAt = 0
+  const succeeded = () => {
+    failures = 0
+    retryAt = 0
+  }
   const keyOf = text => createHash('sha1').update(`${voiceKey}\n${text}`).digest('hex').slice(0, 20)
   const entryOf = text => {
     const key = keyOf(text)
@@ -201,6 +211,7 @@ export function createQuestionTakes({ say, dir, voiceKey, log = () => {}, now = 
         if (!fits() || signal?.aborted) break
         const wav = await say(text, seed, signal)
         if (!wav) break
+        succeeded()
         remember(text, seed, wav)
         if (isNaturalRise(entry.best?.rise)) break
       }
@@ -217,12 +228,12 @@ export function createQuestionTakes({ say, dir, voiceKey, log = () => {}, now = 
   function schedule() {
     clearTimeout(timer)
     if (!queue.length || background) return
-    const wait = Math.max(0, lastLive + idleMs - now())
+    const wait = Math.max(0, lastLive + idleMs - now(), retryAt - now())
     timer = setTimeout(step, wait)
     timer.unref?.()
   }
   async function step() {
-    if (background || liveCount || now() - lastLive < idleMs) return schedule()
+    if (background || liveCount || now() - lastLive < idleMs || now() < retryAt) return schedule()
     const text = queue[0]
     const { entry } = entryOf(text)
     const seed = untried(entry)[0]
@@ -232,11 +243,20 @@ export function createQuestionTakes({ say, dir, voiceKey, log = () => {}, now = 
     }
     const stop = new AbortController()
     background = { text, stop }
+    let wav = null
     try {
-      const wav = await say(text, seed, stop.signal)
-      if (wav && !stop.signal.aborted) remember(text, seed, wav)
+      wav = await say(text, seed, stop.signal)
+      if (wav && !stop.signal.aborted) {
+        succeeded()
+        remember(text, seed, wav)
+      }
     } catch {
       // Stopped for a live line: the take is made again later.
+    }
+    // Empty without being stopped: the engine is down. Wait longer each time.
+    if (!wav && !stop.signal.aborted) {
+      failures++
+      retryAt = now() + Math.min(retryMs * 2 ** (failures - 1), maxRetryMs)
     }
     background = null
     schedule()

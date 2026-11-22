@@ -5,7 +5,9 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 
 process.env.LUKE_VOICE_HOME = mkdtempSync(join(tmpdir(), 'luke-voice-setup-'))
-const { progressPrinter, setup, size, smokeTest } = await import('./setup.mjs')
+const { hubRunsVoice, progressPrinter, setup, size, smokeTest } = await import('./setup.mjs')
+// No hub runs the natural voice in these tests (a real one may run on this machine).
+const noHub = async () => false
 
 const sink = (isTTY = false) => {
   const lines = []
@@ -28,7 +30,7 @@ test('in an installer log, progress is printed every 10%, not on every chunk', (
 test('the gpu profile is tested; a failed test says the light voice will be used', async () => {
   const gpu = { profile: 'gpu', reason: 'RTX, 8192 MiB', devices: [{ name: 'Vulkan0', mib: 8192 }], exe: 'llama-server' }
   const passed = sink()
-  const ok = await setup({ out: passed.out, prepare: async () => gpu, test: async () => ({ ok: true, ms: 4000, heard: 'Oi, eu sou a Ceci.', problems: [] }) })
+  const ok = await setup({ out: passed.out, isVoiceRunning: noHub, prepare: async () => gpu, test: async () => ({ ok: true, ms: 4000, heard: 'Oi, eu sou a Ceci.', problems: [] }) })
   assert.equal(ok.ok, true)
   assert.match(passed.lines.join(''), /Voz natural pronta.*Oi, eu sou a Ceci/)
   const failed = sink()
@@ -37,7 +39,7 @@ test('the gpu profile is tested; a failed test says the light voice will be used
     asked.push(options)
     return options.override === 'light' ? { profile: 'light', reason: options.reason, devices: options.devices } : gpu
   }
-  const bad = await setup({ out: failed.out, prepare, test: async () => ({ ok: false, ms: 1, heard: '', problems: ['o servidor tts não iniciou'] }) })
+  const bad = await setup({ out: failed.out, isVoiceRunning: noHub, prepare, test: async () => ({ ok: false, ms: 1, heard: '', problems: ['o servidor tts não iniciou'] }) })
   assert.equal(bad.ok, false)
   assert.match(failed.lines.join(''), /servidor tts não iniciou[\s\S]*voz leve[\s\S]*Voz leve pronta/)
   // The light profile is saved (prepared) in its place, so calls really use the light voice.
@@ -48,7 +50,7 @@ test('the gpu profile is tested; a failed test says the light voice will be used
   assert.equal(bad.fallback.profile, 'light')
   // With no internet for the light voice either, setup still ends and says so.
   const offline = sink()
-  const worse = await setup({ out: offline.out, prepare: async o => { if (o.override === 'light') throw new Error('fetch failed'); return gpu }, test: async () => ({ ok: false, ms: 1, heard: '', problems: ['x'] }) })
+  const worse = await setup({ out: offline.out, isVoiceRunning: noHub, prepare: async o => { if (o.override === 'light') throw new Error('fetch failed'); return gpu }, test: async () => ({ ok: false, ms: 1, heard: '', problems: ['x'] }) })
   assert.equal(worse.ok, false)
   assert.match(offline.lines.join(''), /não pôde ser baixada: fetch failed/)
 })
@@ -92,4 +94,51 @@ test('the install test asks the ears with the glossary, so they write "Ceci" and
   } finally {
     server.close()
   }
+})
+
+test('a first failed test is run again: one failure alone does not switch the calls to the light voice', async () => {
+  const gpu = { profile: 'gpu', reason: 'RTX, 8192 MiB', devices: [{ name: 'Vulkan0', mib: 8192 }], exe: 'llama-server' }
+  const results = [{ ok: false, ms: 1, heard: '', problems: ['o servidor tts não iniciou'] }, { ok: true, ms: 4000, heard: 'Oi, eu sou a Ceci.', problems: [] }]
+  const asked = []
+  const { lines, out } = sink()
+  const result = await setup({ out, isVoiceRunning: noHub, prepare: async options => (asked.push(options), gpu), test: async () => results.shift() })
+  assert.equal(result.ok, true)
+  assert.equal(asked.length, 1, 'the light profile was saved after one failure')
+  assert.match(lines.join(''), /não passou no teste: o servidor tts não iniciou\. Testando de novo[\s\S]*Voz natural pronta/)
+  // Two failures: the light voice, saying why.
+  let tests = 0
+  const twice = sink()
+  const prepare = async options => (options.override === 'light' ? { profile: 'light', reason: options.reason, devices: [] } : gpu)
+  const failed = await setup({ out: twice.out, isVoiceRunning: noHub, prepare, test: async () => (tests++, { ok: false, ms: 1, heard: '', problems: [`falha ${tests}`] }) })
+  assert.equal(tests, 2)
+  assert.equal(failed.ok, false)
+  assert.match(failed.fallback.reason, /falhou no teste: falha 2/)
+  assert.match(twice.lines.join(''), /falha 1\. Testando de novo[\s\S]*falha 2[\s\S]*voz leve/)
+})
+
+test('with a hub already running the natural voice, the test is left to it instead of failing for lack of video memory', async () => {
+  const gpu = { profile: 'gpu', reason: 'RTX, 8192 MiB', devices: [{ name: 'Vulkan0', mib: 8192 }], exe: 'llama-server' }
+  const { lines, out } = sink()
+  let tested = false
+  const result = await setup({ out, isVoiceRunning: async () => true, prepare: async () => gpu, test: async () => (tested = true) })
+  assert.equal(result.ok, true)
+  assert.equal(tested, false)
+  assert.equal(result.test, null)
+  assert.match(lines.join(''), /já está rodando no hub/)
+})
+
+test("the running hub's voice is read from its /health", async () => {
+  const { createServer } = await import('node:http')
+  let native = { tts: true, asr: true, router: false }
+  const server = createServer((req, res) => res.end(JSON.stringify({ app: 'luke-voice', version: '0.10.1', profile: 'gpu', native })))
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const origin = `http://127.0.0.1:${server.address().port}`
+  try {
+    assert.equal(await hubRunsVoice({ origin }), true)
+    native = { tts: false, asr: false, router: false }
+    assert.equal(await hubRunsVoice({ origin }), false)
+  } finally {
+    server.close()
+  }
+  assert.equal(await hubRunsVoice({ origin }), false)
 })

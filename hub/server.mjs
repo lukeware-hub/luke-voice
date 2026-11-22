@@ -2,7 +2,7 @@
 // It never calls Claude. It queues a command; the matching session's mod pulls it and runs it.
 import { spawn } from 'node:child_process'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
-import { createReadStream, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { createReadStream, existsSync, linkSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { pipeline } from 'node:stream/promises'
 import { basename, dirname, join } from 'node:path'
@@ -81,13 +81,39 @@ function sameSecret(given, expected) {
   return a.length === b.length && timingSafeEqual(a, b)
 }
 
-export function loadSecrets() {
-  const file = stateFile('hub.json')
-  const saved = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {}
+// Two launchers can start two hubs at once. A hub that overwrote hub.json with tokens the other
+// (the one that wins the port) does not hold would get every mod refused with 401. So the file is
+// only created when missing, whole and in one step (a hard link of a finished temp file), and the
+// hub that finds it already there takes its tokens. A truncated or broken file is replaced (temp
+// file and rename) instead of failing every start.
+export function loadSecrets(file = stateFile('hub.json')) {
+  let saved = null
+  try {
+    saved = JSON.parse(readFileSync(file, 'utf8')) ?? {}
+  } catch (error) {
+    if (error.code !== 'ENOENT') saved = {}
+  }
+  if (saved?.serviceToken && saved?.windowKey) return { serviceToken: saved.serviceToken, windowKey: saved.windowKey }
   // The window key survives a hub restart: an open window keeps working instead of failing with "key".
-  const secrets = { serviceToken: saved.serviceToken || newSecret(), windowKey: saved.windowKey || newSecret() }
-  writeFileSync(file, JSON.stringify(secrets, null, 2), { mode: 0o600 })
-  return secrets
+  const secrets = { serviceToken: saved?.serviceToken || newSecret(), windowKey: saved?.windowKey || newSecret() }
+  const temp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
+  writeFileSync(temp, JSON.stringify(secrets, null, 2), { mode: 0o600 })
+  try {
+    if (saved) renameSync(temp, file)
+    else {
+      try {
+        linkSync(temp, file)
+      } catch (error) {
+        // Another hub created it first: use its tokens.
+        if (error.code === 'EEXIST') return loadSecrets(file)
+        // A disk without hard links.
+        renameSync(temp, file)
+      }
+    }
+    return secrets
+  } finally {
+    rmSync(temp, { force: true })
+  }
 }
 
 function chromePath() {
@@ -140,7 +166,7 @@ export function needsPrepare(chosen, { isReady, override = '' }) {
   return ['gpu', 'light'].includes(override) && chosen.profile !== override
 }
 
-export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, engine = null, profile = () => null, voiceRef = null, onLocalVoice = () => {}, onSetup = () => ({ started: false }), engineState = () => 'off', log = () => {}, onShutdown = () => process.exit(0), questionsDir = join(stateDir(), 'cache', 'questions') }) {
+export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, engine = null, profile = () => null, voiceRef = null, onLocalVoice = () => {}, onSetup = () => ({ started: false }), engineState = () => 'off', log = () => {}, onShutdown = () => process.exit(0), questionsDir = join(stateDir(), 'cache', 'questions'), staleMs = STALE_SESSION_MS, sweepMs = 10_000 }) {
   const sessions = new Map() // token -> session
   const replaced = new Set() // tokens a newer subscription of the same Claude session took over
   const streams = new Set() // window SSE responses
@@ -252,16 +278,24 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       sendRoster()
       return [200, { ok: true }]
     },
-    'GET /inbox': async (session, _body, url) => {
+    'GET /inbox': async (session, _body, url, res) => {
       session.seenAt = Date.now()
       const wait = Math.min(Number(url.searchParams.get('wait') || 0), 25_000)
       if (session.inbox.length === 0 && wait > 0) {
         await new Promise(resolve => {
-          const timer = setTimeout(resolve, wait)
-          session.waiters.push(() => {
+          // The waiter leaves the list when the wait ends any way (a command, the timeout, the mod
+          // hanging up): one left behind would keep a dead session from ever being swept, and the
+          // hub from ever going idle.
+          const done = () => {
             clearTimeout(timer)
+            res?.off('close', done)
+            const at = session.waiters.indexOf(done)
+            if (at >= 0) session.waiters.splice(at, 1)
             resolve()
-          })
+          }
+          const timer = setTimeout(done, wait)
+          res?.once('close', done)
+          session.waiters.push(done)
         })
       }
       session.seenAt = Date.now()
@@ -439,10 +473,16 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
   let voiceRefB64 = null
   let voiceRefText = null
   let questions = null
+  // Whether Ceci's reference clip and its transcript are both loaded. Without them the engine speaks
+  // in some other voice, with its accent drifting to European Portuguese: nothing is said then, and
+  // a missing file is looked for again on the next line instead of being remembered as missing.
   const loadVoiceRef = () => {
-    voiceRefB64 ??= voiceRef && existsSync(voiceRef) ? readFileSync(voiceRef).toString('base64') : ''
+    if (voiceRefB64 && voiceRefText) return true
+    const transcript = voiceRef?.replace(/\.wav$/, '.txt')
+    voiceRefB64 = voiceRef && existsSync(voiceRef) ? readFileSync(voiceRef).toString('base64') : null
     // The transcript of the reference: with it, llama.cpp clones Ceci from the reference codes (ICL).
-    voiceRefText ??= voiceRef && existsSync(voiceRef.replace(/\.wav$/, '.txt')) ? readFileSync(voiceRef.replace(/\.wav$/, '.txt'), 'utf8').trim() : ''
+    voiceRefText = transcript && existsSync(transcript) ? readFileSync(transcript, 'utf8').trim() || null : null
+    return Boolean(voiceRefB64 && voiceRefText)
   }
   // /tts streams with stream:true (on /v1/audio/speech it would need stream_format).
   const speak = (url, text, signal, seed) =>
@@ -461,8 +501,8 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       }),
       signal,
     }).catch(() => null)
+  // Made only once the voice reference is loaded (the callers check it): a take belongs to it.
   const questionTakes = () => {
-    loadVoiceRef()
     questions ??= createQuestionTakes({
       dir: questionsDir,
       // A take belongs to one voice: the model, the sampling and the reference clip.
@@ -489,7 +529,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     // reference plus ~380 characters; past that the audio would be cut short.
     const text = String(body.text ?? '').slice(0, MAX_TTS_CHARS).trim()
     if (!text) return send(res, 400, { error: 'Nothing to say.' })
-    loadVoiceRef()
+    if (!loadVoiceRef()) return send(res, 503, { error: "Ceci's voice reference (agent/ceci-voice.wav and agent/ceci-voice.txt) is missing: reinstall luke-voice." })
     // A live line: the background question search stops until the engine is idle again.
     const done = questionTakes().live()
     // The window hangs up when the user talks over Ceci: stop the generation with it, so the
@@ -616,7 +656,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
         const session = sessions.get(bearer)
         if (!session) return send(res, replaced.has(bearer) ? 409 : 401, { error: replaced.has(bearer) ? 'replaced' : 'session' })
         const body = req.method === 'POST' ? await readBody(req) : {}
-        const [status, out] = await sessionRoutes[route](session, body, url)
+        const [status, out] = await sessionRoutes[route](session, body, url, res)
         return send(res, status, out)
       }
 
@@ -701,17 +741,21 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
   const sweep = setInterval(() => {
     const now = Date.now()
     for (const session of sessions.values()) {
-      if (session.waiters.length === 0 && now - session.seenAt > STALE_SESSION_MS) drop(session)
+      if (session.waiters.length === 0 && now - session.seenAt > staleMs) drop(session)
     }
     if (sessions.size > 0 || streams.size > 0) lastBusy = now
-  }, 10_000)
+  }, sweepMs)
   sweep.unref()
 
   server.on('close', () => clearInterval(sweep))
   server.idleFor = () => Date.now() - lastBusy
   server.setEngineDownload = setEngineDownload
   // Once the engine is up: the questions Ceci asks most get their natural takes in the background.
-  server.warmQuestions = () => questionTakes().warm(COMMON_QUESTIONS)
+  // Only while the voice is up and has its reference: a take asked of a server that is down comes
+  // back empty at once.
+  server.warmQuestions = () => {
+    if (engine?.url('tts') && loadVoiceRef()) questionTakes().warm(COMMON_QUESTIONS)
+  }
   server.on('close', () => questions?.stop())
   server.voiceProvider = voiceProvider
   return server

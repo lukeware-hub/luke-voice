@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createServer as createHttpServer, request } from 'node:http'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
@@ -25,6 +25,14 @@ after(() => {
   hub.closeAllConnections()
   hub.close()
 })
+
+// Ceci's voice reference and its transcript: /tts refuses to speak without both.
+const voiceRefFile = () => {
+  const file = join(mkdtempSync(join(tmpdir(), 'luke-voice-ref-')), 'ceci.wav')
+  writeFileSync(file, 'CECIVOICE')
+  writeFileSync(file.replace(/[.]wav$/, '.txt'), 'Oi, eu sou a Ceci.')
+  return file
+}
 
 function call(method, path, { body, auth, key, host, origin } = {}) {
   return new Promise((resolve, reject) => {
@@ -504,7 +512,7 @@ test('a yes/no question gets more takes only while the line before still plays, 
   const base = `http://127.0.0.1:${fake.address().port}`
   const engine = { url: () => base, status: () => ({ tts: true, asr: true, router: false }) }
   const questionsDir = mkdtempSync(join(tmpdir(), 'luke-voice-questions-'))
-  const hub2 = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {}, engine, profile: () => ({ profile: 'gpu' }), questionsDir })
+  const hub2 = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {}, engine, voiceRef: voiceRefFile(), profile: () => ({ profile: 'gpu' }), questionsDir })
   await new Promise(resolve => hub2.listen(0, '127.0.0.1', resolve))
   const p = hub2.address().port
   const say = body =>
@@ -558,7 +566,7 @@ test('when the window hangs up mid-sentence (barge-in), the generation on the en
   await new Promise(resolve => fake.listen(0, '127.0.0.1', resolve))
   const base = `http://127.0.0.1:${fake.address().port}`
   const engine = { url: () => base, status: () => ({ tts: true, asr: true, router: false }) }
-  const hub2 = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {}, engine, profile: () => ({ profile: 'gpu' }) })
+  const hub2 = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {}, engine, voiceRef: voiceRefFile(), profile: () => ({ profile: 'gpu' }) })
   await new Promise(resolve => hub2.listen(0, '127.0.0.1', resolve))
   const p = hub2.address().port
   try {
@@ -704,4 +712,121 @@ test('with no program to open the window (no xdg-open), the hub keeps running an
   openWindow('http://127.0.0.1:1/?k=x', { command: ['luke-voice-no-such-browser', []], log: line => said.push(line) })
   for (let i = 0; i < 100 && said.length === 0; i++) await new Promise(resolve => setTimeout(resolve, 20))
   assert.match(said[0] ?? '', /could not be opened: .*ENOENT/)
+})
+
+test('a mod that stops polling is dropped, even when its last long poll timed out or hung up', async () => {
+  const hub4 = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {}, staleMs: 300, sweepMs: 100 })
+  await new Promise(resolve => hub4.listen(0, '127.0.0.1', resolve))
+  const p = hub4.address().port
+  const ask = (method, path, auth, { hangUpAfter } = {}) =>
+    new Promise(resolve => {
+      const req = request({ host: '127.0.0.1', port: p, method, path, headers: { host: `127.0.0.1:${p}`, 'content-type': 'application/json', ...(auth ? { authorization: `Bearer ${auth}` } : {}) } }, res => {
+        let text = ''
+        res.on('data', c => (text += c))
+        res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(text) }))
+      })
+      req.on('error', () => resolve(null))
+      if (hangUpAfter) setTimeout(() => (req.destroy(), resolve(null)), hangUpAfter)
+      req.end(method === 'POST' ? JSON.stringify({ cwd: '/repos/gone', version: '0.10.1' }) : undefined)
+    })
+  const sessions = async () => (await ask('GET', '/health')).body.sessions
+  const gone = async () => {
+    for (let i = 0; i < 30 && (await sessions()) > 0; i++) await new Promise(resolve => setTimeout(resolve, 100))
+    return (await sessions()) === 0
+  }
+  try {
+    // The long poll times out with nothing to pull, then the Claude session closes.
+    const timedOut = (await ask('POST', '/subscribe', SERVICE)).body
+    assert.equal((await ask('GET', '/inbox?wait=150', timedOut.token)).status, 200)
+    assert.equal(await gone(), true, 'a session whose long poll timed out was never swept')
+    // The Claude session is killed in the middle of a long poll.
+    const killed = (await ask('POST', '/subscribe', SERVICE)).body
+    await ask('GET', '/inbox?wait=25000', killed.token, { hangUpAfter: 100 })
+    assert.equal(await gone(), true, 'a session that hung up mid-poll was kept until its poll timed out')
+  } finally {
+    hub4.closeAllConnections()
+    hub4.close()
+  }
+})
+
+test("/tts never speaks without Ceci's voice reference and its transcript, and finds them once they are there", async () => {
+  const seen = []
+  const fake = createHttpServer(async (req, res) => {
+    const chunks = []
+    for await (const c of req) chunks.push(c)
+    seen.push(JSON.parse(Buffer.concat(chunks).toString('utf8')))
+    res.writeHead(200, { 'content-type': 'audio/wav' })
+    res.end(Buffer.from('RIFF....WAVE'))
+  })
+  await new Promise(resolve => fake.listen(0, '127.0.0.1', resolve))
+  const base = `http://127.0.0.1:${fake.address().port}`
+  const engine = { url: () => base, status: () => ({ tts: true, asr: true, router: false }) }
+  const voiceRef = join(mkdtempSync(join(tmpdir(), 'luke-voice-ref-')), 'ceci.wav')
+  const questionsDir = mkdtempSync(join(tmpdir(), 'luke-voice-questions-'))
+  const hub5 = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {}, engine, voiceRef, profile: () => ({ profile: 'gpu' }), questionsDir })
+  await new Promise(resolve => hub5.listen(0, '127.0.0.1', resolve))
+  const p = hub5.address().port
+  const say = text =>
+    new Promise((resolve, reject) => {
+      const req = request({ host: '127.0.0.1', port: p, method: 'POST', path: '/tts', headers: { host: `127.0.0.1:${p}`, 'content-type': 'application/json', 'x-luke-key': WINDOW } }, res => {
+        let body = ''
+        res.on('data', c => (body += c))
+        res.on('end', () => resolve({ status: res.statusCode, body }))
+      })
+      req.on('error', reject)
+      req.end(JSON.stringify({ text }))
+    })
+  try {
+    // Without the reference the engine would speak in another voice, with a European accent.
+    const missing = await say('Comecei, te aviso quando terminar.')
+    assert.equal(missing.status, 503)
+    assert.match(JSON.parse(missing.body).error, /ceci-voice/)
+    // The background takes of common questions wait for the reference too.
+    hub5.warmQuestions()
+    await new Promise(resolve => setTimeout(resolve, 100))
+    // The clip without its transcript is not enough either.
+    writeFileSync(voiceRef, 'CECIVOICE')
+    assert.equal((await say('Comecei, te aviso quando terminar.')).status, 503)
+    assert.equal(seen.length, 0, 'the engine was asked to speak without the reference')
+    // Restored: found on the next line, without a hub restart.
+    writeFileSync(voiceRef.replace(/[.]wav$/, '.txt'), 'Oi, eu sou a Ceci.')
+    assert.equal((await say('Comecei, te aviso quando terminar.')).status, 200)
+    assert.equal(Buffer.from(seen[0].speaker_ref_b64, 'base64').toString(), 'CECIVOICE')
+    assert.equal(seen[0].speaker_ref_text, 'Oi, eu sou a Ceci.')
+  } finally {
+    hub5.closeAllConnections()
+    hub5.close()
+    fake.close()
+  }
+})
+
+test('a truncated hub.json is replaced instead of failing every start', () => {
+  const file = join(mkdtempSync(join(tmpdir(), 'luke-voice-secrets-')), 'hub.json')
+  writeFileSync(file, '{"serviceToken": "abc')
+  const secrets = loadSecrets(file)
+  assert.ok(secrets.serviceToken && secrets.windowKey)
+  assert.deepEqual(loadSecrets(file), secrets)
+})
+
+test('two hubs starting at once end up with the same secrets, so no mod is refused by the winner', async () => {
+  const { spawn } = await import('node:child_process')
+  const { pathToFileURL } = await import('node:url')
+  const dir = mkdtempSync(join(tmpdir(), 'luke-voice-race-'))
+  const file = join(dir, 'hub.json')
+  const at = Date.now() + 1500
+  // Each stand-in hub waits for the same instant, then loads (or creates) the secrets.
+  const script = `import { loadSecrets } from ${JSON.stringify(pathToFileURL(join(import.meta.dirname, 'server.mjs')).href)}
+while (Date.now() < ${at});
+console.log(JSON.stringify(loadSecrets(${JSON.stringify(file)})))`
+  const runs = Array.from({ length: 6 }, () =>
+    new Promise(resolve => {
+      const child = spawn(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, LUKE_VOICE_HOME: dir }, stdio: ['ignore', 'pipe', 'inherit'] })
+      let out = ''
+      child.stdout.on('data', c => (out += c))
+      child.on('exit', () => resolve(out.trim()))
+    }),
+  )
+  const seen = await Promise.all(runs)
+  const onDisk = JSON.stringify(JSON.parse(readFileSync(file, 'utf8')))
+  for (const line of seen) assert.equal(line, onDisk)
 })
