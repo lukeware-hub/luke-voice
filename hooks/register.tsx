@@ -189,7 +189,7 @@ async function think($: EngineInterface, command: { id: string; request: BrainRe
   }
 }
 
-type Activity = { kind: 'prompt' | 'tool' | 'failure' | 'done' | 'attention' | 'info' | 'task_done'; text: string }
+type Activity = { kind: 'prompt' | 'tool' | 'failure' | 'done' | 'attention' | 'info' | 'task_done' | 'task_progress'; text: string }
 
 // The module's own state; a reload starts it over and the next poll subscribes again.
 let generation = 0
@@ -209,6 +209,25 @@ const taskEfforts = new Map<string, Effort>()
 // as soon as it is back, so a task's result is never lost on the way to Ceci.
 const KEPT_UNSENT = new Set(['task_done', 'done'])
 let unsent: Activity[] = []
+
+// A voice task running longer than this gets a short spoken progress update, at most once in this
+// long, so the user is not left wondering whether Ceci forgot it.
+const PROGRESS_MS = 2 * 60_000
+// When each running task last had one, by its key in the running list.
+const progressAt = new Map<string, number>()
+
+// Progress updates for the voice tasks that are due one (only tasks this module tracks).
+async function reportProgress($: EngineInterface) {
+  const now = await $.clock.now()
+  for (const row of await read($, running)) {
+    if (!tasks.has(row.key)) continue
+    const last = progressAt.get(row.key) ?? row.startedAt
+    if (now - row.startedAt < PROGRESS_MS || now - last < PROGRESS_MS) continue
+    progressAt.set(row.key, now)
+    report($, { kind: 'task_progress', text: short(`Task: ${row.task}\nRunning for: ${elapsed(row.startedAt, now)}`, 600) })
+  }
+  for (const key of progressAt.keys()) if (!tasks.has(key)) progressAt.delete(key)
+}
 
 // The voice tasks still running, kept in the plugin's store by session, so a reload of this
 // module (an update, a /reload) still reports a task's result when its subagent finishes.
@@ -1016,10 +1035,10 @@ export const register: Register = (on, options) => {
     const port = Number(await $.env.get('LUKE_VOICE_PORT'))
     if (Number.isInteger(port) && port > 0 && port < 65536) HUB = `http://127.0.0.1:${port}`
     await $.command.register({ name: NAME, description: 'Ceci, voice assistant: on/off, call, end, window, voz, setup, status, help, uninstall' })
-    // Redraw the pane while a task runs, so its elapsed time moves.
+    // Redraw the pane while a task runs, so its elapsed time moves; a long one gets a spoken update.
     $.clock.every(15_000, () => {
       void read($, running)
-        .then(list => (list.length > 0 ? update($, running, l => [...l]) : undefined))
+        .then(list => (list.length > 0 ? update($, running, l => [...l]).then(() => reportProgress($)) : undefined))
         .catch(() => undefined)
     })
     const started = await next(e)

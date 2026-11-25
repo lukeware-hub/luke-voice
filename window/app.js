@@ -516,6 +516,9 @@ function onActivity(session, events) {
       } else ackNotice(id)
       const parts = text.match(/^Task: ([\s\S]*?)\nResult: ([\s\S]*)$/)
       addLog('result', parts ? parts[1] : 'Tarefa concluída', { body: parts ? parts[2] : text, who: session })
+    } else if (kind === 'task_progress') {
+      // In silent mode a progress line is not worth even "Recebi uma notificação".
+      if (spoken && !quiet.on) pendingSpeech.push({ text: `task progress: ${text}`, id: null })
     } else if (spoken) {
       pendingSpeech.push({ text: line, id: null })
     } else {
