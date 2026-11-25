@@ -628,6 +628,52 @@ test('the ears hear with what Ceci said in the last minute: newest words first, 
   }
 })
 
+test('the ears writing their own prompt down is not taken for the user: the leak is cut, what the user said stays', async () => {
+  let tail = ''
+  const fake = createHttpServer(async (req, res) => {
+    const chunks = []
+    for await (const c of req) chunks.push(c)
+    if (req.url === '/v1/audio/transcriptions') {
+      // What Qwen3-ASR did on silence: the whole prompt, word for word, then the user's words, if any.
+      const prompt = Buffer.concat(chunks).toString('utf8').match(/name="prompt"\r\n\r\n([^\r]*)/)[1]
+      res.writeHead(200, { 'content-type': 'application/json' })
+      return res.end(JSON.stringify({ text: `language Portuguese<asr_text>${prompt}${tail}` }))
+    }
+    res.writeHead(200, { 'content-type': 'audio/wav' })
+    res.end(Buffer.from('RIFF....WAVE\x01\x02\x03\x04'))
+  })
+  await new Promise(resolve => fake.listen(0, '127.0.0.1', resolve))
+  const base = `http://127.0.0.1:${fake.address().port}`
+  const voiceRef = join(mkdtempSync(join(tmpdir(), 'luke-voice-ref-')), 'ceci.wav')
+  writeFileSync(voiceRef, 'CECIVOICE')
+  writeFileSync(voiceRef.replace(/[.]wav$/, '.txt'), 'Oi, eu sou a Ceci.')
+  const engine = { url: () => base, status: () => ({ tts: true, asr: true, router: false }) }
+  const hub2 = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {}, engine, voiceRef, profile: () => ({ profile: 'gpu' }) })
+  await new Promise(resolve => hub2.listen(0, '127.0.0.1', resolve))
+  const p = hub2.address().port
+  const post = (path, body, type) =>
+    new Promise((resolve, reject) => {
+      const req = request({ host: '127.0.0.1', port: p, method: 'POST', path, headers: { host: `127.0.0.1:${p}`, 'content-type': type, 'x-luke-key': WINDOW } }, res => {
+        const got = []
+        res.on('data', c => got.push(c))
+        res.on('end', () => resolve(Buffer.concat(got).toString('utf8')))
+      })
+      req.on('error', reject)
+      req.end(body)
+    })
+  const hear = async () => JSON.parse(await post('/stt', Buffer.from('RIFFWAV'), 'audio/wav')).text
+  try {
+    await post('/tts', JSON.stringify({ text: 'Vou rodar os testes na pasta do projeto e te conto o resultado. Posso?' }), 'application/json')
+    assert.equal(await hear(), '')
+    tail = ' Sim.'
+    assert.equal(await hear(), 'Sim.')
+  } finally {
+    hub2.closeAllConnections()
+    hub2.close()
+    fake.close()
+  }
+})
+
 test('a yes/no question gets more takes only while the line before still plays, and its natural take is kept', async () => {
   const { take, wav } = await import('./test-audio.mjs')
   // Ceci's seed (7) and the first extra seed end flat; the next one rises +6 semitones.

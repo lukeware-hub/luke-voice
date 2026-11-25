@@ -115,3 +115,31 @@ test('a question back is never a yes, even when made of yes words', () => {
     assert.equal(isConfirm(said), true, said)
   }
 })
+
+test('short yeses as the ears write them are yes: "Pod.", "Okei", "Isso...", "Sim, pode rodar"', () => {
+  // "Pod." and "Isso" are what Qwen3-ASR wrote for a spoken "Pode." and "Isso." on the real engine.
+  for (const said of ['Pod.', 'Okei.', 'Oquei', 'OK.', 'Isso...', 'Isso', 'Isso aí, pode rodar.', 'Sim, pode rodar.', 'Pode seguir.', 'Pode seguir em frente.', 'Aham.', 'Exato.', 'Fechou!', 'Pode continuar.']) {
+    assert.equal(isConfirm(said), true, said)
+    assert.equal(isDeny(said), false, said)
+  }
+  // Still to the brain: a request, a change or a doubt.
+  for (const said of ['Pode rodar os testes de pagamento?', 'Roda os testes de login.', 'Isso não.', 'Pod?']) {
+    assert.equal(isConfirm(said), false, said)
+  }
+})
+
+test("Ceci's own voice written down before the user's yes does not hide it", () => {
+  const said = 'Vou rodar os testes do luke-voice e te conto o resultado. Posso?'
+  // Her tail, partly misheard, then the user's "sim" (heard so on the real engine).
+  for (const heard of ['De quanto o resultado? Posso. Sim.', 'Posso? Pode.', 'Te conto o resultado. Posso? Isso.']) {
+    assert.equal(isConfirm(heard, said), true, heard)
+    // Without knowing what she said, it stays with the brain.
+    assert.equal(isConfirm(heard), false, heard)
+  }
+  // What comes before the yes is the user's, not her echo: the brain decides.
+  for (const heard of ['Roda só os de pagamento. Sim.', 'Manda para outra sessão. Pode.']) {
+    assert.equal(isConfirm(heard, said), false, heard)
+  }
+  // A no is never turned into a yes by her echo.
+  assert.equal(isConfirm('Posso? Não.', said), false)
+})

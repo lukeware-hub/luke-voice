@@ -18,6 +18,7 @@ import { MODELS, ensureModel } from './models.mjs'
 import { createNotices } from './notices.mjs'
 import { COMMON_QUESTIONS, MAX_PICK_CHARS, createQuestionTakes, isYesNoQuestion } from './question-pick.mjs'
 import { route as routeUtterance } from './router.mjs'
+import { withoutPromptLeak } from './asr-leak.mjs'
 import { contentType, vendorFile } from './vendor.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -711,7 +712,8 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     form.append('file', new Blob([wav], { type: 'audio/wav' }), 'speech.wav')
     form.append('model', 'qwen3-asr')
     form.append('language', 'pt')
-    form.append('prompt', asrPrompt())
+    const prompt = asrPrompt()
+    form.append('prompt', prompt)
     const started = Date.now()
     // The window gone (it hung up, or gave up waiting) or a hung engine: stop the transcription,
     // so the engine's single slot is free for the next turn. The request closes once its body is
@@ -729,8 +731,10 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       if (error?.name === 'TimeoutError') return send(res, 504, { error: 'The speech engine did not answer in time.' })
       throw error
     }
-    // Qwen3-ASR starts its text with "language Portuguese<asr_text>".
-    return send(res, 200, { text: String(text).replace(/^[\s\S]*<asr_text>/, '').trim(), ms: Date.now() - started })
+    // Qwen3-ASR starts its text with "language Portuguese<asr_text>". On silence or soft noise it can
+    // also write its own prompt down; that part is not the user (asr-leak.mjs).
+    const heard = withoutPromptLeak(String(text).replace(/^[\s\S]*<asr_text>/, ''), prompt)
+    return send(res, 200, { text: heard, ms: Date.now() - started })
   }
 
   // Ceci's voice on the native engine (Qwen3-TTS), streamed as WAV while it is made. A short yes/no
