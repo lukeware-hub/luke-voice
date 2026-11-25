@@ -2,7 +2,7 @@
 
 **Read in English: [README.md](README.md)**
 
-A Ceci, uma assistente de voz ao lado do Claude Code, em português do Brasil. Você fala o que quer, ela repete e pergunta "posso?", e depois do seu "sim" um subagente do Claude Code faz a tarefa no seu computador. Quando termina, ela conta o resultado em voz alta.
+A Ceci, uma assistente de voz ao lado do Claude Code, em português do Brasil. Você fala o que quer, ela repete e pergunta "posso?", e depois do seu "sim" um subagente do Claude Code faz a tarefa no seu computador. Quando termina, ela conta o resultado em voz alta, sem esperar você falar: se não houver chamada, ela abre uma, e um resultado que chega com a janela fechada fica guardado até ela contar.
 
 A Ceci tem duas vozes:
 

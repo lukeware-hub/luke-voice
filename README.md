@@ -2,7 +2,7 @@
 
 **Leia em português: [README.pt-BR.md](README.pt-BR.md)**
 
-Ceci, a voice assistant beside your Claude Code session, in Brazilian Portuguese. You say what you want, she repeats it and asks "posso?", and after your "sim" a Claude Code subagent does the task on your computer. When it finishes, she tells you the result out loud.
+Ceci, a voice assistant beside your Claude Code session, in Brazilian Portuguese. You say what you want, she repeats it and asks "posso?", and after your "sim" a Claude Code subagent does the task on your computer. When it finishes, she tells you the result out loud, without waiting for you to speak: if no call is running she starts one, and a result that comes while the window is closed is kept until she has told it.
 
 Ceci has two voices:
 

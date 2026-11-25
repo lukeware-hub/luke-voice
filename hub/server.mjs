@@ -15,6 +15,7 @@ import { ASR_GLOSSARY, SERVICES, VOICE_SETTINGS, createEngine, maxFrames, prepar
 import { pickMacVoice, sayWav } from './mac-voice.mjs'
 import { personaFor, personaInfo } from './persona.mjs'
 import { MODELS, ensureModel } from './models.mjs'
+import { createNotices } from './notices.mjs'
 import { COMMON_QUESTIONS, MAX_PICK_CHARS, createQuestionTakes, isYesNoQuestion } from './question-pick.mjs'
 import { route as routeUtterance } from './router.mjs'
 import { contentType, vendorFile } from './vendor.mjs'
@@ -30,6 +31,8 @@ const ACK_WAIT_MS = 15_000
 // The router answers in ~0.3 s; past this, the utterance goes to the brain instead.
 const ROUTER_WAIT_MS = 1500
 // Qwen3-ASR transcribes a turn in ~0.2 s; a hung engine must not hold the request (the window gives up at 20 s).
+// A voice-task result that finds no window open opens one, at most once in this long.
+const REOPEN_FOR_NOTICE_MS = 60_000
 const STT_WAIT_MS = 20_000
 // How much of what Ceci just said goes into the ears' prompt: her last minute, newest 200 characters.
 const RECENT_SAID_MS = 60_000
@@ -330,11 +333,15 @@ export function createEngineRunner({ engine, setDownload, warmQuestions = () => 
   }
 }
 
-export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, engine = null, profile = () => null, voiceRef = null, onLocalVoice = () => {}, onSetup = () => ({ started: false }), engineState = () => 'off', macVoice = () => null, macVoiceGender = () => null, macVoiceSiri = () => null, macSay = sayWav, platform = process.platform, log = () => {}, onShutdown = () => process.exit(0), questionsDir = join(stateDir(), 'cache', 'questions'), staleMs = STALE_SESSION_MS, sweepMs = 10_000, sttWaitMs = STT_WAIT_MS, clock = Date.now }) {
+export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, engine = null, profile = () => null, voiceRef = null, onLocalVoice = () => {}, onSetup = () => ({ started: false }), engineState = () => 'off', macVoice = () => null, macVoiceGender = () => null, macVoiceSiri = () => null, macSay = sayWav, platform = process.platform, log = () => {}, onShutdown = () => process.exit(0), questionsDir = join(stateDir(), 'cache', 'questions'), staleMs = STALE_SESSION_MS, sweepMs = 10_000, sttWaitMs = STT_WAIT_MS, clock = Date.now, noticesFile = stateFile('notices.json'), reopenMs = REOPEN_FOR_NOTICE_MS }) {
   const sessions = new Map() // token -> session
   const launches = new Map() // one-time launch code -> when it expires
   const replaced = new Set() // tokens a newer subscription of the same Claude session took over
   const streams = new Set() // window SSE responses
+  // Voice-task results not yet handed to the voice (notices.mjs), and when a result last opened
+  // the window, so a burst of results opens it once.
+  const notices = createNotices({ file: noticesFile, clock })
+  let reopenedAt = -Infinity
   const acks = new Map() // command id -> resolve
   let focused = null
   let call = 'idle'
@@ -448,7 +455,17 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       }
       session.activity.splice(0, Math.max(0, session.activity.length - MAX_ACTIVITY))
       if (typeof body.isBusy === 'boolean') session.isBusy = body.isBusy
-      if (events.length) broadcast({ type: 'activity', session: session.name, events })
+      // A finished task is kept until a window hands it to the voice: it carries the notice's id.
+      const told = events.map(event => {
+        if (String(event.kind) !== 'task_done') return event
+        return { ...event, id: notices.add(session.name, String(event.text ?? '').slice(0, 2000)).id }
+      })
+      if (events.length) broadcast({ type: 'activity', session: session.name, events: told })
+      // No window to tell it: open one that starts the call, so Ceci says it without being asked.
+      if (told.some(event => event.id) && streams.size === 0 && clock() - reopenedAt >= reopenMs) {
+        reopenedAt = clock()
+        void Promise.resolve(open(launchUrl(true), { log })).catch(() => {})
+      }
       sendRoster()
       return [200, { ok: true }]
     },
@@ -520,6 +537,8 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
 
   // Routes for the call window, by the window key.
   const windowRoutes = {
+    // The window handed a finished task's result to the voice: it is not sent again.
+    'POST /notice-ack': (_none, body) => [200, { ok: notices.ack(String(body.id ?? '')) }],
     'POST /token': async () => {
       if (!key) return [409, { error: 'Falta a chave da ElevenLabs. Salve com /plugin configure luke-voice@luke-voice e reinicie o Claude Code, ou use a voz gratuita: /luke-voice voz local.' }]
       try {
@@ -967,6 +986,9 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' })
         streams.add(res)
         res.write(`data: ${JSON.stringify({ type: 'roster', sessions: roster(), focused, call })}\n\n`)
+        // Results this window has not heard yet (it was closed, or reconnecting, when they came).
+        const unheard = notices.pending()
+        if (unheard.length) res.write(`data: ${JSON.stringify({ type: 'notices', notices: unheard })}\n\n`)
         const ping = setInterval(() => res.write(': ping\n\n'), 20_000)
         req.on('close', () => {
           clearInterval(ping)

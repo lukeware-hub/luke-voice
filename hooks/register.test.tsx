@@ -1117,3 +1117,26 @@ test('/luke-voice setup with luke-voice off runs the setup here and says how it 
   setupStdout = '{"ok":false,"error":"Falta espaço: a voz precisa de 3,6 GB livres em /home/ana/.luke-voice/models; libere espaço e rode de novo.","help":""}\n'
   expect((await $.command.run(run('setup'))).text).toBe('Falta espaço: a voz precisa de 3,6 GB livres em /home/ana/.luke-voice/models; libere espaço e rode de novo.')
 })
+
+test('a voice task started before a reload of the mod still reports its result', async ($, on) => {
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  // The store keeps the running tasks by session: this session's agent-9 runs "rodar os testes".
+  storeGet = e => ((e as { key?: string }).key === 'voiceTasks' ? { 'claude-session-1': [['agent-9', 'rodar os testes']], other: [['agent-1', 'x']] } : (e as { key?: string }).key === 'isOn' ? true : undefined)
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => (release = resolve))
+  const { calls, stored } = engine(on, [async () => (await held, { status: 410, body: {} })])
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: false })
+  await until(() => calls.some(c => c.path === '/subscribe'))
+  await $.turn.complete({ answer: 'Todos passaram.', durationMs: 1, isAborted: false, turnId: 'x', agentId: 'agent-9', reason: 'answer' })
+  await until(() => calls.some(c => c.path === '/events' && JSON.stringify(c.body).includes('task_done')))
+  await $.command.run(run('off'))
+  release()
+
+  const done = calls.filter(c => c.path === '/events').map(c => JSON.stringify(c.body)).find(b => b.includes('task_done'))
+  expect(done).toContain('rodar os testes')
+  expect(done).toContain('Todos passaram.')
+  // Reported, it leaves the store; the other session's task stays.
+  await until(() => stored.some(v => JSON.stringify(v) === JSON.stringify({ other: [['agent-1', 'x']] })))
+  expect(stored.some(v => JSON.stringify(v) === JSON.stringify({ other: [['agent-1', 'x']] }))).toBe(true)
+})

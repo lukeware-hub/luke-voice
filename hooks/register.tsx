@@ -205,6 +205,41 @@ const tasks = new Map<string, string>()
 const pendingTasks = new Map<string, string[]>()
 // The effort each voice-task subagent runs at, by agent id, or by its prompt until the id is known.
 const taskEfforts = new Map<string, Effort>()
+// Finished work reported while the link to the hub was down (a hub restart, a reconnect): sent
+// as soon as it is back, so a task's result is never lost on the way to Ceci.
+const KEPT_UNSENT = new Set(['task_done', 'done'])
+let unsent: Activity[] = []
+
+// The voice tasks still running, kept in the plugin's store by session, so a reload of this
+// module (an update, a /reload) still reports a task's result when its subagent finishes.
+const TASKS_KEY = 'voiceTasks'
+type StoredTasks = Record<string, Array<[string, string]>>
+
+async function saveTasks($: EngineInterface) {
+  try {
+    const id = await $.session.id()
+    const saved = await $.store.get(TASKS_KEY)
+    const all: StoredTasks = saved && typeof saved === 'object' && !Array.isArray(saved) ? { ...(saved as StoredTasks) } : {}
+    if (tasks.size) all[id] = [...tasks].slice(-20)
+    else delete all[id]
+    await $.store.set(TASKS_KEY, all)
+  } catch {
+    // Kept in memory still; only a reload would forget it.
+  }
+}
+
+async function loadTasks($: EngineInterface) {
+  try {
+    const id = await $.session.id()
+    const saved = (await $.store.get(TASKS_KEY)) as StoredTasks | undefined
+    const mine = saved && typeof saved === 'object' ? saved[id] : undefined
+    for (const pair of Array.isArray(mine) ? mine : []) {
+      if (Array.isArray(pair) && typeof pair[0] === 'string' && typeof pair[1] === 'string' && !tasks.has(pair[0])) tasks.set(pair[0], pair[1])
+    }
+  } catch {
+    // Nothing kept: tasks started before the reload end without a spoken result.
+  }
+}
 
 // Takes the oldest task waiting on a prompt. The prompt's effort goes with the last one.
 function takePending(prompt: string) {
@@ -481,6 +516,7 @@ async function subscribeOnce($: EngineInterface, options: Record<string, unknown
       return false
     }
     token = res.json.token
+    flushUnsent($)
     // A hub older than 0.8.0 does not answer with a voice: it only has ElevenLabs.
     voice = res.json.provider === 'local' ? 'local' : 'elevenlabs'
     // Only the ElevenLabs voice needs a key; the free voice runs without one.
@@ -590,6 +626,7 @@ async function onCommand($: EngineInterface, command: Command) {
         takePending(prompt)
         tasks.set(spawned.agentId, command.task)
         taskEfforts.set(spawned.agentId, tier.effort)
+        void saveTasks($)
       }
       await startRunning($, spawned.agentId ?? prompt, command.task)
       report($)
@@ -628,13 +665,36 @@ async function onCommand($: EngineInterface, command: Command) {
 // turn runs or a voice task (a background subagent) does: the call window shows it "Trabalhando…".
 // Only tasks this module tracks count: a row left from before a reload would never end.
 function report($: EngineInterface, event?: Activity) {
-  if (!token) return
+  const isKept = Boolean(event && KEPT_UNSENT.has(event.kind))
+  const keep = () => {
+    if (event && isKept) unsent = [...unsent, event].slice(-20)
+  }
+  if (!token) return keep()
   void Promise.all([read($, isOn), read($, running)])
-    .then(([on, list]) => {
+    .then(async ([on, list]) => {
+      // Off: nothing is reported, and nothing is kept for later.
+      if (!on) return
       const hasTask = list.some(r => tasks.has(r.key) || pendingTasks.has(r.key))
-      return on ? hubFetch($, 'POST', '/events', { events: event ? [event] : [], isBusy: isBusy || hasTask }) : undefined
+      const res = await hubFetch($, 'POST', '/events', { events: event ? [event] : [], isBusy: isBusy || hasTask })
+      if (!res.ok) keep()
     })
-    .catch(() => undefined)
+    .catch(keep)
+}
+
+// What was kept while the hub could not be reached, sent once it can.
+function flushUnsent($: EngineInterface) {
+  if (!token || unsent.length === 0) return
+  const events = unsent
+  unsent = []
+  void read($, isOn)
+    .then(async on => {
+      if (!on) return
+      const res = await hubFetch($, 'POST', '/events', { events })
+      if (!res.ok) unsent = [...events, ...unsent].slice(-20)
+    })
+    .catch(() => {
+      unsent = [...events, ...unsent].slice(-20)
+    })
 }
 
 async function turnOn($: EngineInterface, options: Record<string, unknown>) {
@@ -951,6 +1011,7 @@ export const register: Register = (on, options) => {
     const saved = await $.store.get('isOn')
     if (typeof saved === 'boolean') await update($, isOn, () => saved)
     await loadStoredVoice($)
+    await loadTasks($)
     // The hub's port follows LUKE_VOICE_PORT, like the hub (hub/paths.mjs).
     const port = Number(await $.env.get('LUKE_VOICE_PORT'))
     if (Number.isInteger(port) && port > 0 && port < 65536) HUB = `http://127.0.0.1:${port}`
@@ -1009,6 +1070,7 @@ export const register: Register = (on, options) => {
     const pending = waiting?.task
     if (e.agentId !== undefined && waiting && pending !== undefined) {
       tasks.set(e.agentId, pending)
+      void saveTasks($)
       if (waiting.effort) taskEfforts.set(e.agentId, waiting.effort)
       // The prompt's row stays while another task with the same prompt still waits for its id.
       if (waiting.isLast) await stopRunning($, e.text)
@@ -1070,6 +1132,7 @@ export const register: Register = (on, options) => {
       } else {
         tasks.delete(e.agentId)
         taskEfforts.delete(e.agentId)
+        void saveTasks($)
         const answer = e.answer || 'Done, with no answer.'
         report($, { kind: 'task_done', text: short(`Task: ${task}\nResult: ${answer}`, 1500) })
         await addLine($, { kind: 'result', text: answer })

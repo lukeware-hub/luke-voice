@@ -158,7 +158,13 @@ let isMuted = false
 let roster = []
 let focused = null
 let pendingActivity = []
+// What Ceci says on her own once the user is quiet: { text, id }, id set for a finished task's
+// result, which the hub keeps until it is acked here (hub/notices.mjs).
 let pendingSpeech = []
+// Results already taken in (the hub sends unacked ones again on every connect), and the last
+// ones handed to the voice, put back if the user talks over them.
+const heardNotices = new Set()
+let lastSpoken = []
 let silentSince = Date.now()
 let connectedAt = 0
 // Bumped by every Chamar and Encerrar: a call still connecting when the user ends it (or starts
@@ -464,12 +470,33 @@ function speakWhenQuiet() {
     return
   }
   flushActivity()
-  const text = pendingSpeech.splice(0).join('\n')
+  const items = pendingSpeech.splice(0)
+  lastSpoken = items
+  const text = items.map(item => item.text).join('\n')
   // The news goes in as context, never as the user's words; the user message is fixed text.
   conversation.sendContextualUpdate(`[news]\n${quoteUntrusted(text)}`)
   gate.noticeSent()
   // In silent mode the agent only says it got a notification; the result waits as context.
   conversation.sendUserMessage(quiet.on ? QUIET_NOTICE : NOTICE)
+  // Handed to the voice: the hub no longer keeps these results for a window that connects later.
+  for (const item of items) ackNotice(item.id)
+}
+
+function ackNotice(id) {
+  if (id) void hub('POST', '/notice-ack', { id }).catch(() => {})
+}
+
+// The user talked over Ceci while she told the news (local voice): it is told again once they
+// are done.
+function onNoticeCut() {
+  pendingSpeech.unshift(...lastSpoken)
+  lastSpoken = []
+}
+
+// A finished task with no call running: Ceci starts one and tells it, without being asked.
+// Not while a call is connecting or broken, nor with no window key.
+function callForNews() {
+  if (!conversation && KEY && callState === 'idle') void startCall()
 }
 
 function onActivity(session, events) {
@@ -477,13 +504,20 @@ function onActivity(session, events) {
     const kind = safeKind(event.kind)
     const text = String(event.text ?? '')
     const line = `session ${session}: ${kind}: ${text}`
+    const id = typeof event.id === 'string' ? event.id : null
+    // A result the hub sent again (an unacked one, on reconnect) that this window already took in.
+    if (id && heardNotices.has(id)) continue
+    if (id) heardNotices.add(id)
     const spoken = speech.shouldSpeak(session, kind, text)
     if (kind === 'task_done') {
-      if (spoken) pendingSpeech.push(`task done: ${text}`)
+      if (spoken) {
+        pendingSpeech.push({ text: `task done: ${text}`, id })
+        callForNews()
+      } else ackNotice(id)
       const parts = text.match(/^Task: ([\s\S]*?)\nResult: ([\s\S]*)$/)
       addLog('result', parts ? parts[1] : 'Tarefa concluída', { body: parts ? parts[2] : text, who: session })
     } else if (spoken) {
-      pendingSpeech.push(line)
+      pendingSpeech.push({ text: line, id: null })
     } else {
       pendingActivity.push(line)
     }
@@ -568,6 +602,9 @@ async function startCall() {
       windowKey: KEY,
       prepare: microphone,
       clientTools,
+      onNoticeCut: () => {
+        if (isCurrent()) onNoticeCut()
+      },
       onStatus: (text, { isWarning = false } = {}) => {
         if (!isCurrent()) return
         if (callState === 'connecting' || isWarning) setCaption(text)
@@ -641,7 +678,8 @@ async function endCall() {
   const current = conversation
   conversation = null
   pendingActivity = []
-  pendingSpeech = []
+  // Finished tasks' results stay: they are told in the next call (the hub keeps them too).
+  pendingSpeech = pendingSpeech.filter(item => item.id)
   speech.clear()
   quiet.clear()
   await current?.endSession().catch(() => {})
@@ -660,6 +698,9 @@ function connectStream() {
       if (conversation && wasFocused !== focused) conversation.sendContextualUpdate(sessionsLine())
     } else if (message.type === 'activity') {
       onActivity(message.session, message.events)
+    } else if (message.type === 'notices') {
+      // Results that came while this window was closed or reconnecting.
+      for (const notice of message.notices ?? []) onActivity(notice.session, [{ kind: 'task_done', text: notice.text, id: notice.id }])
     } else if (message.type === 'focus') {
       focused = message.name
       renderRoster()

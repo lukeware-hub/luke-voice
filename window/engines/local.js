@@ -234,6 +234,8 @@ export async function startSession({
   onModeChange = () => {},
   onMessage = () => {},
   onStatus = () => {},
+  // The user talked over a notice (the news of a finished task): the window tells it again.
+  onNoticeCut = () => {},
 }) {
   KEY = windowKey
   const downloaded = risingPercent()
@@ -350,6 +352,9 @@ export async function startSession({
   // heard started over her voice.
   let ducked = 0
   let isBargeTurn = false
+  // The speech telling news on Ceci's own (a notice), so a barge-in over it can have it told again.
+  let noticeSpeech = 0
+  let isNoticeLine = false
   // What Ceci said lately, to tell her echo from the user's words.
   let recentSaid = []
   // Her output level, held a moment (the echo arrives a little after), and how much of it the mic hears.
@@ -545,6 +550,9 @@ export async function startSession({
 
   // Speaks chunk by chunk: the next chunk is synthesized while the current one plays.
   async function speak(text) {
+    // The speech this line becomes (speak and speakNative bump `speech` once), when it tells news.
+    if (isNoticeLine) noticeSpeech = speech + 1
+    isNoticeLine = false
     sayingText = text
     recentSaid = [...recentSaid, text].slice(-3)
     if (isNative) return speakNative(text)
@@ -682,7 +690,13 @@ export async function startSession({
     const next = decide({ kind: request.kind, reply, now: Date.now() })
     if (request.kind === 'user') commitTurn()
     pendingAction = next.pending
-    if (next.action !== 'run') return say(next.say)
+    if (next.action !== 'run') {
+      // speak() reads this as it starts, in the same tick; a line with no words leaves it unread.
+      isNoticeLine = request.kind === 'notice'
+      const said = say(next.say)
+      isNoticeLine = false
+      return said
+    }
     return runTool(next.tool, next.say)
   }
 
@@ -733,7 +747,11 @@ export async function startSession({
           return onTurnEnd(joiner.dropped())
         }
         console.info('[luke-voice] barge-in: the user spoke over Ceci')
-        if (ducked) cancelSpeech()
+        if (ducked) {
+          const wasNotice = ducked === noticeSpeech
+          cancelSpeech()
+          if (wasNotice) onNoticeCut()
+        }
         onTurnEnd(joiner.ended(audio), heard)
       })
       .catch(error => {

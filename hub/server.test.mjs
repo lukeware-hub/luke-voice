@@ -1226,3 +1226,37 @@ test('a kept question take belongs to the voice model files by content, not only
     MODELS[SERVICES.tts.models[0]].sha256 = saved
   }
 })
+
+test('a finished task is kept until the window acks it: sent again to a window that connects, and it opens one when none is', async () => {
+  const s = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/notices' } })).body
+  const before = opened.length
+  await call('POST', '/events', { auth: s.token, body: { events: [{ kind: 'task_done', text: 'Task: testes\nResult: passaram' }] } })
+  // No window was open: one opens and starts the call, once for a burst of results.
+  assert.equal(opened.length, before + 1)
+  assert.match(opened.at(-1), /call=1/)
+  await call('POST', '/events', { auth: s.token, body: { events: [{ kind: 'task_done', text: 'Task: lint\nResult: ok' }] } })
+  assert.equal(opened.length, before + 1)
+  // A window that connects now hears both.
+  const first = await new Promise((resolve, reject) => {
+    const req = request({ host: '127.0.0.1', port, path: `/stream?k=${WINDOW}`, headers: { host: `127.0.0.1:${port}` } }, res => {
+      let text = ''
+      res.on('data', chunk => {
+        text += chunk
+        const line = text.split('\n\n').map(part => part.replace(/^data: /, '')).find(part => part.includes('"type":"notices"'))
+        if (line) {
+          req.destroy()
+          resolve(JSON.parse(line))
+        }
+      })
+    })
+    req.on('error', error => (error.code === 'ECONNRESET' ? null : reject(error)))
+    req.end()
+  })
+  const mine = first.notices.filter(n => n.session === 'notices')
+  assert.deepEqual(mine.map(n => n.text), ['Task: testes\nResult: passaram', 'Task: lint\nResult: ok'])
+  // Acked by the window: no longer pending. The ack needs the window key.
+  assert.equal((await call('POST', '/notice-ack', { body: { id: mine[0].id } })).status, 401)
+  assert.equal((await call('POST', '/notice-ack', { key: WINDOW, body: { id: mine[0].id } })).body.ok, true)
+  assert.equal((await call('POST', '/notice-ack', { key: WINDOW, body: { id: mine[1].id } })).body.ok, true)
+  await call('POST', '/unsubscribe', { auth: s.token })
+})
