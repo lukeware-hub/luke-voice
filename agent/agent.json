@@ -94,6 +94,106 @@
           }
         }
       }
+    },
+    {
+      "type": "client",
+      "name": "luke_memory_search",
+      "description": "Search Ceci's permanent memory: every past conversation with the user, the tasks and what the sessions did. Use it before saying you do not remember. Returns dated hits.",
+      "expects_response": true,
+      "response_timeout_secs": 10,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Words to look for, in Portuguese."
+          },
+          "from": {
+            "type": "string",
+            "description": "Optional start date, YYYY-MM-DD or YYYY-MM."
+          },
+          "to": {
+            "type": "string",
+            "description": "Optional end date, YYYY-MM-DD or YYYY-MM."
+          }
+        }
+      }
+    },
+    {
+      "type": "client",
+      "name": "luke_memory_conversation",
+      "description": "Read one past conversation from Ceci's memory, whole: by its number (#12), a date (YYYY-MM-DD, its first conversation that day), \"first\" (the very first one) or \"last\".",
+      "expects_response": true,
+      "response_timeout_secs": 10,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "which"
+        ],
+        "properties": {
+          "which": {
+            "type": "string",
+            "description": "A conversation number, a date YYYY-MM-DD, \"first\" or \"last\"."
+          },
+          "offset": {
+            "type": "string",
+            "description": "Optional: skip this many lines, to read further."
+          }
+        }
+      }
+    },
+    {
+      "type": "client",
+      "name": "luke_memory_timeline",
+      "description": "Read the summaries of past days and months from Ceci's memory, to review a period.",
+      "expects_response": true,
+      "response_timeout_secs": 10,
+      "parameters": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "from": {
+            "type": "string",
+            "description": "Start date, YYYY-MM-DD or YYYY-MM."
+          },
+          "to": {
+            "type": "string",
+            "description": "Optional end date, YYYY-MM-DD or YYYY-MM."
+          }
+        }
+      }
+    },
+    {
+      "type": "client",
+      "name": "luke_memory_delete",
+      "description": "Delete part of Ceci's permanent memory, for good. Call it only after you said exactly what will be deleted and the user clearly said yes. Give exactly one scope.",
+      "expects_response": true,
+      "response_timeout_secs": 10,
+      "parameters": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "conversation": {
+            "type": "string",
+            "description": "A conversation number."
+          },
+          "day": {
+            "type": "string",
+            "description": "A day YYYY-MM-DD or a month YYYY-MM."
+          },
+          "search": {
+            "type": "string",
+            "description": "Delete every line with these words."
+          },
+          "all": {
+            "type": "string",
+            "description": "\"true\" to delete the whole memory."
+          }
+        }
+      }
     }
   ],
   "conversation_config": {

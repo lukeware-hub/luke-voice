@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Args, On } from 'claude-code'
 
-import { asPersona, brainArgs, brainInput, classifyTask, NO_NODE, parseBrain, parseBrainText, preview, TIERS } from './register'
+import { asPersona, brainArgs, brainInput, classifyTask, NO_NODE, parseBrain, parseBrainText, parseSummary, memoryTarget, preview, summaryPrompt, TIERS } from './register'
 import type { BrainRequest } from './register'
 
 const FOOTER = { plugin: 'luke-voice', component: 'SessionMode', props: { modes: [] } } as const
@@ -970,9 +970,11 @@ test('in help, the ElevenLabs voice without a key is called out', async ($, on) 
 test('/luke-voice uninstall alone only says what goes, and runs nothing', async ($, on) => {
   const { calls, launches, stored } = engine(on)
   on('session.info', () => ({ value: { transcriptPath: '', platform: 'macos' } }))
-  for (const arg of ['uninstall', 'desinstalar', 'uninstall agora']) {
+  // "confirmar" with no choice about Ceci's memory still only asks: keep it, or delete it too.
+  for (const arg of ['uninstall', 'desinstalar', 'uninstall agora', 'uninstall confirmar']) {
     const text = (await $.command.run(run(arg))).text
-    expect(text).toContain('/luke-voice uninstall confirmar')
+    expect(text).toContain('/luke-voice uninstall confirmar manter-memoria')
+    expect(text).toContain('/luke-voice uninstall confirmar apagar-memoria')
     expect(text).toContain('.luke-voice')
   }
   expect(launches).toEqual([])
@@ -988,7 +990,7 @@ test('/luke-voice uninstall confirmar ends the call, turns off and starts the un
   await $.command.run(run('on'))
   await until(() => calls.some(c => c.path === '/inbox'))
 
-  const text = (await $.command.run(run('desinstalar confirmar'))).text
+  const text = (await $.command.run(run('desinstalar confirmar apagar-memoria'))).text
   release()
 
   const paths = calls.map(c => c.path)
@@ -997,7 +999,9 @@ test('/luke-voice uninstall confirmar ends the call, turns off and starts the un
   expect(stored.at(-1)).toBe(false)
   const argv = (launches.at(-1) as { argv: string[] }).argv
   expect(argv[0]).toBe('/bin/sh')
-  expect(argv[2]).toContain('LUKE_VOICE_NO_PROMPT=1 nohup')
+  expect(argv[2]).toContain('LUKE_VOICE_NO_PROMPT=1 LUKE_VOICE_DELETE_MEMORY="$m" nohup')
+  // The choice about Ceci's memory goes to the script: 1 deletes it, 0 keeps it.
+  expect(argv[6]).toBe('1')
   expect(argv[2]).toContain('&')
   // The script runs from a copy: it deletes the plugin folder it lives in.
   expect(argv[2]).toContain('cp "$1" "$d/uninstall.sh"')
@@ -1012,6 +1016,7 @@ test('/luke-voice uninstall on Windows gives the uninstall line to paste and run
   on('session.info', () => ({ value: { transcriptPath: '', platform: 'windows' } }))
   const text = (await $.command.run(run('uninstall confirmar'))).text
   expect(text).toContain('uninstall-luke-voice-windows.cmd | iex')
+  expect(text).toContain('memória da Ceci')
   expect(launches).toEqual([])
   expect(stored).toEqual([])
 })
@@ -1156,4 +1161,39 @@ test('a session ended from the call window turns luke-voice off here, without ch
   const ui = await $.ui.mount({ ...FOOTER, surface: 'terminal' })
   expect((await ui.find({ type: 'Button', key: 'luke-voice-toggle' }))?.props.label).toBe('✦ luke-voice: off')
   await ui.unmount()
+})
+
+test("the brain reads today's date and Ceci's memory, before the conversation, as memories only", () => {
+  const input = brainInput({ ...REQUEST, today: '2026-11-25, quarta-feira', memory: 'Primeira conversa: 2025-03-01.\n2025-03-01 (#1) usuário: Meu projeto se chama Girassol.' })
+  const lines = input.split('\n')
+  expect(lines[0]).toBe('[hoje] 2026-11-25, quarta-feira')
+  expect(lines.indexOf('[memória]')).toBeLessThan(lines.indexOf('[conversa]'))
+  expect(input).toContain('2025-03-01 (#1) usuário: Meu projeto se chama Girassol.')
+  // Nothing kept yet says so, and an old hub that sends no memory still works.
+  expect(brainInput(REQUEST)).toContain('[memória]\n(nada guardado ainda)')
+})
+
+test('the memory tools reach the brain: reading runs at once, a delete only waits for a "sim"', () => {
+  expect(parseBrainText('{"say":"","tool":{"name":"luke_memory_search","args":{"query":"girassol"}}}').tool).toEqual({ name: 'luke_memory_search', args: { query: 'girassol' } })
+  expect(parseBrainText('{"say":"","tool":{"name":"luke_memory_conversation","args":{"which":"first"}}}').tool?.name).toBe('luke_memory_conversation')
+  expect(parseBrainText('{"say":"Apago a conversa #3, posso?","pending":{"name":"luke_memory_delete","args":{"conversation":3}}}').pending).toEqual({ name: 'luke_memory_delete', args: { conversation: 3 } })
+})
+
+test('a summary prompt carries its text, and a conversation summary gives its title on the first line', () => {
+  const item = { level: 'conversation' as const, period: '7', toEvent: 40, day: '2026-11-03', text: '10:00 usuário: roda os testes' }
+  expect(summaryPrompt(item)).toContain('Data: 2026-11-03\n10:00 usuário: roda os testes')
+  expect(parseSummary(item, '**Testes do Girassol**\nO usuário pediu os testes; passaram.')).toEqual({ level: 'conversation', period: '7', text: 'O usuário pediu os testes; passaram.', title: 'Testes do Girassol' })
+  expect(parseSummary(item, 'Título: Deploy\nFez o deploy.').title).toBe('Deploy')
+  expect(parseSummary(item, 'Só uma linha.')).toEqual({ level: 'conversation', period: '7', text: 'Só uma linha.', title: null })
+  expect(parseSummary({ ...item, level: 'day', period: '2026-11-03' }, ' Dia calmo. ')).toEqual({ level: 'day', period: '2026-11-03', text: 'Dia calmo.', title: null })
+})
+
+test('/luke-voice memoria apagar names exactly one thing: all, a conversation, a day, a month or words', () => {
+  expect(memoryTarget('tudo')?.scope).toEqual({ all: true })
+  expect(memoryTarget('#12')?.scope).toEqual({ conversation: 12 })
+  expect(memoryTarget('12')?.scope).toEqual({ conversation: 12 })
+  expect(memoryTarget('2026-11-03')?.scope).toEqual({ day: '2026-11-03' })
+  expect(memoryTarget('2026-11')?.scope).toEqual({ day: '2026-11' })
+  expect(memoryTarget('senha do wifi')?.scope).toEqual({ search: 'senha do wifi' })
+  expect(memoryTarget('   ')).toBeNull()
 })

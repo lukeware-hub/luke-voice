@@ -2,12 +2,13 @@
 // "posso?" (the fast path in local.js), never straight from the brain: not on a notice, and not on
 // a user turn either, even if the model forgot to ask first.
 
-// Tools that act on the computer: only these can wait for a "sim" (PENDABLE_TOOLS in hooks/register.tsx).
-const PENDABLE = ['luke_run_task', 'luke_send_to_claude']
+// Tools that act on the computer or delete from the memory: only these can wait for a "sim" (PENDABLE_TOOLS in hooks/register.tsx).
+const PENDABLE = ['luke_run_task', 'luke_send_to_claude', 'luke_memory_delete']
 // Said instead of the brain's words when it called an acting tool at once: it did not run yet.
 const ASK = {
   luke_run_task: 'Posso rodar essa tarefa?',
   luke_send_to_claude: 'Posso mandar isso para o Claude?',
+  luke_memory_delete: 'Posso apagar isso da memória?',
 }
 // A "posso?" waits this long for its "sim".
 export const PENDING_TTL_MS = 90_000

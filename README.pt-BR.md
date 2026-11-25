@@ -172,6 +172,15 @@ Escolha de qualquer um destes jeitos; vale a escolha mais recente:
 
 Sem nenhuma escolha, o luke-voice usa a ElevenLabs se houver chave salva, e a voz gratuita se não houver.
 
+### A memória da Ceci
+
+A Ceci nunca esquece uma conversa. Toda chamada fica guardada inteira numa memória só por computador, a mesma para todas as sessões do Claude Code: o que você disse, o que ela disse, as tarefas e os resultados, e o que as sessões fizeram. Ela fica em `~/.ceci/memory.db` (um arquivo SQLite, fora da pasta do luke-voice), é criada sozinha na primeira vez que o luke-voice liga, e nada nela é apagado sozinho.
+
+- **Lembrar:** a cada fala, a Ceci lê um resumo de tudo desde a primeira conversa, as últimas conversas e o que combina com o que você acabou de dizer. Pergunte "lembra da primeira conversa?" ou "o que a gente falou semana passada?" e ela busca na memória.
+- **Revisar:** a aba **Memória** da janela da chamada lista todas as conversas por dia, com busca; no Claude Code, `/luke-voice memoria` e `/luke-voice memoria buscar <texto>`.
+- **Apagar (o único jeito de algo sair):** peça à Ceci ("apaga a conversa de ontem"; ela pergunta "posso?" antes), use os botões **Apagar** da aba Memória, ou `/luke-voice memoria apagar <#conversa | AAAA-MM-DD | AAAA-MM | palavras | tudo>`. Apagar também refaz os resumos que falavam daquilo e compacta o arquivo, para as palavras sumirem do disco. Ao desinstalar, ele pergunta se a memória também deve ser apagada.
+- Os resumos são escritos pelo Claude Haiku, na sua conta do Claude, quando não há chamada. As lembranças vão para o cérebro a cada fala, como a conversa já vai.
+
 ### O que sai do seu computador
 
 - **Desligado:** nada.
@@ -203,7 +212,7 @@ Sem nenhuma escolha, o luke-voice usa a ElevenLabs se houver chave salva, e a vo
 
 ## Desinstalar
 
-Uma linha remove tudo: o luke-voice do Claude Code, a voz baixada, e o Node.js e o Git que o instalador trouxe (e tira os dois do PATH). Ela pergunta antes de começar e pede para fechar o Claude Code antes (aberto, ele ligaria o luke-voice de novo); o resto do computador não muda.
+Uma linha remove tudo: o luke-voice do Claude Code, a voz baixada, e o Node.js e o Git que o instalador trouxe (e tira os dois do PATH). Ela pergunta antes de começar e pede para fechar o Claude Code antes (aberto, ele ligaria o luke-voice de novo); o resto do computador não muda. A memória da Ceci (`~/.ceci`) fica, a menos que você diga para apagar também: o desinstalador pergunta, e no Claude Code você escolhe `/luke-voice uninstall confirmar manter-memoria` ou `/luke-voice uninstall confirmar apagar-memoria`.
 
 De dentro do Claude Code (macOS ou Linux): digite `/luke-voice uninstall`. Ele diz o que vai ser apagado e pede `/luke-voice uninstall confirmar`; aí encerra a chamada, desliga o luke-voice e roda o desinstalador abaixo em segundo plano. Depois, feche o Claude Code e abra de novo. No Windows, ele mostra a linha abaixo para colar.
 

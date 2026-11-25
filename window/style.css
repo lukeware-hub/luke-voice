@@ -1839,6 +1839,172 @@ body[data-hidden='true'] *::after {
   animation-play-state: paused !important;
 }
 
+/* Memory: Ceci's conversations, newest first. The cards are the history's; a delete asks inline. */
+.entry[data-kind='memory'] .mark {
+  background: var(--indigo);
+}
+
+.memory-search {
+  margin: 0 0 10px;
+}
+
+.memory-search input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--fill);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+  transition: background-color 200ms var(--ease-out), box-shadow 200ms var(--ease-out);
+}
+
+.memory-search input::placeholder {
+  color: var(--faint);
+}
+
+.memory-search input:focus-visible {
+  outline: none;
+  background: var(--card);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.memory-stats {
+  margin: 0 0 12px;
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.memory-entry .what {
+  font-weight: 600;
+}
+
+.memory-summary {
+  grid-column: 2;
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+.memory-entry details,
+.memory-actions {
+  grid-column: 2;
+}
+
+.memory-lines {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+  max-height: 420px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  animation: caption-in 320ms var(--ease-ios);
+}
+
+.memory-line {
+  display: grid;
+  gap: 1px;
+  padding: 8px 10px;
+  border-radius: var(--radius-control);
+  background: var(--fill-2);
+}
+
+.memory-line[data-kind='user'] {
+  background: var(--accent-soft);
+}
+
+.memory-who {
+  color: var(--faint);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.memory-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.memory-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.memory-actions .memory-delete {
+  color: var(--red-text);
+}
+
+.memory-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: var(--radius-control);
+  background: var(--red-soft);
+  animation: caption-in 240ms var(--ease-ios);
+}
+
+.memory-confirm p {
+  flex: 1 1 220px;
+  margin: 0;
+  color: var(--text);
+  font-size: 14px;
+}
+
+.danger-btn {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--red-strong);
+  color: #ffffff;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  transition: filter 160ms var(--ease-out), transform 160ms var(--ease-out);
+}
+
+.danger-btn:hover {
+  filter: brightness(1.08);
+}
+
+.danger-btn:active {
+  transform: scale(0.97);
+}
+
+.danger-btn:disabled {
+  opacity: 0.6;
+}
+
+.memory-more {
+  margin: 8px auto 0;
+  display: flex;
+}
+
+.memory-danger {
+  margin: 28px 0 8px;
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+}
+
+.memory-danger > .danger-btn {
+  background: transparent;
+  color: var(--red-text);
+  box-shadow: inset 0 0 0 1px var(--red-soft);
+}
+
 @media (prefers-reduced-motion: reduce) {
   /* Less motion, not none: no movement, but color and opacity still show each change. */
   *,

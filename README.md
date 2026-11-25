@@ -172,6 +172,15 @@ Pick it in any of these ways; the newest choice wins:
 
 With no choice at all, luke-voice uses ElevenLabs while a key is saved, and the free voice otherwise.
 
+### Ceci's memory
+
+Ceci never forgets a conversation. Every call is recorded whole in one memory per computer, shared by every Claude Code session: what you said, what she said, the tasks and their results, and what the sessions did. It lives in `~/.ceci/memory.db` (a SQLite file, outside luke-voice's folder), is created by itself the first time luke-voice starts, and nothing in it is ever removed on its own.
+
+- **Remembering:** on every turn Ceci reads a summary of everything since the first conversation, the latest conversations and what matches what you just said. Ask her "lembra da primeira conversa?" or "o que a gente falou semana passada?" and she searches the memory.
+- **Reviewing:** the **Memória** tab in the call window lists every conversation by day, with a search; in Claude Code, `/luke-voice memoria` and `/luke-voice memoria buscar <texto>`.
+- **Deleting (the only way anything leaves):** ask Ceci ("apaga a conversa de ontem"; she asks "posso?" first), use the **Apagar** buttons in the Memória tab, or `/luke-voice memoria apagar <#conversa | AAAA-MM-DD | AAAA-MM | palavras | tudo>`. A delete also rewrites the summaries that mentioned it and compacts the file, so the words are gone from the disk. Uninstalling asks whether to delete the memory too.
+- Summaries are written by Claude Haiku on your Claude account, while no call is live. Remembered lines go to the brain with each turn, like the conversation does.
+
 ### What leaves your computer
 
 - **While it is off:** nothing.
@@ -203,7 +212,7 @@ With no choice at all, luke-voice uses ElevenLabs while a key is saved, and the 
 
 ## Uninstall
 
-One line removes everything: luke-voice from Claude Code, the downloaded voice, and the Node.js and Git the installer brought (and takes them off the PATH). It asks before it starts, and asks you to close Claude Code first (while it is open, luke-voice would start again); nothing else on the computer changes.
+One line removes everything: luke-voice from Claude Code, the downloaded voice, and the Node.js and Git the installer brought (and takes them off the PATH). It asks before it starts, and asks you to close Claude Code first (while it is open, luke-voice would start again); nothing else on the computer changes. Ceci's memory (`~/.ceci`) is kept unless you say to delete it too: the uninstaller asks, and from Claude Code you pick `/luke-voice uninstall confirmar manter-memoria` or `/luke-voice uninstall confirmar apagar-memoria`.
 
 From inside Claude Code (macOS or Linux): type `/luke-voice uninstall`. It says what will be removed and asks for `/luke-voice uninstall confirmar`; then it ends the call, turns luke-voice off and runs the uninstaller below in the background. Close Claude Code and open it again when it says so. On Windows it gives you the line below.
 
