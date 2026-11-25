@@ -7,9 +7,22 @@ export const FRAME = 512
 export const RATE = 16_000
 
 const DEFAULTS = {
-  minLevel: 0.012, // below this RMS nothing counts as speech, however quiet the room
+  // Below this RMS (~-42 dBFS) nothing counts as speech, however quiet the room. The mic has no
+  // automatic gain, so a soft voice or a far mic speaks at ~0.01-0.02: at the old 0.012 its quiet
+  // syllables fell under the bar, short words were dropped as blips and turns were cut mid-phrase.
+  // A noisy room still sets a higher bar (ratio, below), and Silero drops noise before the ears.
+  minLevel: 0.008,
   ratio: 3, // speech is this many times louder than the noise floor
   bargeRatio: 3, // while Ceci speaks, the bar is this many times higher
+  // ...and never under this (the old 0.012 times bargeRatio): a lower minLevel for the user's own
+  // turns must not let Ceci's echo or the room interrupt her more easily.
+  bargeMinLevel: 0.036,
+  // Once a turn has started in a quiet room, a frame counts as speech down to this share of
+  // minLevel (hysteresis): soft word endings and the quiet consonants of fast speech no longer count
+  // as silence, so a turn is not cut under the user and short words reach minSpeechFrames. In a
+  // noisy room the bar is the room's (floor times ratio), as before, so a noise that switched on is
+  // still absorbed; Ceci's echo bar is never lowered.
+  holdRatio: 0.7,
   startFrames: 3, // ~100 ms of speech starts an utterance
   bargeFrames: 8, // ~250 ms of loud speech interrupts Ceci
   endFrames: 40, // ~1.3 s of silence ends it (breaths mid-sentence last up to ~1 s)
@@ -26,7 +39,9 @@ const DEFAULTS = {
   // fires a moment after the user started, and the words before it must not be lost.
   bargePrerollFrames: 50,
   maxFrames: 940, // ~30 s at most per utterance
-  minSpeechFrames: 8, // shorter blips (a cough, a click) are dropped
+  // Shorter blips (a click, a knock) are dropped. ~190 ms: a quick "sim" or "não" has about that
+  // much voiced sound; at 8 (~260 ms) it was often dropped. Silero still checks what passes.
+  minSpeechFrames: 6,
   // A noise that switches on above the bar never has a quiet frame, so the floor, learned from quiet
   // frames only, would never reach it: every turn would run to the 30 s cap. After ~3 s with every
   // frame above the bar, the floor creeps toward the quietest of those frames, slowly (a step-up is
@@ -103,7 +118,8 @@ export function createVad(options = {}) {
       // from her output level): while she speaks it is never speech, in or out of a turn, so her
       // echo neither interrupts her nor keeps a turn going after the user stopped.
       const echoBar = isSpeaking ? echo : 0
-      const bar = Math.max(normalBar * (isSpeaking && !inSpeech ? o.bargeRatio : 1), echoBar)
+      const turnBar = inSpeech ? Math.max(o.minLevel * o.holdRatio, floor * o.ratio) : isSpeaking ? Math.max(o.bargeMinLevel, floor * o.ratio * o.bargeRatio) : normalBar
+      const bar = Math.max(turnBar, echoBar)
       const isLoud = level >= bar
 
       // The room got louder: every frame above the bar for creepFrames, and Ceci quiet (her voice

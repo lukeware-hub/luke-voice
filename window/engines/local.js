@@ -12,6 +12,7 @@ import { createCutReply, createTurnJoiner, createTurnLog } from '/engines/turn-j
 import { risingPercent } from '/engines/progress.js'
 import { isEcho, isNotSpeech } from '/engines/transcript.js'
 import { FRAME, RATE, createVad, rms } from '/engines/vad.js'
+import { normalizeSpeech } from '/engines/gain.js'
 
 export const name = 'local'
 
@@ -401,7 +402,13 @@ export async function startSession({
   // The Mac voice falls back to the browser voice for a line `say` could not make.
   const macSynth = text => nativeSynth(text).then(made => (made.isBroken ? ask('speak', { text }) : made))
   const synth = text => (isNative ? nativeSynth(text) : isMacVoice ? macSynth(text) : ask('speak', { text }))
-  const transcribe = audio => (isNative ? nativeTranscribe(audio) : ask('transcribe', { audio }, [audio.buffer]))
+  // A soft voice is raised to a steady level first (gain.js), for Silero and the ears alike: on
+  // recorded turns at a very low level it halved the word errors, and left normal turns as they were.
+  const transcribe = audio => {
+    const { audio: level, gain } = normalizeSpeech(audio)
+    if (gain > 1) console.info(`[luke-voice] quiet speech raised ${gain.toFixed(1)}x for the ears`)
+    return isNative ? nativeTranscribe(level) : ask('transcribe', { audio: level }, [level.buffer])
+  }
 
   const setMode = next => {
     if (next === mode) return

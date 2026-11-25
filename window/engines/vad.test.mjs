@@ -81,9 +81,48 @@ test('a short blip is dropped instead of being transcribed', () => {
 
 test('steady room noise raises the floor, so it never counts as speech', () => {
   const vad = createVad()
-  const events = feed(vad, Array(400).fill(0).map(() => noise(0.011)))
+  const events = feed(vad, Array(400).fill(0).map(() => noise(0.0075)))
   assert.deepEqual(events, [])
   assert.ok(vad.floor > 0.005)
+})
+
+test('steady noise above the bar from the very first frame is one short turn, then the room', () => {
+  // A fan at 0.011 (under the old bar of 0.012, over the new 0.008) before the room is known: it
+  // looks like speech once, the floor catches up in a few seconds, and Silero drops that turn.
+  const vad = createVad()
+  const events = []
+  for (let i = 0; i < 1500; i++) {
+    const event = vad.push(noise(0.011))
+    if (event) events.push({ ...event, at: i })
+  }
+  assert.deepEqual(events.map(e => e.type), ['start', 'end'])
+  assert.ok((events[1].at * FRAME) / 16_000 < 10, 'absorbed in under 10 s')
+  assert.ok(vad.floor * 3 > 0.011, 'the noise is the room now')
+})
+
+test('a soft voice under the old bar starts a turn, and its quiet word endings do not end it', () => {
+  // A soft speaker at 0.01, with syllables that dip to 0.006 (under the start bar, over the hold bar).
+  const vad = createVad()
+  const word = () => [...Array(6).fill(0).map(() => tone(0.01)), ...Array(4).fill(0).map(() => tone(0.006))]
+  const events = feed(vad, [...Array(30).fill(0).map(silence), ...Array(5).fill(0).flatMap(word), ...Array(45).fill(0).map(silence)])
+  assert.deepEqual(events.map(e => e.type), ['start', 'end'])
+  // All 50 frames of speech are in it: none of the dips counted as silence.
+  assert.ok(events[1].audio.length >= 50 * FRAME)
+})
+
+test('a quick "sim" of ~200 ms is a turn, not a blip', () => {
+  const vad = createVad()
+  const events = feed(vad, [...Array(30).fill(0).map(silence), ...Array(6).fill(0).map(() => tone(0.05)), ...Array(45).fill(0).map(silence)])
+  assert.deepEqual(events.map(e => e.type), ['start', 'end'])
+  // A click of ~130 ms is still dropped.
+  const click = feed(createVad(), [...Array(30).fill(0).map(silence), ...Array(4).fill(0).map(() => tone(0.05)), ...Array(45).fill(0).map(silence)])
+  assert.deepEqual(click.map(e => e.type), ['start', 'drop'])
+})
+
+test('a lower bar for the user does not lower the bar to interrupt Ceci', () => {
+  // 0.03 is over the user's bar many times, but under the barge bar (0.036) while she speaks.
+  const events = feed(createVad(), Array(60).fill(0).map(() => tone(0.03)), { isSpeaking: true })
+  assert.deepEqual(events, [])
 })
 
 test('while Ceci speaks, a quiet echo does not interrupt but loud speech barges in', () => {

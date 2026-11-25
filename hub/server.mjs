@@ -64,6 +64,7 @@ const STATIC = {
   '/engines/progress.js': ['engines/progress.js', 'text/javascript; charset=utf-8'],
   '/engines/context.js': ['engines/context.js', 'text/javascript; charset=utf-8'],
   '/engines/vad.js': ['engines/vad.js', 'text/javascript; charset=utf-8'],
+  '/engines/gain.js': ['engines/gain.js', 'text/javascript; charset=utf-8'],
   '/engines/piper-ids.js': ['engines/piper-ids.js', 'text/javascript; charset=utf-8'],
   '/engines/transcript.js': ['engines/transcript.js', 'text/javascript; charset=utf-8'],
   '/engines/mic-worklet.js': ['engines/mic-worklet.js', 'text/javascript; charset=utf-8'],
