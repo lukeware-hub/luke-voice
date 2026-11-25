@@ -654,7 +654,7 @@ export async function startSession({
     if (isWarming) return
     isWarming = true
     try {
-      for (const text of ACKS) {
+      for (const text of [...ACKS, ...Object.values(DONE_SAY)]) {
         if (ackAudio.has(text)) continue
         if (!isIdle()) return
         const stop = new AbortController()
@@ -675,6 +675,19 @@ export async function startSession({
     }
   }
   const cancelAckWarm = () => ackWarm?.abort()
+
+  // A line made ahead of time (an acknowledgement, or "Comecei..." for a yes), said with no wait.
+  // False when it is not made yet, or Ceci is talking: the caller says it the usual way.
+  function sayMade(text) {
+    const made = ackAudio.get(text)
+    if (!made || isEnded || isStale() || mode === 'speaking' || saying !== 0) return false
+    commitTurn()
+    turns.said(text)
+    onMessage({ source: 'ai', message: text })
+    recentSaid = [...recentSaid, text].slice(-3)
+    play(made.audio, made.sampleRate, ++speech, true)
+    return true
+  }
 
   // "Certo." while the brain thinks. Not over Ceci's own voice, and never added to the conversation.
   function sayAck() {
@@ -723,14 +736,15 @@ export async function startSession({
 
   // Runs a tool and says how it went. A tool that failed, or one that only reads (activity), goes
   // back to the brain once, so the user hears what it means.
-  async function runTool(tool, said) {
+  // `isAnnounced`: Ceci already said it started (a yes on the fast path), so a success says nothing more.
+  async function runTool(tool, said, isAnnounced = false) {
     if (isStale()) return
     if (typeof clientTools[tool.name] !== 'function') return say(said)
     commitTurn()
     const result = String(await clientTools[tool.name](tool.args ?? {}))
     remember(`[tool ${tool.name}] ${result}`)
     // The brain sometimes acts without a word; the user still needs to hear that it worked.
-    if (tool.name !== 'luke_session_activity' && TOOL_OK.test(result)) return say(said || DONE_SAY[tool.name] || '')
+    if (tool.name !== 'luke_session_activity' && TOOL_OK.test(result)) return isAnnounced ? undefined : say(said || DONE_SAY[tool.name] || '')
     const followUp = await askBrain({ kind: 'tool_result', text: `${tool.name}: ${result}` })
     return say(followUp.say)
   }
@@ -856,8 +870,13 @@ export async function startSession({
     if (stop === 'claude') return stopNow()
     if (action && isConfirm(text, recentSaid.join(' '))) {
       timing('fast path', 0, `yes to "posso?": ${action.tool.name}`)
-      return runTool(action.tool, '')
+      // "Comecei..." plays at once, made ahead of time, while the tool starts; a failure is still
+      // explained after it.
+      return runTool(action.tool, '', sayMade(DONE_SAY[action.tool.name]))
     }
+    // An answer to "posso?" the fast path did not take: written to the log, so a missed short yes
+    // can be found and added.
+    if (action) timing('no fast path', 0, `answer to "posso?": "${text.slice(0, 80)}"`)
     if (isNative && router) {
       // The brain is asked at once, beside the router: when the router passes, its answer is
       // already on the way instead of starting only now. A reply the router gave makes the
