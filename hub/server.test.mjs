@@ -143,7 +143,7 @@ test('the page loads no remote script; the ElevenLabs client is loaded on demand
   assert.match(eleven, /CLIENT_INTEGRITY = 'sha384-[A-Za-z0-9+/=]{64}'/)
   assert.match(eleven, /script\.integrity = CLIENT_INTEGRITY/)
   assert.match(eleven, /script\.crossOrigin = 'anonymous'/)
-  for (const path of ['/app.js', '/guard.js', '/engines/elevenlabs.js', '/engines/local.js', '/engines/speech-text.js', '/engines/fast-path.js', '/engines/turn-join.js', '/engines/confirm.js', '/engines/greetings.js', '/engines/progress.js', '/engines/context.js', '/engines/vad.js', '/engines/piper-ids.js', '/engines/transcript.js', '/engines/mic-worklet.js', '/engines/voice-worker.js']) {
+  for (const path of ['/app.js', '/guard.js', '/engines/elevenlabs.js', '/engines/local.js', '/engines/speech-text.js', '/engines/fast-path.js', '/engines/turn-join.js', '/engines/confirm.js', '/engines/greetings.js', '/engines/phrase-audio.js', '/engines/progress.js', '/engines/context.js', '/engines/vad.js', '/engines/gain.js', '/engines/piper-ids.js', '/engines/transcript.js', '/engines/mic-worklet.js', '/engines/voice-worker.js']) {
     const res = await call('GET', path)
     assert.equal(res.status, 200)
     assert.doesNotMatch(res.body, /\bfrom\s*['"]https?:|import\s*\(\s*['"]https?:/)
@@ -1259,4 +1259,23 @@ test('a finished task is kept until the window acks it: sent again to a window t
   assert.equal((await call('POST', '/notice-ack', { key: WINDOW, body: { id: mine[0].id } })).body.ok, true)
   assert.equal((await call('POST', '/notice-ack', { key: WINDOW, body: { id: mine[1].id } })).body.ok, true)
   await call('POST', '/unsubscribe', { auth: s.token })
+})
+
+test('the window ends a session: it leaves the roster at once, and its mod is told it was ended', async () => {
+  const s = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/stuck', sessionId: 'stuck-1' } })).body
+  assert.ok((await call('GET', '/health')).body.sessions >= 1)
+  // Only the window key may end one, and only one that exists.
+  assert.equal((await call('POST', '/session-end', { body: { name: s.name } })).status, 401)
+  assert.equal((await call('POST', '/session-end', { key: WINDOW, body: { name: 'nope' } })).status, 404)
+  // A command waiting for that session gets its answer now instead of timing out.
+  const waiting = call('POST', '/command', { key: WINDOW, body: { type: 'task', task: 'x', session: s.name } })
+  await new Promise(resolve => setTimeout(resolve, 50))
+  assert.equal((await call('POST', '/session-end', { key: WINDOW, body: { name: s.name } })).body.ok, true)
+  assert.equal((await waiting).body.ok, false)
+  const activity = await call('GET', `/activity?session=${s.name}`, { key: WINDOW })
+  assert.match(activity.body.text, /No session is named|No Claude session is connected/)
+  // Its mod, on its next request, hears it was ended (and turns off), not "subscribe again".
+  const inbox = await call('GET', '/inbox?wait=0', { auth: s.token })
+  assert.equal(inbox.status, 410)
+  assert.equal(inbox.body.error, 'ended')
 })

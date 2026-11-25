@@ -573,6 +573,16 @@ async function pollLoop($: EngineInterface, options: Record<string, unknown>, ge
       if (gen !== generation) return
       // A reload of this mod subscribed again for the same session: this older loop ends.
       if (res.status === 409) return
+      // Ended by the user from the call window: luke-voice turns off in this session only (the
+      // stored on/off, shared by every session, stays), until the user turns it on again.
+      if (res.status === 410 && res.json.error === 'ended') {
+        token = null
+        await update($, isOn, () => false)
+        await turnOff($)
+        await addLine($, { kind: 'stop', text: 'Sessão encerrada pela janela da Ceci.' })
+        $.ui.toast('luke-voice: esta sessão foi encerrada pela janela da Ceci')
+        return
+      }
       if (res.status === 401 || res.status === 410) {
         token = null
         await $.clock.sleep(250)

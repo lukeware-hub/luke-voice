@@ -154,3 +154,18 @@ test('markup leftovers: snake_case, arithmetic, domains, emoji and list items', 
   assert.equal(plainText('Fiz três coisas:\n- Revisei\n- Testei\n\n1. Primeiro\n2. Segundo'), 'Fiz três coisas: Revisei. Testei. Primeiro. Segundo')
   assert.deepEqual(speechChunks('Fiz três coisas:\n- Revisei o código\n- Rodei os testes', { isNative: true }), ['Fiz três coisas: Revisei o código.', 'Rodei os testes'])
 })
+
+test('the natural voice says a chunk phrase by phrase, cut after each comma, so the page can pause there', async () => {
+  const { phrases } = await import('./speech-text.js')
+  assert.deepEqual(phrases('Terminei a tarefa, rodei os testes, e todos passaram sem nenhum erro.'), ['Terminei a tarefa,', 'rodei os testes,', 'e todos passaram sem nenhum erro.'])
+  // Too short to stand alone: kept with its neighbour.
+  assert.deepEqual(phrases('Oi, tudo bem com você hoje.'), ['Oi, tudo bem com você hoje.'])
+  assert.deepEqual(phrases('Pronto, terminei.'), ['Pronto, terminei.'])
+  // A decimal comma is not a pause, and a question stays whole for its rise.
+  assert.deepEqual(phrases('O tempo médio caiu para 1,5 segundo em todos os testes.'), ['O tempo médio caiu para 1,5 segundo em todos os testes.'])
+  assert.deepEqual(phrases('Quer que eu rode os testes, ou prefere esperar?'), ['Quer que eu rode os testes, ou prefere esperar?'])
+  // Nothing is lost or added, apart from the spaces at the cuts.
+  const text = 'Abri o repositório da API, li o README, corrigi o bug no login, e rodei tudo de novo.'
+  assert.equal(phrases(text).join(' '), text)
+  assert.deepEqual(phrases(''), [])
+})

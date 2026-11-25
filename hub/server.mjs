@@ -60,9 +60,11 @@ const STATIC = {
   '/engines/turn-join.js': ['engines/turn-join.js', 'text/javascript; charset=utf-8'],
   '/engines/confirm.js': ['engines/confirm.js', 'text/javascript; charset=utf-8'],
   '/engines/greetings.js': ['engines/greetings.js', 'text/javascript; charset=utf-8'],
+  '/engines/phrase-audio.js': ['engines/phrase-audio.js', 'text/javascript; charset=utf-8'],
   '/engines/progress.js': ['engines/progress.js', 'text/javascript; charset=utf-8'],
   '/engines/context.js': ['engines/context.js', 'text/javascript; charset=utf-8'],
   '/engines/vad.js': ['engines/vad.js', 'text/javascript; charset=utf-8'],
+  '/engines/gain.js': ['engines/gain.js', 'text/javascript; charset=utf-8'],
   '/engines/piper-ids.js': ['engines/piper-ids.js', 'text/javascript; charset=utf-8'],
   '/engines/transcript.js': ['engines/transcript.js', 'text/javascript; charset=utf-8'],
   '/engines/mic-worklet.js': ['engines/mic-worklet.js', 'text/javascript; charset=utf-8'],
@@ -337,6 +339,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
   const sessions = new Map() // token -> session
   const launches = new Map() // one-time launch code -> when it expires
   const replaced = new Set() // tokens a newer subscription of the same Claude session took over
+  const ended = new Set() // tokens of sessions the user ended from the window: their mod turns off
   const streams = new Set() // window SSE responses
   // Voice-task results not yet handed to the voice (notices.mjs), and when a result last opened
   // the window, so a burst of results opens it once.
@@ -491,6 +494,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       }
       session.seenAt = Date.now()
       if (replaced.has(session.token)) return [409, { error: 'replaced' }]
+      if (ended.has(session.token)) return [410, { error: 'ended' }]
       if (!sessions.has(session.token)) return [410, { error: 'unsubscribed' }]
       return [200, { commands: session.inbox.splice(0), call, isFocused: focused === session.name }]
     },
@@ -537,6 +541,19 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
 
   // Routes for the call window, by the window key.
   const windowRoutes = {
+    // The user ends a session from the window, even one that hangs: it leaves the roster now, and
+    // its mod, on its next request, is told it was ended and turns luke-voice off in that session.
+    'POST /session-end': (_none, body) => {
+      const session = byName(String(body.name ?? ''))
+      if (!session) return [404, { ok: false, error: missing(String(body.name ?? '')) }]
+      ended.add(session.token)
+      // Its waiting commands get no answer now: the window is not left hanging on them.
+      for (const command of session.inbox) acks.get(command.id)?.({ ok: false, message: `The ${session.name} session was ended.` })
+      session.inbox = []
+      drop(session)
+      log(`session ${session.name} ended from the window`)
+      return [200, { ok: true }]
+    },
     // The window handed a finished task's result to the voice: it is not sent again.
     'POST /notice-ack': (_none, body) => [200, { ok: notices.ack(String(body.id ?? '')) }],
     'POST /token': async () => {
@@ -918,6 +935,8 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
         const session = sessions.get(bearer)
         // A reloaded mod may still ack a command it pulled before the reload: acks are by command id.
         const isLateAck = route === 'POST /ack' && replaced.has(bearer)
+        // A session ended from the window: its mod is told so, and turns itself off.
+        if (!session && ended.has(bearer)) return send(res, 410, { error: 'ended' })
         if (!session && !isLateAck) return send(res, replaced.has(bearer) ? 409 : 401, { error: replaced.has(bearer) ? 'replaced' : 'session' })
         const body = req.method === 'POST' ? await readBody(req) : {}
         const [status, out] = await sessionRoutes[route](session, body, url, res)
