@@ -315,3 +315,24 @@ export function speechChunks(text, { isNative = false } = {}) {
   const spoken = spokenForms(plainText(text))
   return isNative ? chunks(respellNative(spoken), MAX_CHUNK, FIRST_CHUNK_NATIVE) : chunks(respell(spoken), MAX_CHUNK, FIRST_CHUNK)
 }
+
+// The natural voice (Qwen3-TTS) often runs straight through a comma: measured on "Terminei a
+// tarefa, rodei os testes, e todos passaram", the first comma had no pause at all and the second
+// 380 ms. So each chunk is said phrase by phrase, cut after ", ", and the page puts a short pause
+// of its own after a phrase that ends in a comma (local.js). A comma between digits (1,5) is not a
+// cut, nor one that would leave a phrase shorter than `min` ("Oi, tudo bem" stays whole). A
+// question stays whole: the voice gives it its rise only when it sees the "?" with all its words.
+export const MIN_PHRASE = 12
+export function phrases(chunk, min = MIN_PHRASE) {
+  const text = String(chunk ?? '').trim()
+  if (!text || text.endsWith('?')) return text ? [text] : []
+  const pieces = text.split(/(?<=,)\s+/)
+  const out = []
+  for (const piece of pieces) {
+    const last = out.length - 1
+    // A short piece joins the one before it (or the next, when it is the first).
+    if (last >= 0 && (out[last].length < min || piece.length < min)) out[last] = `${out[last]} ${piece}`
+    else out.push(piece)
+  }
+  return out
+}

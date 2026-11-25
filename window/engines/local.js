@@ -5,7 +5,8 @@
 import { decide, liveAction } from '/engines/confirm.js'
 import { pickGreeting } from '/engines/greetings.js'
 import { isConfirm, isDeny, stopTarget } from '/engines/fast-path.js'
-import { speechChunks } from '/engines/speech-text.js'
+import { phrases, speechChunks } from '/engines/speech-text.js'
+import { COMMA_PAUSE_S, trimEdges } from '/engines/phrase-audio.js'
 import { trimContext } from '/engines/context.js'
 import { createCutReply, createTurnJoiner, createTurnLog } from '/engines/turn-join.js'
 import { risingPercent } from '/engines/progress.js'
@@ -467,7 +468,8 @@ export async function startSession({
   // The native voice streams each chunk: playback starts on the first ~250 ms, the rest follows
   // in pieces of ~300 ms, back to back.
   async function speakNative(text) {
-    const parts = speechChunks(text, { isNative: true })
+    // Phrase by phrase, so each comma gets its pause (speech-text.js, phrase-audio.js).
+    const parts = speechChunks(text, { isNative: true }).flatMap(chunk => phrases(chunk))
     if (parts.length === 0) return
     const mine = ++speech
     saying = mine
@@ -506,6 +508,27 @@ export async function startSession({
       }
       if (!response?.ok) {
         console.warn(`[luke-voice] the native voice could not say: ${parts[i]}`)
+        continue
+      }
+      // A phrase that meets another at a comma comes whole (a phrase is short, and the engine sends
+      // one that short in one go anyway): its silence on that side is cut, and after a comma the
+      // page waits COMMA_PAUSE_S, so every comma gets the same short pause.
+      const afterComma = i > 0 && parts[i - 1].endsWith(',')
+      const beforeComma = i < parts.length - 1 && parts[i].endsWith(',')
+      if (afterComma || beforeComma) {
+        const pieces = []
+        const sampleRate = await readWavStream(response, piece => pieces.push(piece), () => mine !== speech || isEnded)
+        if (mine !== speech || isEnded || sampleRate === null) return
+        const whole = new Float32Array(pieces.reduce((n, p) => n + p.length, 0))
+        let at = 0
+        for (const piece of pieces) {
+          whole.set(piece, at)
+          at += piece.length
+        }
+        const audio = trimEdges(whole, sampleRate, { start: afterComma, end: beforeComma })
+        if (i === 0) timing('speak', Math.round(performance.now() - started), 'to first audio (native)')
+        if (audio.length) lastNode = play(audio, sampleRate, mine, false)
+        if (beforeComma && playing.size) playhead += COMMA_PAUSE_S
         continue
       }
       let pending = []

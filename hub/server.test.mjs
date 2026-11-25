@@ -143,7 +143,7 @@ test('the page loads no remote script; the ElevenLabs client is loaded on demand
   assert.match(eleven, /CLIENT_INTEGRITY = 'sha384-[A-Za-z0-9+/=]{64}'/)
   assert.match(eleven, /script\.integrity = CLIENT_INTEGRITY/)
   assert.match(eleven, /script\.crossOrigin = 'anonymous'/)
-  for (const path of ['/app.js', '/guard.js', '/engines/elevenlabs.js', '/engines/local.js', '/engines/speech-text.js', '/engines/fast-path.js', '/engines/turn-join.js', '/engines/confirm.js', '/engines/greetings.js', '/engines/progress.js', '/engines/context.js', '/engines/vad.js', '/engines/piper-ids.js', '/engines/transcript.js', '/engines/mic-worklet.js', '/engines/voice-worker.js']) {
+  for (const path of ['/app.js', '/guard.js', '/engines/elevenlabs.js', '/engines/local.js', '/engines/speech-text.js', '/engines/fast-path.js', '/engines/turn-join.js', '/engines/confirm.js', '/engines/greetings.js', '/engines/phrase-audio.js', '/engines/progress.js', '/engines/context.js', '/engines/vad.js', '/engines/piper-ids.js', '/engines/transcript.js', '/engines/mic-worklet.js', '/engines/voice-worker.js']) {
     const res = await call('GET', path)
     assert.equal(res.status, 200)
     assert.doesNotMatch(res.body, /\bfrom\s*['"]https?:|import\s*\(\s*['"]https?:/)

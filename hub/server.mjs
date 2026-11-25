@@ -60,6 +60,7 @@ const STATIC = {
   '/engines/turn-join.js': ['engines/turn-join.js', 'text/javascript; charset=utf-8'],
   '/engines/confirm.js': ['engines/confirm.js', 'text/javascript; charset=utf-8'],
   '/engines/greetings.js': ['engines/greetings.js', 'text/javascript; charset=utf-8'],
+  '/engines/phrase-audio.js': ['engines/phrase-audio.js', 'text/javascript; charset=utf-8'],
   '/engines/progress.js': ['engines/progress.js', 'text/javascript; charset=utf-8'],
   '/engines/context.js': ['engines/context.js', 'text/javascript; charset=utf-8'],
   '/engines/vad.js': ['engines/vad.js', 'text/javascript; charset=utf-8'],
