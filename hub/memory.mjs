@@ -73,6 +73,17 @@ export function ftsQuery(text) {
   return words.length ? words.map(w => `"${w}"`).join(' OR ') : ''
 }
 
+// The scope of a delete the brain asked for (luke_memory_delete's args): exactly one of
+// conversation, day (a day or a month), search or all. Null when it names nothing clear.
+export function scopeFromArgs({ conversation, day, search, all } = {}) {
+  if (all === true || all === 'true') return { all: true }
+  const id = String(conversation ?? '').replace(/^#/, '')
+  if (/^\d+$/.test(id)) return { conversation: Number(id) }
+  if (/^\d{4}-\d{2}(-\d{2})?$/.test(String(day ?? ''))) return { day: String(day) }
+  if (String(search ?? '').trim()) return { search: String(search) }
+  return null
+}
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS conversations (
   id INTEGER PRIMARY KEY,

@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Args, On } from 'claude-code'
 
-import { asPersona, brainArgs, brainInput, classifyTask, NO_NODE, parseBrain, parseBrainText, parseSummary, memoryTarget, preview, summaryPrompt, TIERS } from './register'
+import { asPersona, brainArgs, brainInput, classifyTask, NO_NODE, parseBrain, parseBrainText, parseSummary, memoryTarget, preview, withFull, summaryPrompt, TIERS } from './register'
 import type { BrainRequest } from './register'
 
 const FOOTER = { plugin: 'luke-voice', component: 'SessionMode', props: { modes: [] } } as const
@@ -1196,4 +1196,22 @@ test('/luke-voice memoria apagar names exactly one thing: all, a conversation, a
   expect(memoryTarget('2026-11')?.scope).toEqual({ day: '2026-11' })
   expect(memoryTarget('senha do wifi')?.scope).toEqual({ search: 'senha do wifi' })
   expect(memoryTarget('   ')).toBeNull()
+})
+
+test("a long event is shortened for the voice and kept whole for Ceci's memory", () => {
+  expect(withFull('curto', 600)).toEqual({ text: 'curto' })
+  const long = 'x'.repeat(5000)
+  const out = withFull(long, 600)
+  expect(out.text.length).toBe(600)
+  expect(out.full).toBe(long)
+  // Never past what one hub request takes.
+  expect(withFull('y'.repeat(100_000), 600).full?.length).toBe(48_000)
+})
+
+test("Haiku's real summary shape (a title line, then the summary) is read as title and text", () => {
+  const item = { level: 'conversation' as const, period: '3', toEvent: 9, day: '2026-11-25', text: '...' }
+  const real = 'Testes do Girassol: 42 passaram\nO usuário pediu para rodar os testes do projeto Girassol, e a Ceci confirmou antes de executar. A sessão rodou `npm test` e os 42 testes passaram.'
+  const out = parseSummary(item, real)
+  expect(out.title).toBe('Testes do Girassol: 42 passaram')
+  expect(out.text.startsWith('O usuário pediu')).toBe(true)
 })

@@ -113,3 +113,42 @@ test('a delete from the window removes what it names, and says how much', async 
   assert.deepEqual((await call('GET', '/memory/search?q=girassol', { key: WINDOW })).body.hits, [])
   assert.equal((await call('GET', '/memory/stats', { key: WINDOW })).body.events, before - preview.events)
 })
+
+test('a delete by voice is only ever asked: the brain\'s proposal gets its count, deletes nothing, and a miss is not asked', async () => {
+  await call('POST', '/call', { key: WINDOW, body: { state: 'live' } })
+  await call('POST', '/memory/events', { key: WINDOW, body: { events: [{ kind: 'user', text: 'A senha do cofre é Tartaruga.' }, { kind: 'user', text: 'Outra fala sobre Tartaruga.' }] } })
+  await call('POST', '/call', { key: WINDOW, body: { state: 'idle' } })
+  const session = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/cofre', version: '9' } })).body
+  const ask = async reply => {
+    const asked = call('POST', '/brain', { key: WINDOW, body: { kind: 'user', text: 'apaga o que falei da tartaruga', turns: [], context: [] } })
+    await serve(session.token, () => ({ message: JSON.stringify(reply) }))
+    return (await asked).body
+  }
+  const before = (await call('GET', '/memory/stats', { key: WINDOW })).body.events
+  const pending = { name: 'luke_memory_delete', args: { search: 'tartaruga' } }
+  const proposed = await ask({ say: 'Apago tudo que fala da tartaruga, posso?', tool: null, pending })
+  assert.equal(proposed.say, 'São 2 registros. Apago tudo que fala da tartaruga, posso?')
+  assert.deepEqual(proposed.pending, pending)
+  // The brain calling it at once deletes nothing either: only the window runs it, after a yes.
+  const atOnce = await ask({ say: 'Apaguei.', tool: pending, pending: null })
+  assert.deepEqual(atOnce.tool, pending)
+  // A delete that matches nothing is not asked about.
+  const miss = await ask({ say: 'Apago tudo sobre girafas, posso?', tool: null, pending: { name: 'luke_memory_delete', args: { search: 'girafas' } } })
+  assert.equal(miss.pending, null)
+  assert.match(miss.say, /não achei nada/i)
+  const unclear = await ask({ say: 'Apago, posso?', tool: null, pending: { name: 'luke_memory_delete', args: {} } })
+  assert.equal(unclear.pending, null)
+  // Nothing was deleted by any of it (the brain's proposals were recorded, so there are more events).
+  assert.ok((await call('GET', '/memory/stats', { key: WINDOW })).body.events >= before)
+  assert.equal((await call('GET', '/memory/search?q=tartaruga&kind=user', { key: WINDOW })).body.hits.length, 2)
+  await call('POST', '/unsubscribe', { auth: session.token })
+})
+
+test('a session event keeps its whole text in the memory, even when the voice reads it shortened', async () => {
+  const session = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/longo', version: '9' } })).body
+  const long = `Resposta longa ${'palavra '.repeat(3000)}fim-do-texto`
+  await call('POST', '/events', { auth: session.token, body: { events: [{ kind: 'done', text: 'Resposta longa…', full: long }] } })
+  const hit = (await call('GET', '/memory/search?q=fim-do-texto', { key: WINDOW })).body.hits[0]
+  assert.equal(hit.text, long)
+  await call('POST', '/unsubscribe', { auth: session.token })
+})

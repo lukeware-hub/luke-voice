@@ -1878,6 +1878,19 @@ body[data-hidden='true'] *::after {
   font-size: 13px;
 }
 
+.memory-day {
+  margin: 14px 0 0;
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.memory-day:first-child {
+  margin-top: 0;
+}
+
 .memory-entry .what {
   font-weight: 600;
 }
