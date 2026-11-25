@@ -737,14 +737,15 @@ export async function startSession({
 
   // One turn with the brain: what to say, what to run now, and what to run on a "sim".
   // `asked` is the brain's answer when it was asked already (beside the router).
-  async function think(request, asked = null) {
+  // `answering` is the live "posso?" this user turn answers, if any (confirm.js).
+  async function think(request, asked = null, answering = null) {
     // On a request, "Certo." plays if the brain is slow, so the user knows Ceci heard.
     const ack = request.kind === 'user' ? setTimeout(sayAck, ACK_AFTER_MS) : null
     const reply = await (asked ?? askBrain(request))
     clearTimeout(ack)
     if (isEnded || isStale()) return
     // An acting tool never runs from here: it waits for the user's "sim" (confirm.js).
-    const next = decide({ kind: request.kind, reply, now: Date.now() })
+    const next = decide({ kind: request.kind, reply, now: Date.now(), answering })
     if (request.kind === 'user') commitTurn()
     pendingAction = next.pending
     if (next.action !== 'run') {
@@ -853,7 +854,7 @@ export async function startSession({
       return timing('fast path', 0, 'stop: Ceci only')
     }
     if (stop === 'claude') return stopNow()
-    if (action && isConfirm(text)) {
+    if (action && isConfirm(text, recentSaid.join(' '))) {
       timing('fast path', 0, `yes to "posso?": ${action.tool.name}`)
       return runTool(action.tool, '')
     }
@@ -870,9 +871,9 @@ export async function startSession({
         timing('router', routed.ms ?? 0, routed.intent)
         return say(routed.say)
       }
-      return think(request, asked)
+      return think(request, asked, action)
     }
-    await think({ kind: 'user', text })
+    await think({ kind: 'user', text }, null, action)
   }
 
   // The level of what Ceci is playing now (before her volume).

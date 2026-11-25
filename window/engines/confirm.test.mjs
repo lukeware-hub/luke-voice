@@ -46,3 +46,19 @@ test('a "sim" runs the waiting tool only while it is fresh; an old one after a n
   const afterNotice = decide({ kind: 'notice', reply: { say: 'Terminou.', tool: null, pending: null }, now: 2000 }).pending
   assert.equal(liveAction(afterNotice, 2001), null)
 })
+
+test('a yes the fast path missed, read as a yes by the brain, runs the action Ceci asked about, with no second "posso?"', () => {
+  const asked = { tool: task, at: 1 }
+  // The brain does not see the pending arguments: what runs is what Ceci asked about.
+  const out = decide({ kind: 'user', reply: { say: 'Comecei!', tool: { name: 'luke_run_task', args: { task: 'outra coisa' } }, pending: null }, now: 2, answering: asked })
+  assert.deepEqual(out, { action: 'run', say: 'Comecei!', tool: task, pending: null })
+  // Another acting tool than the one asked about still only asks.
+  assert.equal(decide({ kind: 'user', reply: { say: '', tool: send, pending: null }, now: 2, answering: asked }).action, 'pend')
+  // With no "posso?" waiting, it still only asks.
+  assert.equal(decide({ kind: 'user', reply: { say: '', tool: task, pending: null }, now: 2 }).action, 'pend')
+  // A notice never runs it, whatever it answers.
+  assert.equal(decide({ kind: 'notice', reply: { say: '', tool: task, pending: null }, now: 2, answering: asked }).action, 'say')
+  // A change asked with the yes goes back to "posso?" with the new arguments.
+  const changed = { name: 'luke_run_task', args: { task: 'só na pasta site' } }
+  assert.deepEqual(decide({ kind: 'user', reply: { say: 'Só na pasta site, posso?', tool: null, pending: changed }, now: 3, answering: asked }).pending, { tool: changed, at: 3 })
+})
