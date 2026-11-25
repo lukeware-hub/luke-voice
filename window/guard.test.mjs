@@ -103,3 +103,9 @@ test('"sai do modo silêncio" leaves silent mode, and never turns it on', () => 
   assert.equal(quiet.userSpoke('sai do modo silêncio'), 'off')
   assert.equal(quiet.on, false)
 })
+
+test('a long task\'s progress line is said each time it comes (it changes every time)', () => {
+  const speech = createSpeechFilter()
+  assert.equal(speech.shouldSpeak('a', 'task_progress', 'Task: testes\nRunning for: 2min 00s'), true)
+  assert.equal(speech.shouldSpeak('a', 'task_progress', 'Task: testes\nRunning for: 4min 00s'), true)
+})

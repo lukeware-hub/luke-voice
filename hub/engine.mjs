@@ -69,7 +69,9 @@ export const SERVICES = {
   router: {
     models: ['native/qwen3.5-0.8b-q4_k_m.gguf'],
     // The few-shot prompt and a 300-character utterance fit in 2048.
-    args: ([model]) => ['-m', model, '-ngl', '0', '-c', '2048', '-np', '1', '--jinja', ...LEAN],
+    // Two CPU threads: llama.cpp would take every core for a 0.8B model and 16 tokens, starving the
+    // window's audio while Ceci speaks.
+    args: ([model]) => ['-m', model, '-ngl', '0', '-c', '2048', '-np', '1', '--jinja', '-t', '2', ...LEAN],
   },
 }
 
@@ -87,8 +89,15 @@ export const VOICE_SETTINGS = { temperature: 0.9, top_p: 0.9, seed: 7 }
 export const ASR_GLOSSARY = 'Conversa em português do Brasil com a Ceci, uma assistente de programação. Termos comuns: API, commit, branch, main, deploy, build, bug, pull request, GitHub, Claude, Ceci, lint, TypeScript, token, login, checkout, README, Opus, Sonnet, Haiku, Anthropic, Lukeware, Diego, push, merge, PR, teste, repositório, subagente, npm, luke-voice.'
 
 // Audio frames allowed for a text (12.5 per second; ~14 characters per second in pt-BR), so a
-// rare generation loop stops after a few seconds instead of babbling for 40.
-export const maxFrames = text => Math.ceil(String(text).length * 1.5) + 25
+// rare generation loop stops after a few seconds instead of babbling for 40. Digits and acronyms
+// are said much longer than they are written ("2026" is "dois mil e vinte e seis", "API" is
+// "a pê i"), so each gets more room, or the end of a line full of them would be cut off.
+export const maxFrames = text => {
+  const t = String(text)
+  const digits = t.match(/\d/g)?.length ?? 0
+  const capitals = (t.match(/\b[A-Z]{2,}\b/g) ?? []).join('').length
+  return Math.ceil(t.length * 1.5) + 25 + digits * 5 + capitals * 3
+}
 
 // Below this much video memory the voice and the ears would not fit together on the GPU.
 export const MIN_VRAM_MIB = 6000

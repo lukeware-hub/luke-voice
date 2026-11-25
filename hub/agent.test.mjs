@@ -76,9 +76,15 @@ test('both voices are Ceci: same name, age and creator, told only when asked, an
   assert.match(await readFile(join(root, 'agent/brain-prompt.md'), 'utf8'), /nunca mais de duas frases curtas, contando a pergunta/)
   const def = JSON.parse(await readFile(join(root, 'agent/agent.json'), 'utf8'))
   assert.match(def.conversation_config.agent.first_message, /Eu sou a Ceci/)
-  // The free local voice greets with the same words.
+  // Both voices greet from one list (a different line each call); the agent's own first message is
+  // its first line, and the agent allows the window to send another one.
+  const { GREETINGS } = await import('../window/engines/greetings.js')
+  assert.equal(def.conversation_config.agent.first_message, GREETINGS[0])
+  assert.equal(def.platform_settings.overrides.conversation_config_override.agent.first_message, true)
   const local = await readFile(join(root, 'window/engines/local.js'), 'utf8')
-  assert.ok(local.includes(`const GREETING = '${def.conversation_config.agent.first_message}'`))
+  const eleven = await readFile(join(root, 'window/engines/elevenlabs.js'), 'utf8')
+  assert.match(local, /say\(pickGreeting\(/)
+  assert.match(eleven, /firstMessage: pickGreeting\(\)/)
 })
 
 test('every ElevenLabs request carries a timeout, so a hung API never holds a call', async () => {

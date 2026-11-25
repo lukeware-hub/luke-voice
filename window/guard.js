@@ -121,6 +121,8 @@ export function createSpeechFilter() {
         if (said.size > 50) said.delete(said.values().next().value)
         return true
       }
+      // A long voice task still running: its progress line changes every time, so no de-duplication.
+      if (kind === 'task_progress') return true
       if (kind === 'done' && awaiting.has(session)) {
         awaiting.delete(session)
         return true

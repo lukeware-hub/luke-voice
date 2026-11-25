@@ -116,11 +116,14 @@ export function wavSamples(buffer) {
 
 // Questions Ceci asks often, improved in the background once the engine is up.
 export const COMMON_QUESTIONS = ['Posso?', 'Posso começar?', 'Quer que eu faça mais alguma coisa?', 'Mais alguma coisa?', 'Tudo bem?', 'Pode ser?', 'Quer que eu continue?']
-// Seeds tried for a question, after Ceci's own (the take said live): at most this many takes in all.
+// Seeds tried for a question, after Ceci's own (the take said live).
 const MORE_SEEDS = [1, 2, 3, 4, 5, 6, 7, 8].map(s => s + 100)
-const MAX_TAKES = 1 + MORE_SEEDS.length
-// The background search waits this long after the last live line, so it never queues in front of one.
-const IDLE_MS = 1500
+// At most this many takes per question in all. Each take holds the voice's single slot on the GPU
+// for ~1 s, and every take past the first few rarely beat them: three keep the GPU free.
+export const MAX_TAKES = 3
+// The background search waits this long after the last live line, so it never takes the voice in
+// a pause of the conversation, only once the call has gone quiet.
+const IDLE_MS = 10_000
 // A background take that comes back empty at once (the voice server down or restarting) is tried
 // again after this long, doubled on each failure up to the cap, instead of in a tight loop.
 const RETRY_MS = 5000
@@ -134,7 +137,7 @@ export const takeMs = text => 500 + 20 * String(text).length
 // more made only in time nobody waits for: while the line before still plays (`budget`), or in the
 // background when the engine is idle. Any live line stops the background search at once.
 // `say(text, seed, signal)` makes one take and resolves to its WAV (or null).
-export function createQuestionTakes({ say, dir, voiceKey, log = () => {}, now = () => Date.now(), idleMs = IDLE_MS, retryMs = RETRY_MS, maxRetryMs = MAX_RETRY_MS }) {
+export function createQuestionTakes({ say, dir, voiceKey, log = () => {}, now = () => Date.now(), idleMs = IDLE_MS, maxTakes = MAX_TAKES, retryMs = RETRY_MS, maxRetryMs = MAX_RETRY_MS }) {
   const memory = new Map() // key -> { text, takes: [{ seed, rise }], best }
   const queue = []
   let lastLive = 0
@@ -197,8 +200,8 @@ export function createQuestionTakes({ say, dir, voiceKey, log = () => {}, now = 
       memory.delete(f.replace(/\.json$/, ''))
     }
   }
-  const untried = entry => MORE_SEEDS.filter(s => !entry.takes.some(t => t.seed === s))
-  const isDone = entry => isNaturalRise(entry.best?.rise) || entry.takes.length >= MAX_TAKES
+  const untried = entry => MORE_SEEDS.slice(0, maxTakes - 1).filter(s => !entry.takes.some(t => t.seed === s))
+  const isDone = entry => isNaturalRise(entry.best?.rise) || entry.takes.length >= maxTakes
 
   // The served take for a question, made within `budget` ms when it can be: a WAV, or null when the
   // line should be said live (nothing cached and no time for two takes).

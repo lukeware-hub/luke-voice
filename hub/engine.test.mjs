@@ -48,7 +48,7 @@ test('the servers run lean: small contexts, no busy-waiting, no prompt cache, fe
   assert.deepEqual(flags('tts'), { '-c': '1024', '-ub': '256', '-np': '1', '-ngl': '99', '--poll': '0', '-cram': '0', '-t': '2', '-lm': 'none' })
   assert.deepEqual(flags('asr'), { '-c': '1536', '-ub': '256', '-np': '1', '-ngl': '99', '--poll': '0', '-cram': '0', '-t': '2', '-lm': 'none' })
   // The router runs on the CPU: all its threads, and its file stays mapped.
-  assert.deepEqual(flags('router'), { '-c': '2048', '-ub': null, '-np': '1', '-ngl': '0', '--poll': '0', '-cram': '0', '-t': null, '-lm': null })
+  assert.deepEqual(flags('router'), { '-c': '2048', '-ub': null, '-np': '1', '-ngl': '0', '--poll': '0', '-cram': '0', '-t': '2', '-lm': null })
 })
 
 test('lean: the ears move to the CPU (model and projector) so a smaller GPU keeps Ceci\'s original voice', () => {
@@ -522,4 +522,12 @@ test('the profile is read from disk again only when another process rewrites it'
   writeFileSync(file, JSON.stringify({ profile: 'gpu' }))
   utimesSync(file, new Date(), new Date(Date.now() + 5000))
   assert.equal(readProfile(dir).profile, 'gpu')
+})
+
+test('digits and acronyms get more audio frames, so a line full of them is not cut off', async () => {
+  const { maxFrames } = await import('./engine.mjs')
+  const plain = 'Comecei, te aviso quando terminar.'
+  assert.equal(maxFrames(plain), Math.ceil(plain.length * 1.5) + 25)
+  // Same length, but "2026" and "API" are said much longer than they are written.
+  assert.ok(maxFrames('Em 2026 a API mudou.') >= maxFrames('Em xxxx a xxx mudou.') + 4 * 5 + 3 * 3)
 })

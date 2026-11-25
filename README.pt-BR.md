@@ -2,7 +2,7 @@
 
 **Read in English: [README.md](README.md)**
 
-A Ceci, uma assistente de voz ao lado do Claude Code, em português do Brasil. Você fala o que quer, ela repete e pergunta "posso?", e depois do seu "sim" um subagente do Claude Code faz a tarefa no seu computador. Quando termina, ela conta o resultado em voz alta.
+A Ceci, uma assistente de voz ao lado do Claude Code, em português do Brasil. Você fala o que quer, ela repete e pergunta "posso?", e depois do seu "sim" um subagente do Claude Code faz a tarefa no seu computador. Quando termina, ela conta o resultado em voz alta, sem esperar você falar: se não houver chamada, ela abre uma, e um resultado que chega com a janela fechada fica guardado até ela contar.
 
 A Ceci tem duas vozes:
 
@@ -91,7 +91,7 @@ Para instalar sem perguntas, defina `LUKE_VOICE_NO_PROMPT=1` antes de rodar; acr
 
 **No Mac:** na primeira chamada, o Mac pergunta se o Chrome pode usar o microfone: clique em **Permitir**. Um Mac com chip Apple fica com a voz natural; um Mac com Intel fica com a voz leve.
 
-**Deu certo quando:** você ouve "Oi! Eu sou a Ceci. O que vamos fazer hoje?". Se faltar alguma coisa, digite `/luke-voice help`: ele confere a sua instalação e diz o que arrumar.
+**Deu certo quando:** você ouve a Ceci te cumprimentar, por exemplo "Oi! Eu sou a Ceci. O que vamos fazer hoje?" (as palavras mudam a cada chamada). Se faltar alguma coisa, digite `/luke-voice help`: ele confere a sua instalação e diz o que arrumar.
 
 ## Como usar
 
@@ -131,7 +131,7 @@ Algumas coisas não precisam de chamada ao modelo:
 
 ### Saber quando você terminou de falar
 
-O Silero VAD (MIT) descarta sons sem fala. O Pipecat Smart Turn v3.2 (BSD-2-Clause) decide quando você terminou de falar: ele é consultado depois de uma pausa de 0,7 s, e só um "terminou" claro encerra a sua vez. 2 s de silêncio sempre encerram (1,3 s sem o modelo). Uma respiração no meio da frase dura até cerca de 1 s, então não te corta. Se você continuar falando antes de a Ceci começar a responder, as duas partes viram um pedido só. Um barulho que começa e continua (uma TV, um ar-condicionado) vira o som da sala em cerca de 10 s, então a sua vez continua terminando na hora.
+O Silero VAD (MIT) descarta sons sem fala. O Pipecat Smart Turn v3.2 (BSD-2-Clause) decide quando você terminou de falar: ele é consultado depois de uma pausa de 0,4 s e de novo a cada 0,2 s enquanto a pausa continua, e um "terminou" encerra a sua vez ali. 1,1 s de silêncio sempre encerra (1,3 s sem o modelo). Se uma respiração no meio da frase encerrar a sua vez e você continuar falando antes de a Ceci começar a responder, as duas partes viram um pedido só. Enquanto a Ceci fala, um som que pode ser você falando por cima abaixa a voz dela; ela para quando as suas palavras são ouvidas, e volta ao volume normal se era só o eco dela mesma. Um barulho que começa e continua (uma TV, um ar-condicionado) vira o som da sala em cerca de 10 s, então a sua vez continua terminando na hora.
 
 ### Quão rápido é
 

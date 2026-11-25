@@ -26,8 +26,9 @@ test('speech after silence starts an utterance, and silence ends it with the aud
   assert.deepEqual(events.map(e => e.type), ['start', 'end'])
   const audio = events[1].audio
   assert.ok(audio instanceof Float32Array)
-  // preroll (10 lead-in + 8 barge frames) + speech after start (27) + silence until end (40)
-  assert.equal(audio.length, (18 + 27 + 40) * FRAME)
+  // preroll (10 lead-in + 8 barge frames) + speech after start (27) + the last 5 of the 40 frames
+  // of silence that ended it (the rest is cut, so the ears do not spend time on nothing)
+  assert.equal(audio.length, (18 + 27 + 5) * FRAME)
 })
 
 test('a breath of about 1 s in the middle of a sentence does not end the turn', () => {
@@ -215,4 +216,38 @@ test('while Ceci talks and the user is not in a turn, the high barge bar still h
   feed(vad, Array(20).fill(0).map(silence))
   assert.deepEqual(feed(vad, Array(60).fill(0).map(() => tone(0.02)), { isSpeaking: true }), [])
   assert.equal(vad.inSpeech, false)
+})
+
+test("Ceci's expected echo raises the bar while she speaks: her echo neither barges in nor keeps a turn open", () => {
+  // Her echo at 0.06 would barge in with the plain bar (3 x 0.012); with the echo level given, it does not.
+  assert.equal(feed(createVad(), Array(40).fill(0).map(() => tone(0.06)), { isSpeaking: true })[0]?.type, 'barge')
+  assert.deepEqual(feed(createVad(), Array(40).fill(0).map(() => tone(0.06)), { isSpeaking: true, echo: 0.1 }), [])
+  // The user, louder than her echo, still barges in.
+  const vad = createVad()
+  const events = feed(vad, Array(20).fill(0).map(() => tone(0.3)), { isSpeaking: true, echo: 0.1 })
+  assert.equal(events[0]?.type, 'barge')
+  // They stop and only her echo is left: that counts as quiet, so the turn ends.
+  const after = feed(vad, Array(45).fill(0).map(() => tone(0.06)), { isSpeaking: true, echo: 0.1 })
+  assert.deepEqual(after.map(e => e.type), ['end'])
+  // Without Ceci speaking, the echo level is ignored.
+  assert.equal(feed(createVad(), Array(10).fill(0).map(() => tone(0.06)), { echo: 0.1 })[0]?.type, 'start')
+})
+
+test('the turn model is asked again as the pause goes on, so a later "done" ends the turn early', () => {
+  const vad = createVad({ candidateFrames: 12, candidateEvery: 6, endFrames: 35 })
+  const events = feed(vad, [...Array(30).fill(0).map(() => tone(0.1)), ...Array(30).fill(0).map(silence)])
+  const asks = events.filter(e => e.type === 'candidate')
+  // At 12, 18, 24 and 30 frames of silence, all about the same pause.
+  assert.equal(asks.length, 4)
+  assert.ok(asks.every(e => e.id === asks[0].id))
+  // The model says done on the third: the turn ends there, with only a short tail of silence.
+  const end = vad.endNow(asks[2].id)
+  assert.equal(end.type, 'end')
+  assert.ok(end.audio.length <= (18 + 30 + 5) * FRAME)
+  // Speech resuming starts a new pause: its first ask comes at 12 frames again.
+  const again = createVad({ candidateFrames: 12, candidateEvery: 6, endFrames: 35 })
+  const resumed = feed(again, [...Array(30).fill(0).map(() => tone(0.1)), ...Array(14).fill(0).map(silence), ...Array(10).fill(0).map(() => tone(0.1)), ...Array(12).fill(0).map(silence)])
+  const ids = resumed.filter(e => e.type === 'candidate').map(e => e.id)
+  assert.equal(ids.length, 2)
+  assert.notEqual(ids[0], ids[1])
 })

@@ -3,17 +3,17 @@
 // and Kokoro speaks it. Only the brain leaves the machine (through the hub, to Claude).
 // It gives the window the same session the ElevenLabs engine does.
 import { decide, liveAction } from '/engines/confirm.js'
+import { pickGreeting } from '/engines/greetings.js'
 import { isConfirm, isDeny, stopTarget } from '/engines/fast-path.js'
 import { speechChunks } from '/engines/speech-text.js'
 import { trimContext } from '/engines/context.js'
 import { createCutReply, createTurnJoiner, createTurnLog } from '/engines/turn-join.js'
 import { risingPercent } from '/engines/progress.js'
-import { isNotSpeech } from '/engines/transcript.js'
+import { isEcho, isNotSpeech } from '/engines/transcript.js'
 import { FRAME, RATE, createVad, rms } from '/engines/vad.js'
 
 export const name = 'local'
 
-const GREETING = 'Oi! Eu sou a Ceci. O que vamos fazer hoje?'
 const BRAIN_FAILED = 'Não consegui pensar numa resposta agora. Tente de novo.'
 const STOPPED = 'Parei o Claude.'
 const NOT_STOPPED = 'O Claude não está trabalhando agora.'
@@ -28,12 +28,26 @@ const DENIED = 'Tá bom, deixei pra lá.'
 // Ceci heard. Synthesized when the call starts, so they play with no wait.
 const ACKS = ['Certo.', 'Deixa eu ver.', 'Hum, tá bom.']
 const ACK_AFTER_MS = 600
-// With the end-of-turn model: a ~700 ms pause asks it whether the user is done, and only a clear
-// "done" (0.7) ends the turn; otherwise ~2 s of silence still ends it. Without the model, ~1.3 s
-// (vad.js). People breathe for 0.4-1 s mid-sentence, so shorter pauses cut them off.
-const TURN_CANDIDATE_FRAMES = 22
-const TURN_END_FRAMES = 62
-const TURN_DONE = 0.7
+// With the end-of-turn model: a ~380 ms pause asks it whether the user is done, and it is asked
+// again every ~190 ms while the pause goes on; a "done" (0.6) ends the turn there, and ~1.1 s of
+// silence ends it anyway. Without the model, ~1.3 s (vad.js). A breath mid-sentence that still
+// ends the turn is not lost: speech that resumes before Ceci answers is joined (turn-join.js).
+const TURN_CANDIDATE_FRAMES = 12
+const TURN_CANDIDATE_EVERY = 6
+const TURN_END_FRAMES = 35
+const TURN_DONE = 0.6
+// While the user may be talking over her, Ceci goes on at this volume instead of stopping: her
+// own echo set off most interruptions, and a false one used to cut her off mid-sentence. She
+// stops once the turn turns out to be the user's words, and goes back to full volume if not.
+const DUCK_GAIN = 0.2
+// How loud her voice comes back in the mic, as a share of her output: learned while she speaks
+// and nobody talks, from this start. The detector's bar while she speaks is this much of her
+// output, times ECHO_MARGIN.
+const ECHO_START = 0.15
+const ECHO_MARGIN = 2
+// The first audio of each chunk of the natural voice: enough to ride over a slow moment of the
+// engine (it makes audio at ~2x real time), little enough not to be heard as a wait.
+const FIRST_AUDIO_S = 0.25
 // Tool answers that mean it worked; anything else goes back to the brain to explain.
 const TOOL_OK = /^(Started|Claude started|Added as a note|Queued|Stopped|Sent)/i
 
@@ -220,6 +234,8 @@ export async function startSession({
   onModeChange = () => {},
   onMessage = () => {},
   onStatus = () => {},
+  // The user talked over a notice (the news of a finished task): the window tells it again.
+  onNoticeCut = () => {},
 }) {
   KEY = windowKey
   const downloaded = risingPercent()
@@ -261,12 +277,15 @@ export async function startSession({
   else if (!isNative && !isMacVoice && config.macVoiceHint) onStatus(MAC_VOICE_HINT, { isWarning: true })
 
   const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    // No automatic gain: it raised whatever was left of Ceci's echo after the echo canceller,
+    // and the raised echo interrupted her.
+    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: false },
   })
   let micContext = null
   let outContext = null
   let frames
   let analyser
+  let outGain
   let levels
   try {
     micContext = new AudioContext({ sampleRate: RATE })
@@ -278,7 +297,11 @@ export async function startSession({
     outContext = new AudioContext()
     analyser = outContext.createAnalyser()
     analyser.fftSize = 512
-    analyser.connect(outContext.destination)
+    // Her volume (lowered while the user may be talking over her) is set after the analyser, so
+    // the window's level meter and the echo estimate see what she says, not how loud.
+    outGain = outContext.createGain()
+    analyser.connect(outGain)
+    outGain.connect(outContext.destination)
     levels = new Float32Array(analyser.fftSize)
   } catch (error) {
     // The call does not start: let go of the microphone (its indicator would stay on) and the audio.
@@ -292,7 +315,7 @@ export async function startSession({
   }
   document.addEventListener('click', resumeAudio)
 
-  const vad = createVad(voiceInfo?.turn ? { candidateFrames: TURN_CANDIDATE_FRAMES, endFrames: TURN_END_FRAMES } : {})
+  const vad = createVad(voiceInfo?.turn ? { candidateFrames: TURN_CANDIDATE_FRAMES, candidateEvery: TURN_CANDIDATE_EVERY, endFrames: TURN_END_FRAMES } : {})
   const context = []
   const turns = createTurnLog()
   let isMuted = false
@@ -325,6 +348,18 @@ export async function startSession({
 
   // Aborts the native voice's stream when Ceci is cut off.
   let nativeStop = null
+  // The speech playing lowered while a barge-in is checked (0: none), and whether the turn being
+  // heard started over her voice.
+  let ducked = 0
+  let isBargeTurn = false
+  // The speech telling news on Ceci's own (a notice), so a barge-in over it can have it told again.
+  let noticeSpeech = 0
+  let isNoticeLine = false
+  // What Ceci said lately, to tell her echo from the user's words.
+  let recentSaid = []
+  // Her output level, held a moment (the echo arrives a little after), and how much of it the mic hears.
+  let outPeak = 0
+  let echoShare = ECHO_START
 
   // The native voice for one piece of text, whole (the acknowledgements).
   async function nativeSynth(text, signal = null) {
@@ -373,8 +408,27 @@ export async function startSession({
     onModeChange({ mode })
   }
 
+  function setVolume(gain) {
+    outGain.gain.setTargetAtTime(gain, outContext.currentTime, 0.03)
+  }
+
+  // The user may be talking over Ceci: lower her voice until their turn is heard.
+  function duck() {
+    if (playing.size === 0 && saying === 0) return
+    ducked = speech
+    setVolume(DUCK_GAIN)
+  }
+
+  function unduck() {
+    if (!ducked) return
+    ducked = 0
+    setVolume(1)
+  }
+
   function cancelSpeech() {
     speech++
+    ducked = 0
+    setVolume(1)
     nativeStop?.abort()
     nativeStop = null
     for (const node of playing) {
@@ -391,6 +445,8 @@ export async function startSession({
 
   // Queues one piece of audio after whatever is playing.
   function play(audio, sampleRate, mine, isLast) {
+    // A new line: the one lowered for a barge-in is over, and this one plays at full volume.
+    if (ducked && mine !== ducked) unduck()
     const buffer = outContext.createBuffer(1, audio.length, sampleRate)
     buffer.copyToChannel(audio, 0)
     const node = outContext.createBufferSource()
@@ -408,7 +464,7 @@ export async function startSession({
     return node
   }
 
-  // The native voice streams each chunk: playback starts on the first ~80 ms, the rest follows
+  // The native voice streams each chunk: playback starts on the first ~250 ms, the rest follows
   // in pieces of ~300 ms, back to back.
   async function speakNative(text) {
     const parts = speechChunks(text, { isNative: true })
@@ -474,7 +530,7 @@ export async function startSession({
           rate = sampleRate
           pending.push(piece)
           pendingLength += piece.length
-          if (isFirst && pendingLength >= rate * 0.08) {
+          if (isFirst && pendingLength >= rate * FIRST_AUDIO_S) {
             if (i === 0) timing('speak', Math.round(performance.now() - started), 'to first audio (native)')
             isFirst = false
             flush()
@@ -494,7 +550,11 @@ export async function startSession({
 
   // Speaks chunk by chunk: the next chunk is synthesized while the current one plays.
   async function speak(text) {
+    // The speech this line becomes (speak and speakNative bump `speech` once), when it tells news.
+    if (isNoticeLine) noticeSpeech = speech + 1
+    isNoticeLine = false
     sayingText = text
+    recentSaid = [...recentSaid, text].slice(-3)
     if (isNative) return speakNative(text)
     const parts = speechChunks(text)
     if (parts.length === 0) return
@@ -561,13 +621,15 @@ export async function startSession({
 
   // "Certo." while the brain thinks. Not over Ceci's own voice, and never added to the conversation.
   function sayAck() {
-    if (isEnded || isStale() || mode === 'speaking' || ackAudio.size === 0) return
+    // `saying`: a line (the greeting) is still being made; an ack now would cut it off.
+    if (isEnded || isStale() || mode === 'speaking' || saying !== 0 || ackAudio.size === 0) return
     const text = ACKS[nextAck++ % ACKS.length]
     const made = ackAudio.get(text)
     if (!made) return
     timing('ack', 0, `"${text}"`)
     // On screen too, or the caption would show Ceci's previous line while she says "Certo.".
     onMessage({ source: 'ai', message: text })
+    recentSaid = [...recentSaid, text].slice(-3)
     play(made.audio, made.sampleRate, ++speech, true)
   }
 
@@ -617,17 +679,24 @@ export async function startSession({
   }
 
   // One turn with the brain: what to say, what to run now, and what to run on a "sim".
-  async function think(request) {
+  // `asked` is the brain's answer when it was asked already (beside the router).
+  async function think(request, asked = null) {
     // On a request, "Certo." plays if the brain is slow, so the user knows Ceci heard.
     const ack = request.kind === 'user' ? setTimeout(sayAck, ACK_AFTER_MS) : null
-    const reply = await askBrain(request)
+    const reply = await (asked ?? askBrain(request))
     clearTimeout(ack)
     if (isEnded || isStale()) return
     // An acting tool never runs from here: it waits for the user's "sim" (confirm.js).
     const next = decide({ kind: request.kind, reply, now: Date.now() })
     if (request.kind === 'user') commitTurn()
     pendingAction = next.pending
-    if (next.action !== 'run') return say(next.say)
+    if (next.action !== 'run') {
+      // speak() reads this as it starts, in the same tick; a line with no words leaves it unread.
+      isNoticeLine = request.kind === 'notice'
+      const said = say(next.say)
+      isNoticeLine = false
+      return said
+    }
     return runTool(next.tool, next.say)
   }
 
@@ -654,19 +723,49 @@ export async function startSession({
       }))
   }
 
-  // A turn ended (or a carried part came back): transcribe and answer it.
-  function onTurnEnd(ended) {
+  // A turn ended (or a carried part came back): transcribe and answer it. `heard` is its
+  // transcript when it was already written down (a barge-in, checked at once).
+  function onTurnEnd(ended, heard = null) {
     if (!ended) return
     if (ended.isJoined) console.info('[luke-voice] resumed: joined with the previous part')
     userJobs++
-    queue(() => onUtterance(ended.audio).finally(() => userJobs--), ended.turn)
+    queue(() => onUtterance(ended.audio, ended.isJoined ? null : heard).finally(() => userJobs--), ended.turn)
   }
 
-  async function onUtterance(audio) {
+  // A turn that started over Ceci's voice ended. It is written down at once, outside the queue
+  // (the reply she is saying holds the queue until its last chunk is made): her own echo, or no
+  // speech, lets her go on at full volume; the user's words stop her and are answered.
+  function onBargeEnd(audio) {
+    userJobs++
+    transcribe(audio.slice())
+      .then(heard => {
+        if (isEnded) return
+        if (heard.noSpeech || isNotSpeech(heard.text) || isEcho(heard.text, recentSaid.join(' '))) {
+          timing('dropped', heard.ms ?? 0, `a barge-in that was Ceci's own echo or no speech: "${heard.text ?? ''}"`)
+          unduck()
+          // A part carried for joining comes back as its own turn.
+          return onTurnEnd(joiner.dropped())
+        }
+        console.info('[luke-voice] barge-in: the user spoke over Ceci')
+        if (ducked) {
+          const wasNotice = ducked === noticeSpeech
+          cancelSpeech()
+          if (wasNotice) onNoticeCut()
+        }
+        onTurnEnd(joiner.ended(audio), heard)
+      })
+      .catch(error => {
+        unduck()
+        onError(String(error?.message ?? error))
+      })
+      .finally(() => userJobs--)
+  }
+
+  async function onUtterance(audio, heard = null) {
     const seconds = (audio.length / RATE).toFixed(1)
     // A reply this sound cut off comes back only if the sound was no speech.
     const cut = cutReply.take()
-    const { text, ms, noSpeech } = await transcribe(audio)
+    const { text, ms, noSpeech } = heard ?? (await transcribe(audio))
     if (noSpeech) {
       timing('dropped', ms, `${seconds} s of sound with no speech in it`)
       if (cut && !isEnded) await speak(cut)
@@ -702,6 +801,11 @@ export async function startSession({
       return runTool(action.tool, '')
     }
     if (isNative && router) {
+      // The brain is asked at once, beside the router: when the router passes, its answer is
+      // already on the way instead of starting only now. A reply the router gave makes the
+      // brain's answer unused (it only says and proposes; nothing runs without this turn).
+      const request = { kind: 'user', text }
+      const asked = askBrain(request)
       const lastSaid = turns.lastSaid
       const routed = await router({ text, lastSaid }).catch(() => null)
       if (isStale()) return
@@ -709,22 +813,53 @@ export async function startSession({
         timing('router', routed.ms ?? 0, routed.intent)
         return say(routed.say)
       }
+      return think(request, asked)
     }
     await think({ kind: 'user', text })
   }
 
+  // The level of what Ceci is playing now (before her volume).
+  function outputLevel() {
+    if (playing.size === 0) return 0
+    analyser.getFloatTimeDomainData(levels)
+    let sum = 0
+    for (const v of levels) sum += v * v
+    return Math.sqrt(sum / levels.length)
+  }
+
+  function endTurn(audio) {
+    const wasBarge = isBargeTurn
+    isBargeTurn = false
+    if (wasBarge) onBargeEnd(audio)
+    else onTurnEnd(joiner.ended(audio))
+  }
+
   let frameCount = 0
+  let isAskingTurn = false
   frames.port.onmessage = ({ data: frame }) => {
     if (isEnded || isMuted || frame.length !== FRAME) return
-    const event = vad.push(frame, { isSpeaking: mode === 'speaking' })
+    const isSpeaking = mode === 'speaking'
+    const level = rms(frame)
+    // Her voice as it leaves the speakers (after the volume), held ~200 ms for the echo's delay.
+    outPeak = Math.max(isSpeaking ? outputLevel() * outGain.gain.value : 0, outPeak * 0.85)
+    // While she speaks and nobody talks, the mic hears only her echo (and the room): learn how much
+    // of her it hears, slowly, and rising only a little at a time, so a user speaking softly
+    // under the bar does not teach it their voice.
+    if (isSpeaking && !vad.inSpeech && outPeak > 0.02) {
+      const share = Math.min(level / outPeak, echoShare * 1.5 + 0.01)
+      echoShare = Math.min(1.5, Math.max(0.02, echoShare + (share - echoShare) * 0.02))
+    }
+    const event = vad.push(frame, { isSpeaking, echo: echoShare * outPeak * ECHO_MARGIN })
     // ?voice-debug=1: the mic level and the learned room level twice a second, to tune the detector.
-    if (isDebug && ++frameCount % 16 === 0) console.info(`[luke-voice] mic ${rms(frame).toFixed(4)} room ${vad.floor.toFixed(4)} ${mode}`)
+    if (isDebug && ++frameCount % 16 === 0) console.info(`[luke-voice] mic ${level.toFixed(4)} room ${vad.floor.toFixed(4)} echo ${(echoShare * outPeak).toFixed(4)} ${mode}`)
     if (!event) return
     // The user is talking: an acknowledgement being made would compete with their turn.
     if (event.type === 'start' || event.type === 'barge') cancelAckWarm()
+    // Maybe the user, maybe her echo: she goes on, lower, until the turn is heard (onBargeEnd).
     if (event.type === 'barge') {
-      console.info('[luke-voice] barge-in: the user spoke over Ceci')
-      cancelSpeech()
+      console.info('[luke-voice] barge-in? lowering Ceci until the turn is heard')
+      isBargeTurn = true
+      duck()
     }
     // A reply whose first audio is still being made: the user talking first wins, as if they had
     // talked over her, instead of the reply then playing over them.
@@ -741,21 +876,31 @@ export async function startSession({
       // A newer turn is being answered again: an older reply cut here is out of date.
       cutReply.clear()
     }
-    if (event.type === 'end') onTurnEnd(joiner.ended(event.audio))
+    if (event.type === 'end') endTurn(event.audio)
     if (event.type === 'drop') {
+      isBargeTurn = false
+      unduck()
       onTurnEnd(joiner.dropped())
       // Too short to be speech: the reply it cut off is said again, in its turn in the queue.
       if (cutReply.isCut) queue(() => (cutReply.isCut && !isEnded ? speak(cutReply.take()) : null))
     }
-    // A short pause: the turn model says whether the user is done, so Ceci need not wait 800 ms.
-    if (event.type === 'candidate') {
+    // A short pause: the turn model says whether the user is done, so Ceci need not wait for the
+    // full silence. One question at a time: a pause asked about while the last answer is pending
+    // waits for the next ask.
+    if (event.type === 'candidate' && !isAskingTurn) {
+      isAskingTurn = true
       ask('endpoint', { audio: event.audio }, [event.audio.buffer])
+        .finally(() => (isAskingTurn = false))
         .then(({ done, ms }) => {
           timing('end of turn', ms, `p=${done.toFixed(2)}`)
           if (done < TURN_DONE || isEnded) return
           const end = vad.endNow(event.id)
-          if (end?.type === 'end') onTurnEnd(joiner.ended(end.audio))
-          if (end?.type === 'drop') onTurnEnd(joiner.dropped())
+          if (end?.type === 'end') endTurn(end.audio)
+          if (end?.type === 'drop') {
+            isBargeTurn = false
+            unduck()
+            onTurnEnd(joiner.dropped())
+          }
         })
         .catch(() => {})
     }
@@ -770,18 +915,14 @@ export async function startSession({
       if (isMuted) {
         vad.reset()
         cutReply.clear()
+        isBargeTurn = false
+        unduck()
       }
     },
     // The user is mid-utterance, or what they said is still being written down or answered: the
     // window holds its spoken notices until they finish.
     isUserSpeaking: () => vad.inSpeech || userJobs > 0,
-    getOutputVolume: () => {
-      if (playing.size === 0) return 0
-      analyser.getFloatTimeDomainData(levels)
-      let sum = 0
-      for (const v of levels) sum += v * v
-      return Math.sqrt(sum / levels.length)
-    },
+    getOutputVolume: outputLevel,
     endSession: async () => {
       if (isEnded) return
       isEnded = true
@@ -804,10 +945,10 @@ export async function startSession({
   }
 
   onConnect()
-  // Ceci greets like the ElevenLabs agent does (agent/agent.json first_message), so a call
-  // sounds the same with either voice and the user knows she is listening.
-  // Then, while nobody talks, the acknowledgements. A failed greeting is only logged.
-  void say(isLuke ? GREETING.replace('Eu sou a Ceci', 'Eu sou o Luke') : GREETING.replace('Ceci', herName))
+  // Ceci greets from the same lines as the ElevenLabs agent (greetings.js), a different one each
+  // call, so the user knows she is listening. Then, while nobody talks, the acknowledgements.
+  // A failed greeting is only logged.
+  void say(pickGreeting({ name: isLuke ? 'Luke' : herName }))
     .catch(error => console.warn(`[luke-voice] the greeting failed: ${error?.message ?? error}`))
     .then(warmAcks)
   return session

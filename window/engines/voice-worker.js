@@ -169,6 +169,9 @@ async function loadPiper() {
 async function load({ voice = 'pf_dora', language = 'pt-br', device: forced, dtype, threads, sttDtype, sttDevice: sttDeviceChoice, tts: ttsChoice, native = false } = {}) {
   if (threads) env.backends.onnx.wasm.numThreads = threads
   // The native engine speaks and listens in the hub: here only the end-of-turn and speech checks.
+  // Two small models (Silero, Smart Turn) need no more than two threads: a pool of up to seven
+  // only spins on cores the hub's engine and the audio need.
+  else if (native) env.backends.onnx.wasm.numThreads = Math.min(2, env.backends.onnx.wasm.numThreads)
   if (native) {
     post('status', { stage: 'loading', device: 'native' })
     await loadTurn().catch(error => console.warn(`[luke-voice] end-of-turn models did not load: ${error?.message ?? error}`))

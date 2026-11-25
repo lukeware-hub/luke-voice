@@ -125,6 +125,13 @@
   "platform_settings": {
     "auth": {
       "enable_auth": true
+    },
+    "overrides": {
+      "conversation_config_override": {
+        "agent": {
+          "first_message": true
+        }
+      }
     }
   }
 }

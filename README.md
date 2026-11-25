@@ -2,7 +2,7 @@
 
 **Leia em português: [README.pt-BR.md](README.pt-BR.md)**
 
-Ceci, a voice assistant beside your Claude Code session, in Brazilian Portuguese. You say what you want, she repeats it and asks "posso?", and after your "sim" a Claude Code subagent does the task on your computer. When it finishes, she tells you the result out loud.
+Ceci, a voice assistant beside your Claude Code session, in Brazilian Portuguese. You say what you want, she repeats it and asks "posso?", and after your "sim" a Claude Code subagent does the task on your computer. When it finishes, she tells you the result out loud, without waiting for you to speak: if no call is running she starts one, and a result that comes while the window is closed is kept until she has told it.
 
 Ceci has two voices:
 
@@ -91,7 +91,7 @@ To install without questions, set `LUKE_VOICE_NO_PROMPT=1` before you run it; ad
 
 **On a Mac:** the first call asks whether Chrome may use the microphone: click **Allow**. A Mac with Apple silicon gets the natural voice; an Intel Mac gets the light voice.
 
-**Done when:** you hear "Oi! Eu sou a Ceci. O que vamos fazer hoje?". If anything is missing, type `/luke-voice help`: it checks your setup and says what to fix.
+**Done when:** you hear Ceci greet you, for example "Oi! Eu sou a Ceci. O que vamos fazer hoje?" (the words change each call). If anything is missing, type `/luke-voice help`: it checks your setup and says what to fix.
 
 ## Use
 
@@ -131,7 +131,7 @@ Some things need no model call at all:
 
 ### Knowing when you finished talking
 
-Silero VAD (MIT) drops sounds without speech. Pipecat Smart Turn v3.2 (BSD-2-Clause) decides when you finished talking: it is asked after a 0.7 s pause, and only a clear "done" ends your turn. 2 s of silence always ends it (1.3 s without the model). A breath in the middle of a sentence lasts up to about 1 s, so it does not cut you off. If you go on talking before Ceci starts answering, both parts are joined into one request. A noise that starts and stays (a TV, an air conditioner) is learned as the room in about 10 s, so your turns still end on time.
+Silero VAD (MIT) drops sounds without speech. Pipecat Smart Turn v3.2 (BSD-2-Clause) decides when you finished talking: it is asked after a 0.4 s pause and again every 0.2 s while the pause goes on, and a "done" ends your turn there. 1.1 s of silence always ends it (1.3 s without the model). If a breath in the middle of a sentence ends your turn and you go on talking before Ceci starts answering, both parts are joined into one request. While Ceci speaks, a sound that may be you talking over her lowers her voice; she stops once your words are heard, and goes on at full volume if it was only her own echo. A noise that starts and stays (a TV, an air conditioner) is learned as the room in about 10 s, so your turns still end on time.
 
 ### How fast it is
 
