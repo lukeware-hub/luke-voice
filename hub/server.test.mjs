@@ -1279,3 +1279,12 @@ test('the window ends a session: it leaves the roster at once, and its mod is to
   assert.equal(inbox.status, 410)
   assert.equal(inbox.body.error, 'ended')
 })
+
+test("the window's log lines are kept in window.log, one per line, only with the window key", async () => {
+  const file = join(process.env.LUKE_VOICE_HOME, 'window.log')
+  assert.equal((await call('POST', '/log', { body: { lines: ['x'] } })).status, 401)
+  await call('POST', '/log', { key: WINDOW, body: { lines: ['[luke-voice] barge-in? lowering Ceci', 'two\nlines'] } })
+  const text = readFileSync(file, 'utf8')
+  assert.match(text, /\[luke-voice\] barge-in\? lowering Ceci\n/)
+  assert.match(text, /two lines\n/)
+})

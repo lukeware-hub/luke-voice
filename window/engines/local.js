@@ -46,6 +46,7 @@ const DUCK_GAIN = 0.2
 // and nobody talks, from this start. The detector's bar while she speaks is this much of her
 // output, times ECHO_MARGIN.
 const ECHO_START = 0.15
+const ECHO_MAX = 0.5
 const ECHO_MARGIN = 2
 // The first audio of each chunk of the natural voice: enough to ride over a slow moment of the
 // engine (it makes audio at ~2x real time), little enough not to be heard as a wait.
@@ -467,7 +468,9 @@ export async function startSession({
     setMode('speaking')
     node.onended = () => {
       playing.delete(node)
-      if (playing.size === 0 && mine === speech && (isLast || node.isLast)) setMode('listening')
+      // Back to listening when her last audio ends, or when nothing plays and no line is being made
+      // (a line that was replaced, an acknowledgement whose reply had nothing to say).
+      if (playing.size === 0 && ((mine === speech && (isLast || node.isLast)) || saying === 0)) setMode('listening')
     }
     return node
   }
@@ -892,16 +895,20 @@ export async function startSession({
   let isAskingTurn = false
   frames.port.onmessage = ({ data: frame }) => {
     if (isEnded || isMuted || frame.length !== FRAME) return
-    const isSpeaking = mode === 'speaking'
+    // Her audio is playing now. Not `mode`: that stays 'speaking' while a reply is still being made
+    // (held for its comma pauses) or after an acknowledgement, with nothing coming out of the
+    // speakers, and the detector's higher bar for her voice then kept a normal voice from being heard.
+    const isSpeaking = playing.size > 0
     const level = rms(frame)
     // Her voice as it leaves the speakers (after the volume), held ~200 ms for the echo's delay.
     outPeak = Math.max(isSpeaking ? outputLevel() * outGain.gain.value : 0, outPeak * 0.85)
     // While she speaks and nobody talks, the mic hears only her echo (and the room): learn how much
-    // of her it hears, slowly, and rising only a little at a time, so a user speaking softly
-    // under the bar does not teach it their voice.
-    if (isSpeaking && !vad.inSpeech && outPeak > 0.02) {
+    // of her it hears, slowly. A frame much louder than her expected echo is the user, not her: it
+    // is not learned, or a user talking softly over her would raise the bar until nobody got through.
+    // And never past ECHO_MAX: an echo canceller leaves far less of her than that.
+    if (isSpeaking && !vad.inSpeech && outPeak > 0.02 && level <= echoShare * outPeak * 3) {
       const share = Math.min(level / outPeak, echoShare * 1.5 + 0.01)
-      echoShare = Math.min(1.5, Math.max(0.02, echoShare + (share - echoShare) * 0.02))
+      echoShare = Math.min(ECHO_MAX, Math.max(0.02, echoShare + (share - echoShare) * 0.02))
     }
     const event = vad.push(frame, { isSpeaking, echo: echoShare * outPeak * ECHO_MARGIN })
     // ?voice-debug=1: the mic level and the learned room level twice a second, to tune the detector.

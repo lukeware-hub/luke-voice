@@ -177,6 +177,22 @@ const gate = createVoiceGate()
 const speech = createSpeechFilter()
 const quiet = createQuietMode()
 
+// Every "[luke-voice]" line the page logs also goes to the hub's window.log, with its time, in
+// batches: the window runs in its own Chrome profile, so this is how a call can be read afterwards.
+const logLines = []
+for (const level of ['info', 'warn', 'error']) {
+  const original = console[level].bind(console)
+  console[level] = (...args) => {
+    original(...args)
+    const text = args.map(arg => (typeof arg === 'string' ? arg : arg instanceof Error ? arg.message : JSON.stringify(arg))).join(' ')
+    if (text.startsWith('[luke-voice]') && logLines.length < 500) logLines.push(`${new Date().toISOString()} ${level} ${text}`)
+  }
+}
+setInterval(() => {
+  if (logLines.length === 0 || !KEY) return
+  void hub('POST', '/log', { lines: logLines.splice(0, 200) }).catch(() => {})
+}, 2000)
+
 async function hub(method, path, body) {
   const res = await fetch(path, {
     method,
