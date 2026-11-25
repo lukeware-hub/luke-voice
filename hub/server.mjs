@@ -2,7 +2,7 @@
 // It never calls Claude. It queues a command; the matching session's mod pulls it and runs it.
 import { spawn } from 'node:child_process'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
-import { createReadStream, existsSync, linkSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, createReadStream, existsSync, linkSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { pipeline } from 'node:stream/promises'
 import { homedir } from 'node:os'
@@ -32,6 +32,8 @@ const ACK_WAIT_MS = 15_000
 const ROUTER_WAIT_MS = 1500
 // Qwen3-ASR transcribes a turn in ~0.2 s; a hung engine must not hold the request (the window gives up at 20 s).
 // A voice-task result that finds no window open opens one, at most once in this long.
+// The call window's log file starts over past this size.
+const WINDOW_LOG_BYTES = 1_000_000
 const REOPEN_FOR_NOTICE_MS = 60_000
 const STT_WAIT_MS = 20_000
 // How much of what Ceci just said goes into the ears' prompt: her last minute, newest 200 characters.
@@ -335,7 +337,7 @@ export function createEngineRunner({ engine, setDownload, warmQuestions = () => 
   }
 }
 
-export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, engine = null, profile = () => null, voiceRef = null, onLocalVoice = () => {}, onSetup = () => ({ started: false }), engineState = () => 'off', macVoice = () => null, macVoiceGender = () => null, macVoiceSiri = () => null, macSay = sayWav, platform = process.platform, log = () => {}, onShutdown = () => process.exit(0), questionsDir = join(stateDir(), 'cache', 'questions'), staleMs = STALE_SESSION_MS, sweepMs = 10_000, sttWaitMs = STT_WAIT_MS, clock = Date.now, noticesFile = stateFile('notices.json'), reopenMs = REOPEN_FOR_NOTICE_MS }) {
+export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, engine = null, profile = () => null, voiceRef = null, onLocalVoice = () => {}, onSetup = () => ({ started: false }), engineState = () => 'off', macVoice = () => null, macVoiceGender = () => null, macVoiceSiri = () => null, macSay = sayWav, platform = process.platform, log = () => {}, onShutdown = () => process.exit(0), questionsDir = join(stateDir(), 'cache', 'questions'), staleMs = STALE_SESSION_MS, sweepMs = 10_000, sttWaitMs = STT_WAIT_MS, clock = Date.now, noticesFile = stateFile('notices.json'), reopenMs = REOPEN_FOR_NOTICE_MS, windowLog = stateFile('window.log') }) {
   const sessions = new Map() // token -> session
   const launches = new Map() // one-time launch code -> when it expires
   const replaced = new Set() // tokens a newer subscription of the same Claude session took over
@@ -541,6 +543,20 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
 
   // Routes for the call window, by the window key.
   const windowRoutes = {
+    // The call window's own "[luke-voice]" console lines, kept in ~/.luke-voice/window.log so a
+    // call that went wrong can be read afterwards (the window runs in its own Chrome profile, with
+    // no DevTools at hand). At most ~1 MB, then the file starts over (the previous one kept as .old).
+    'POST /log': (_none, body) => {
+      const lines = (Array.isArray(body.lines) ? body.lines : []).slice(0, 200).map(line => String(line).replace(/[\r\n]+/g, ' ').slice(0, 500))
+      if (lines.length === 0 || !windowLog) return [200, { ok: true }]
+      try {
+        if (existsSync(windowLog) && statSync(windowLog).size > WINDOW_LOG_BYTES) renameSync(windowLog, `${windowLog}.old`)
+        appendFileSync(windowLog, `${lines.join('\n')}\n`, { mode: 0o600 })
+      } catch {
+        // A log that cannot be written changes nothing for the call.
+      }
+      return [200, { ok: true }]
+    },
     // The user ends a session from the window, even one that hangs: it leaves the roster now, and
     // its mod, on its next request, is told it was ended and turns luke-voice off in that session.
     'POST /session-end': (_none, body) => {
