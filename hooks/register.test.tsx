@@ -1140,3 +1140,20 @@ test('a voice task started before a reload of the mod still reports its result',
   await until(() => stored.some(v => JSON.stringify(v) === JSON.stringify({ other: [['agent-1', 'x']] })))
   expect(stored.some(v => JSON.stringify(v) === JSON.stringify({ other: [['agent-1', 'x']] }))).toBe(true)
 })
+
+test('a session ended from the call window turns luke-voice off here, without changing the stored on/off', async ($, on) => {
+  const { calls, stored } = engine(on, [async () => ({ status: 410, body: { error: 'ended' } })])
+
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/unsubscribe'))
+  const polls = calls.filter(c => c.path === '/inbox').length
+  // No new subscription, no more polling: it stays off until the user turns it on.
+  for (let i = 0; i < 200; i++) await Promise.resolve()
+  expect(calls.filter(c => c.path === '/inbox').length).toBe(polls)
+  expect(calls.filter(c => c.path === '/subscribe').length).toBe(1)
+  // Only the `on` command stored true; ending it from the window stored nothing.
+  expect(stored.filter(v => v === false).length).toBe(0)
+  const ui = await $.ui.mount({ ...FOOTER, surface: 'terminal' })
+  expect((await ui.find({ type: 'Button', key: 'luke-voice-toggle' }))?.props.label).toBe('✦ luke-voice: off')
+  await ui.unmount()
+})

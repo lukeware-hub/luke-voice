@@ -314,23 +314,65 @@ function setCall(state, caption) {
 
 /* ---------- Sessions ---------- */
 
+// The session whose end button was pressed once: a second press within ARM_MS ends it.
+const ARM_MS = 4000
+let armed = { name: null, until: 0 }
+let armTimer = null
+
 function sessionRow(session, index) {
   const state = session.needsYou ? 'attention' : session.isBusy ? 'working' : 'idle'
-  const row = el('button', 'session')
-  row.type = 'button'
+  const row = el('div', 'session')
   row.style.setProperty('--i', String(index))
   row.dataset.state = state
   row.dataset.tone = index % 2 === 0 ? 'blue' : 'violet'
-  row.setAttribute('aria-current', String(session.name === focused))
-  row.title = session.cwd || session.name
+  const pick = el('button', 'session-pick')
+  pick.type = 'button'
+  pick.setAttribute('aria-current', String(session.name === focused))
+  pick.title = session.cwd || session.name
   const avatar = el('span', 'avatar')
   avatar.append(icon(index % 2 === 0 ? 'i-waveform-fill' : 'i-terminal-window'))
   const who = el('span', 'who')
   who.append(el('span', 'name', session.name), el('span', 'state', SESSION_STATE[state]))
   const badge = session.name === focused ? el('span', 'badge', 'Ativo') : el('span', 'badge quiet', 'Falar com esta')
-  row.append(avatar, who, badge)
-  row.addEventListener('click', () => void hub('POST', '/focus', { name: session.name }))
+  pick.append(avatar, who, badge)
+  pick.addEventListener('click', () => void hub('POST', '/focus', { name: session.name }))
+  row.append(pick, endButton(session))
   return row
+}
+
+// Ends a session's link with Ceci, even a stuck one. Two presses, no dialog: the first turns the
+// button into "Encerrar?", the second (within 4 s) ends it.
+function endButton(session) {
+  const isArmed = armed.name === session.name && Date.now() < armed.until
+  const button = el('button', 'session-end')
+  button.type = 'button'
+  button.dataset.armed = String(isArmed)
+  button.setAttribute('aria-label', isArmed ? `Confirmar: encerrar a sessão ${session.name}` : `Encerrar a sessão ${session.name}`)
+  button.title = isArmed ? 'Toque de novo para encerrar' : 'Encerrar esta sessão'
+  button.append(icon('i-x'))
+  if (isArmed) button.append(el('span', 'label', 'Encerrar?'))
+  button.addEventListener('click', event => {
+    event.stopPropagation()
+    if (armed.name === session.name && Date.now() < armed.until) return void endSession(session.name)
+    armed = { name: session.name, until: Date.now() + ARM_MS }
+    clearTimeout(armTimer)
+    armTimer = setTimeout(() => {
+      armed = { name: null, until: 0 }
+      renderRoster()
+    }, ARM_MS)
+    renderRoster()
+    // The re-rendered button keeps the keyboard focus, so Enter twice works too.
+    document.querySelector(`.session-end[data-armed='true']`)?.focus()
+  })
+  return button
+}
+
+async function endSession(name) {
+  armed = { name: null, until: 0 }
+  clearTimeout(armTimer)
+  const out = await hub('POST', '/session-end', { name }).catch(error => ({ ok: false, error: error.message }))
+  addLog(out.ok ? 'stop' : 'failed', out.ok ? `Sessão ${name} encerrada` : `Não consegui encerrar a sessão ${name}`, { who: name })
+  renderRoster()
 }
 
 function renderRoster() {

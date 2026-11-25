@@ -1260,3 +1260,22 @@ test('a finished task is kept until the window acks it: sent again to a window t
   assert.equal((await call('POST', '/notice-ack', { key: WINDOW, body: { id: mine[1].id } })).body.ok, true)
   await call('POST', '/unsubscribe', { auth: s.token })
 })
+
+test('the window ends a session: it leaves the roster at once, and its mod is told it was ended', async () => {
+  const s = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/stuck', sessionId: 'stuck-1' } })).body
+  assert.ok((await call('GET', '/health')).body.sessions >= 1)
+  // Only the window key may end one, and only one that exists.
+  assert.equal((await call('POST', '/session-end', { body: { name: s.name } })).status, 401)
+  assert.equal((await call('POST', '/session-end', { key: WINDOW, body: { name: 'nope' } })).status, 404)
+  // A command waiting for that session gets its answer now instead of timing out.
+  const waiting = call('POST', '/command', { key: WINDOW, body: { type: 'task', task: 'x', session: s.name } })
+  await new Promise(resolve => setTimeout(resolve, 50))
+  assert.equal((await call('POST', '/session-end', { key: WINDOW, body: { name: s.name } })).body.ok, true)
+  assert.equal((await waiting).body.ok, false)
+  const activity = await call('GET', `/activity?session=${s.name}`, { key: WINDOW })
+  assert.match(activity.body.text, /No session is named|No Claude session is connected/)
+  // Its mod, on its next request, hears it was ended (and turns off), not "subscribe again".
+  const inbox = await call('GET', '/inbox?wait=0', { auth: s.token })
+  assert.equal(inbox.status, 410)
+  assert.equal(inbox.body.error, 'ended')
+})
