@@ -473,6 +473,7 @@ const memoryUi = {
   wipe: $('memoryWipe'),
 }
 let memoryOldest = null
+let memoryLastDay = null
 
 const longDay = day => {
   const date = new Date(`${day}T12:00:00`)
@@ -527,11 +528,11 @@ function memoryMark() {
   return mark
 }
 
-function conversationEntry(c, { isOpen = false } = {}) {
+function conversationEntry(c, { isOpen = false, showDay = false } = {}) {
   const item = el('li', 'entry memory-entry')
   item.dataset.kind = 'memory'
   const meta = el('p', 'meta')
-  meta.append(el('strong', '', longDay(c.day)), el('span', '', `#${c.id}`), el('span', '', `${c.events} ${c.events === 1 ? 'registro' : 'registros'}`))
+  meta.append(el('strong', '', showDay ? longDay(c.day) : new Date(c.startedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })), el('span', '', `#${c.id}`), el('span', '', `${c.events} ${c.events === 1 ? 'registro' : 'registros'}`))
   item.append(memoryMark(), meta, el('p', 'what', c.title || c.summary || 'Conversa sem resumo ainda'))
   if (c.title && c.summary) item.append(el('p', 'memory-summary', c.summary))
   const details = el('details')
@@ -549,7 +550,7 @@ function conversationEntry(c, { isOpen = false } = {}) {
   const actions = el('div', 'memory-actions')
   const remove = el('button', 'link memory-delete', 'Apagar')
   remove.type = 'button'
-  remove.addEventListener('click', () => confirmDelete(actions, remove, `Apagar a conversa de ${longDay(c.day)}? Não dá para desfazer.`, () => deleteFromMemory({ conversation: c.id })))
+  remove.addEventListener('click', () => confirmDelete(actions, remove, `Apagar a conversa de ${longDay(c.day)}, com ${c.events} ${c.events === 1 ? 'registro' : 'registros'}? Não dá para desfazer.`, () => deleteFromMemory({ conversation: c.id })))
   actions.append(remove)
   item.append(details, actions)
   if (isOpen) details.open = true
@@ -568,7 +569,7 @@ function hitEntry(hit) {
   open.addEventListener('click', async () => {
     const out = await hub('GET', `/memory/conversation?id=${hit.conversation}&limit=1`).catch(() => null)
     if (!out?.id) return
-    memoryUi.list.replaceChildren(conversationEntry(out, { isOpen: true }))
+    memoryUi.list.replaceChildren(conversationEntry(out, { isOpen: true, showDay: true }))
     memoryUi.more.hidden = true
   })
   actions.append(open)
@@ -595,9 +596,19 @@ async function loadMemory({ older = false } = {}) {
   const before = older && memoryOldest ? `&before=${memoryOldest}` : ''
   const out = await hub('GET', `/memory/conversations?limit=30${before}`).catch(error => ({ error: error.message, conversations: [] }))
   const rows = out.conversations ?? []
-  if (!older) memoryUi.list.replaceChildren()
+  if (!older) {
+    memoryUi.list.replaceChildren()
+    memoryLastDay = null
+  }
   if (rows.length) memoryOldest = rows.at(-1).startedAt
-  memoryUi.list.append(...rows.map(c => conversationEntry(c)))
+  // Grouped by day: a heading before each day's first conversation (across pages too).
+  for (const c of rows) {
+    if (c.day !== memoryLastDay) {
+      memoryLastDay = c.day
+      memoryUi.list.append(el('li', 'memory-day', longDay(c.day)))
+    }
+    memoryUi.list.append(conversationEntry(c))
+  }
   if (!memoryUi.list.childElementCount) memoryUi.list.append(el('li', 'empty', out.error ?? 'As conversas com a Ceci aparecem aqui.'))
   memoryUi.more.hidden = rows.length < 30
 }
@@ -608,9 +619,11 @@ memoryUi.form.addEventListener('submit', event => {
 })
 memoryUi.query.addEventListener('search', () => void loadMemory())
 memoryUi.more.addEventListener('click', () => void loadMemory({ older: true }))
-memoryUi.wipe.addEventListener('click', () =>
-  confirmDelete(memoryUi.wipe.parentElement, memoryUi.wipe, 'Apagar toda a memória da Ceci, com todas as conversas? Não dá para desfazer.', () => deleteFromMemory({ all: true })),
-)
+memoryUi.wipe.addEventListener('click', async () => {
+  const found = await hub('POST', '/memory/preview', { scope: { all: true } }).catch(() => null)
+  const what = found ? `${found.conversations} ${found.conversations === 1 ? 'conversa' : 'conversas'} e ${found.events} ${found.events === 1 ? 'registro' : 'registros'}` : 'todas as conversas'
+  confirmDelete(memoryUi.wipe.parentElement, memoryUi.wipe, `Apagar toda a memória da Ceci: ${what}? Não dá para desfazer.`, () => deleteFromMemory({ all: true }))
+})
 
 /* ---------- Settings ---------- */
 

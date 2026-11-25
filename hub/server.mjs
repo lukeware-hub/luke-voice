@@ -19,7 +19,7 @@ import { createNotices } from './notices.mjs'
 import { COMMON_QUESTIONS, MAX_PICK_CHARS, createQuestionTakes, isYesNoQuestion } from './question-pick.mjs'
 import { route as routeUtterance } from './router.mjs'
 import { withoutPromptLeak } from './asr-leak.mjs'
-import { dayOf, openMemory, rangeOf } from './memory.mjs'
+import { dayOf, openMemory, rangeOf, scopeFromArgs } from './memory.mjs'
 import { quoteUntrusted } from '../window/guard.js'
 import { contentType, vendorFile } from './vendor.mjs'
 
@@ -488,6 +488,19 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     sendRoster()
   }
 
+  // Before Ceci asks "posso?" about deleting from the memory, the user hears how much it is; a
+  // delete that matches nothing is not asked about at all.
+  const withDeleteCount = (say, pending) => {
+    if (pending?.name !== 'luke_memory_delete' || !memory?.isAvailable) return { say, pending }
+    const scope = scopeFromArgs(pending.args ?? {})
+    if (!scope) return { say: 'Não entendi o que apagar da memória. Diga uma conversa, um dia ou umas palavras.', pending: null }
+    const found = memory.preview(scope)
+    if (found.events === 0) return { say: 'Não achei nada na memória com isso, então não há o que apagar.', pending: null }
+    const where = found.conversations > 1 ? ` em ${found.conversations} conversas` : ''
+    const count = `São ${found.events} ${found.events === 1 ? 'registro' : 'registros'}${where}.`
+    return { say: `${count} ${say}`.trim(), pending }
+  }
+
   // What a command to a session answered, kept in the memory.
   const recorded = (result, session) => {
     remember({ kind: 'tool_result', text: `${result.ok ? 'Feito' : 'Falhou'}: ${result.message ?? ''}`.trim(), session: session.name, untrusted: true })
@@ -600,7 +613,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     'POST /events': (session, body) => {
       const events = Array.isArray(body.events) ? body.events.slice(0, 50) : []
       // Everything the sessions report is kept in Ceci's memory, marked as not the user's words.
-      for (const event of events) remember({ kind: SESSION_KINDS[String(event.kind)] ?? 'session_info', text: String(event.text ?? '').slice(0, MEMORY_TEXT), session: session.name, untrusted: true })
+      for (const event of events) remember({ kind: SESSION_KINDS[String(event.kind)] ?? 'session_info', text: String(event.full ?? event.text ?? '').slice(0, MEMORY_TEXT), session: session.name, untrusted: true })
       for (const event of events) {
         const item = { kind: String(event.kind ?? 'info').slice(0, 20), text: String(event.text ?? '').slice(0, 2000) }
         session.activity.push(item)
@@ -788,15 +801,17 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
         memory: memoryBlock(['user', 'tool_result'].includes(body.kind) || !body.kind ? clip(body.text, 500) : ''),
       }
       // A tool's answer read by the brain is kept too, as data from the computer.
-      if (request.kind === 'tool_result') remember({ kind: 'tool_result', text: request.text, untrusted: true })
+      if (request.kind === 'tool_result') remember({ kind: 'tool_result', text: String(body.text ?? '').slice(0, MEMORY_TEXT), untrusted: true })
       const result = await enqueue(session, { type: 'think', request }, BRAIN_WAIT_MS)
       if (!result.ok) return [502, { error: result.message }]
       try {
         const reply = JSON.parse(result.message)
-        for (const [field, tool] of [['tool', reply.tool], ['pending', reply.pending]]) {
+        // Counted before the proposal itself is recorded (its words would match its own search).
+        const { say, pending } = withDeleteCount(String(reply.say ?? ''), reply.pending ?? null)
+        for (const [field, tool] of [['tool', reply.tool], ['pending', pending]]) {
           if (tool?.name) remember({ kind: 'tool_call', text: `${field === 'pending' ? 'Perguntou antes de usar' : 'Usou'} ${tool.name}: ${JSON.stringify(tool.args ?? {})}`, meta: { field, tool } })
         }
-        return [200, { say: String(reply.say ?? ''), tool: reply.tool ?? null, pending: reply.pending ?? null }]
+        return [200, { say, tool: reply.tool ?? null, pending }]
       } catch {
         return [502, { error: 'The brain answered something that is not JSON.' }]
       }
