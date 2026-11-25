@@ -13,9 +13,14 @@ const DEFAULTS = {
   startFrames: 3, // ~100 ms of speech starts an utterance
   bargeFrames: 8, // ~250 ms of loud speech interrupts Ceci
   endFrames: 40, // ~1.3 s of silence ends it (breaths mid-sentence last up to ~1 s)
-  // With a turn model (Smart Turn), ~400 ms of silence makes a candidate end: the model says
-  // whether the user is done. If not, the silence must reach endFrames. 0 turns candidates off.
+  // With a turn model (Smart Turn), a pause of candidateFrames makes a candidate end: the model
+  // says whether the user is done. If not, it is asked again every candidateEvery frames of the
+  // same pause (0: once), and the silence still ends the turn at endFrames. 0 turns candidates off.
   candidateFrames: 0,
+  candidateEvery: 0,
+  // Silence kept at the end of an utterance: the rest is cut, so the speech check and the ears
+  // do not spend time on up to 2 s of nothing.
+  tailFrames: 5,
   prerollFrames: 10, // ~320 ms kept from before the start, so the first syllable is not cut
   // While Ceci speaks, ~1.6 s is kept: speech has quiet dips between syllables, so a barge-in
   // fires a moment after the user started, and the words before it must not be lost.
@@ -55,7 +60,8 @@ export function createVad(options = {}) {
   let frames = []
   // Bumped on every new pause and every resumed speech, so a late answer about an old pause is ignored.
   let pause = 0
-  let asked = false
+  // The silence (in frames) at which the turn model was last consulted on this pause; -1: not yet.
+  let askedAt = -1
   // Frames in a row above the bar, and the quietest of them (the creep of the floor).
   let above = 0
   let aboveMin = Infinity
@@ -70,12 +76,13 @@ export function createVad(options = {}) {
 
   function finish() {
     const enough = voiced >= o.minSpeechFrames
+    if (quiet > o.tailFrames) frames = frames.slice(0, frames.length - (quiet - o.tailFrames))
     const audio = audioOf()
     inSpeech = false
     frames = []
     preroll = []
     loud = quiet = voiced = 0
-    asked = false
+    askedAt = -1
     pause++
     return enough ? { type: 'end', audio } : { type: 'drop' }
   }
@@ -137,15 +144,16 @@ export function createVad(options = {}) {
         voiced++
         if (quiet > 0) {
           pause++
-          asked = false
+          askedAt = -1
         }
         quiet = 0
       } else {
         quiet++
       }
       if (quiet >= o.endFrames || frames.length >= o.maxFrames) return finish()
-      if (o.candidateFrames && !asked && quiet >= o.candidateFrames && voiced >= o.minSpeechFrames) {
-        asked = true
+      const isDue = askedAt < 0 ? quiet >= o.candidateFrames : o.candidateEvery > 0 && quiet - askedAt >= o.candidateEvery
+      if (o.candidateFrames && isDue && voiced >= o.minSpeechFrames) {
+        askedAt = quiet
         return { type: 'candidate', audio: audioOf(o.candidateSamples), id: pause }
       }
       return null
@@ -160,7 +168,7 @@ export function createVad(options = {}) {
       frames = []
       preroll = []
       loud = quiet = voiced = 0
-      asked = false
+      askedAt = -1
       pause++
     },
   }

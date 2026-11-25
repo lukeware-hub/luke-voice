@@ -131,7 +131,7 @@ Algumas coisas não precisam de chamada ao modelo:
 
 ### Saber quando você terminou de falar
 
-O Silero VAD (MIT) descarta sons sem fala. O Pipecat Smart Turn v3.2 (BSD-2-Clause) decide quando você terminou de falar: ele é consultado depois de uma pausa de 0,7 s, e só um "terminou" claro encerra a sua vez. 2 s de silêncio sempre encerram (1,3 s sem o modelo). Uma respiração no meio da frase dura até cerca de 1 s, então não te corta. Se você continuar falando antes de a Ceci começar a responder, as duas partes viram um pedido só. Um barulho que começa e continua (uma TV, um ar-condicionado) vira o som da sala em cerca de 10 s, então a sua vez continua terminando na hora.
+O Silero VAD (MIT) descarta sons sem fala. O Pipecat Smart Turn v3.2 (BSD-2-Clause) decide quando você terminou de falar: ele é consultado depois de uma pausa de 0,4 s e de novo a cada 0,2 s enquanto a pausa continua, e um "terminou" encerra a sua vez ali. 1,1 s de silêncio sempre encerra (1,3 s sem o modelo). Se uma respiração no meio da frase encerrar a sua vez e você continuar falando antes de a Ceci começar a responder, as duas partes viram um pedido só. Enquanto a Ceci fala, um som que pode ser você falando por cima abaixa a voz dela; ela para quando as suas palavras são ouvidas, e volta ao volume normal se era só o eco dela mesma. Um barulho que começa e continua (uma TV, um ar-condicionado) vira o som da sala em cerca de 10 s, então a sua vez continua terminando na hora.
 
 ### Quão rápido é
 

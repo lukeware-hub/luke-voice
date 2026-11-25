@@ -28,12 +28,14 @@ const DENIED = 'Tá bom, deixei pra lá.'
 // Ceci heard. Synthesized when the call starts, so they play with no wait.
 const ACKS = ['Certo.', 'Deixa eu ver.', 'Hum, tá bom.']
 const ACK_AFTER_MS = 600
-// With the end-of-turn model: a ~700 ms pause asks it whether the user is done, and only a clear
-// "done" (0.7) ends the turn; otherwise ~2 s of silence still ends it. Without the model, ~1.3 s
-// (vad.js). People breathe for 0.4-1 s mid-sentence, so shorter pauses cut them off.
-const TURN_CANDIDATE_FRAMES = 22
-const TURN_END_FRAMES = 62
-const TURN_DONE = 0.7
+// With the end-of-turn model: a ~380 ms pause asks it whether the user is done, and it is asked
+// again every ~190 ms while the pause goes on; a "done" (0.6) ends the turn there, and ~1.1 s of
+// silence ends it anyway. Without the model, ~1.3 s (vad.js). A breath mid-sentence that still
+// ends the turn is not lost: speech that resumes before Ceci answers is joined (turn-join.js).
+const TURN_CANDIDATE_FRAMES = 12
+const TURN_CANDIDATE_EVERY = 6
+const TURN_END_FRAMES = 35
+const TURN_DONE = 0.6
 // While the user may be talking over her, Ceci goes on at this volume instead of stopping: her
 // own echo set off most interruptions, and a false one used to cut her off mid-sentence. She
 // stops once the turn turns out to be the user's words, and goes back to full volume if not.
@@ -311,7 +313,7 @@ export async function startSession({
   }
   document.addEventListener('click', resumeAudio)
 
-  const vad = createVad(voiceInfo?.turn ? { candidateFrames: TURN_CANDIDATE_FRAMES, endFrames: TURN_END_FRAMES } : {})
+  const vad = createVad(voiceInfo?.turn ? { candidateFrames: TURN_CANDIDATE_FRAMES, candidateEvery: TURN_CANDIDATE_EVERY, endFrames: TURN_END_FRAMES } : {})
   const context = []
   const turns = createTurnLog()
   let isMuted = false
@@ -669,10 +671,11 @@ export async function startSession({
   }
 
   // One turn with the brain: what to say, what to run now, and what to run on a "sim".
-  async function think(request) {
+  // `asked` is the brain's answer when it was asked already (beside the router).
+  async function think(request, asked = null) {
     // On a request, "Certo." plays if the brain is slow, so the user knows Ceci heard.
     const ack = request.kind === 'user' ? setTimeout(sayAck, ACK_AFTER_MS) : null
-    const reply = await askBrain(request)
+    const reply = await (asked ?? askBrain(request))
     clearTimeout(ack)
     if (isEnded || isStale()) return
     // An acting tool never runs from here: it waits for the user's "sim" (confirm.js).
@@ -780,6 +783,11 @@ export async function startSession({
       return runTool(action.tool, '')
     }
     if (isNative && router) {
+      // The brain is asked at once, beside the router: when the router passes, its answer is
+      // already on the way instead of starting only now. A reply the router gave makes the
+      // brain's answer unused (it only says and proposes; nothing runs without this turn).
+      const request = { kind: 'user', text }
+      const asked = askBrain(request)
       const lastSaid = turns.lastSaid
       const routed = await router({ text, lastSaid }).catch(() => null)
       if (isStale()) return
@@ -787,6 +795,7 @@ export async function startSession({
         timing('router', routed.ms ?? 0, routed.intent)
         return say(routed.say)
       }
+      return think(request, asked)
     }
     await think({ kind: 'user', text })
   }
@@ -808,6 +817,7 @@ export async function startSession({
   }
 
   let frameCount = 0
+  let isAskingTurn = false
   frames.port.onmessage = ({ data: frame }) => {
     if (isEnded || isMuted || frame.length !== FRAME) return
     const isSpeaking = mode === 'speaking'
@@ -856,9 +866,13 @@ export async function startSession({
       // Too short to be speech: the reply it cut off is said again, in its turn in the queue.
       if (cutReply.isCut) queue(() => (cutReply.isCut && !isEnded ? speak(cutReply.take()) : null))
     }
-    // A short pause: the turn model says whether the user is done, so Ceci need not wait 800 ms.
-    if (event.type === 'candidate') {
+    // A short pause: the turn model says whether the user is done, so Ceci need not wait for the
+    // full silence. One question at a time: a pause asked about while the last answer is pending
+    // waits for the next ask.
+    if (event.type === 'candidate' && !isAskingTurn) {
+      isAskingTurn = true
       ask('endpoint', { audio: event.audio }, [event.audio.buffer])
+        .finally(() => (isAskingTurn = false))
         .then(({ done, ms }) => {
           timing('end of turn', ms, `p=${done.toFixed(2)}`)
           if (done < TURN_DONE || isEnded) return
