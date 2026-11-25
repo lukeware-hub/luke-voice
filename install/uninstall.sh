@@ -127,6 +127,30 @@ step 3 'Apagando a pasta do luke-voice'
 rm -rf "$LV_HOME" || fail "não consegui apagar $LV_HOME." 'Feche o Claude Code e a janela da chamada, e rode o desinstalador de novo.'
 ok 'Pasta apagada.'
 
+# Ceci's memory lives apart (it is never removed on its own): asked about here. Without a terminal
+# to ask, it is kept unless LUKE_VOICE_DELETE_MEMORY=1 (/luke-voice uninstall confirmar apagar-memoria).
+MEMORY_HOME="${CECI_MEMORY_HOME:-$HOME/.ceci}"
+if [ -d "$MEMORY_HOME" ]; then
+  case "${MEMORY_HOME%/}" in
+    '' | / | "$HOME" | "${HOME%/}") fail "a pasta '$MEMORY_HOME' não parece ser a da memória da Ceci." 'Confira a variável CECI_MEMORY_HOME.' ;;
+  esac
+  delete_memory="${LUKE_VOICE_DELETE_MEMORY:-}"
+  if [ -z "$delete_memory" ] && can_ask; then
+    printf '\n  A memória da Ceci (todas as conversas) está em %s.\n' "$MEMORY_HOME"
+    printf '  Apagar a memória também? Não dá para desfazer. s para apagar, Enter para manter: '
+    IFS= read -r answer </dev/tty || answer=''
+    case "$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')" in
+      s | sim | y | yes) delete_memory=1 ;;
+    esac
+  fi
+  if [ "$delete_memory" = "1" ]; then
+    rm -rf "$MEMORY_HOME" || fail "não consegui apagar $MEMORY_HOME." 'Feche o Claude Code e rode o desinstalador de novo.'
+    ok 'Memória da Ceci apagada.'
+  else
+    ok "Memória da Ceci mantida em $MEMORY_HOME (para apagar depois: rm -rf $MEMORY_HOME)."
+  fi
+fi
+
 step 4 'Tirando o link do Node.js do luke-voice'
 removed=false
 # ~/.local/bin, and next to claude, where installers before 0.10.2 put it.

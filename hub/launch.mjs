@@ -69,7 +69,11 @@ if (!up) {
   // Past 5 MB the log moves to hub.old.log (the one before is dropped), or it grows forever.
   rotateLog(stateFile('hub.log'))
   const logFd = openSync(stateFile('hub.log'), 'a')
-  spawn(process.execPath, [join(here, 'server.mjs')], {
+  // node:sqlite (Ceci's memory) warns that it is experimental on every start: not worth a log line.
+  // The flag exists from Node 21.3; an older Node would refuse to start with it.
+  const [major, minor] = process.versions.node.split('.').map(Number)
+  const quiet = major > 21 || (major === 21 && minor >= 3) ? ['--disable-warning=ExperimentalWarning'] : []
+  spawn(process.execPath, [...quiet, join(here, 'server.mjs')], {
     detached: true,
     stdio: ['ignore', logFd, logFd],
     windowsHide: true,

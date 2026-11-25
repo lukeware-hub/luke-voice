@@ -201,6 +201,30 @@ if (Test-Path $full) {
 }
 Ok 'Pasta apagada.'
 
+# Ceci's memory lives apart (it is never removed on its own): asked about here. With no one to ask,
+# it is kept unless LUKE_VOICE_DELETE_MEMORY=1.
+$memoryHome = if ($env:CECI_MEMORY_HOME) { $env:CECI_MEMORY_HOME } else { Join-Path $HOME '.ceci' }
+if (Test-Path $memoryHome) {
+  $memoryFull = [IO.Path]::GetFullPath($memoryHome).TrimEnd('\')
+  if ($memoryFull -eq [IO.Path]::GetFullPath($HOME).TrimEnd('\') -or $memoryFull.Length -le 3) {
+    Fail "a pasta '$memoryHome' não parece ser a da memória da Ceci." 'Confira a variável CECI_MEMORY_HOME.'
+  }
+  $deleteMemory = $env:LUKE_VOICE_DELETE_MEMORY -eq '1'
+  if (-not $deleteMemory -and -not $env:LUKE_VOICE_DELETE_MEMORY) {
+    Write-Host ""
+    Write-Host "  A memória da Ceci (todas as conversas) está em $memoryFull."
+    $answer = Ask '  Apagar a memória também? Não dá para desfazer. s para apagar, Enter para manter'
+    $deleteMemory = @('s', 'sim', 'y', 'yes') -contains $answer
+  }
+  if ($deleteMemory) {
+    Remove-Item -Recurse -Force $memoryFull -ErrorAction SilentlyContinue
+    if (Test-Path $memoryFull) { Fail "não consegui apagar $memoryFull." 'Feche o Claude Code e rode o desinstalador de novo.' }
+    Ok 'Memória da Ceci apagada.'
+  } else {
+    Ok "Memória da Ceci mantida em $memoryFull (para apagar depois, apague essa pasta)."
+  }
+}
+
 Write-Host ""
 Write-Host "  ======================================" -ForegroundColor Green
 Write-Host "   luke-voice removido." -ForegroundColor Green

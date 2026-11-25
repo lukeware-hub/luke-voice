@@ -148,6 +148,7 @@ const ENTRY = {
   sent: ['i-paper-plane-right', 'Enviado ao Claude'],
   stop: ['i-stop', 'Parar'],
   failed: ['i-x-circle', 'Falhou'],
+  memory: ['i-chat-circle-dots', 'Memória'],
 }
 const SESSION_STATE = { attention: 'Precisa de você', working: 'Trabalhando…', idle: 'Pronto' }
 
@@ -192,6 +193,27 @@ setInterval(() => {
   if (logLines.length === 0 || !KEY) return
   void hub('POST', '/log', { lines: logLines.splice(0, 200) }).catch(() => {})
 }, 2000)
+
+// Every word of the call goes to Ceci's permanent memory (hub/memory.mjs), in small batches. A batch
+// the hub did not take is kept and sent again, so a hub restart does not lose what was said.
+let memoryBatch = []
+function rememberSaid(source, message) {
+  const text = String(message ?? '').trim()
+  if (!text) return
+  const kind = source === 'user' ? (text === NOTICE || text === QUIET_NOTICE ? 'notice' : 'user') : 'ceci'
+  memoryBatch.push({ kind, text, at: Date.now() })
+  if (memoryBatch.length > 2000) memoryBatch = memoryBatch.slice(-2000)
+}
+async function flushMemory() {
+  if (memoryBatch.length === 0 || !KEY) return
+  const batch = memoryBatch.splice(0, 200)
+  try {
+    await hub('POST', '/memory/events', { events: batch })
+  } catch {
+    memoryBatch = [...batch, ...memoryBatch]
+  }
+}
+setInterval(() => void flushMemory(), 1000)
 
 async function hub(method, path, body) {
   const res = await fetch(path, {
@@ -268,6 +290,7 @@ function showView(name) {
       ui.historyCount.hidden = true
     }
     if (name === 'settings') void renderFacts()
+    if (name === 'memory') void loadMemory()
   }
   // The selection pill glides to the new item (a view transition); without one, it just moves.
   if (document.startViewTransition && !reduceMotion.matches && document.body.dataset.view !== name) document.startViewTransition(apply)
@@ -436,6 +459,158 @@ function addLog(kind, title, { body, who } = {}) {
     ui.historyCount.hidden = false
   }
 }
+
+/* ---------- Memory ---------- */
+
+// Ceci's permanent memory: the conversations, newest first, a search, and deleting. A delete asks
+// right here in the page (no browser dialog) and says it cannot be undone.
+const memoryUi = {
+  form: $('memorySearch'),
+  query: $('memoryQuery'),
+  stats: $('memoryStats'),
+  list: $('memoryList'),
+  more: $('memoryMore'),
+  wipe: $('memoryWipe'),
+}
+let memoryOldest = null
+
+const longDay = day => {
+  const date = new Date(`${day}T12:00:00`)
+  return Number.isNaN(date.getTime()) ? day : date.toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })
+}
+const WHO = { user: 'Você', ceci: 'Ceci', notice: 'Aviso', task: 'Pedido', tool_call: 'Ferramenta', tool_result: 'Resposta', task_result: 'Resultado' }
+const whoSaid = item => WHO[item.kind] ?? (item.session ? `Sessão ${item.session}` : 'Sessão')
+
+// "Apagar" turns into a question with two buttons; only the red one deletes.
+function confirmDelete(holder, trigger, question, onYes) {
+  if (holder.querySelector(':scope > .memory-confirm')) return
+  const ask = el('div', 'memory-confirm')
+  ask.setAttribute('role', 'group')
+  const yes = el('button', 'danger-btn', 'Apagar')
+  yes.type = 'button'
+  const no = el('button', 'link', 'Cancelar')
+  no.type = 'button'
+  ask.append(el('p', '', question), yes, no)
+  trigger.hidden = true
+  holder.append(ask)
+  const close = () => {
+    ask.remove()
+    trigger.hidden = false
+  }
+  no.addEventListener('click', close)
+  yes.addEventListener('click', async () => {
+    yes.disabled = true
+    await onYes()
+    close()
+  })
+  no.focus()
+}
+
+async function deleteFromMemory(scope) {
+  const out = await hub('POST', '/memory/delete', { scope, how: 'window' }).catch(error => ({ error: error.message }))
+  if (out.error) return addLog('failed', `A memória não mudou: ${out.error}`)
+  addLog('memory', `Apaguei ${out.deleted} ${out.deleted === 1 ? 'registro' : 'registros'}.`)
+  await loadMemory()
+}
+
+function lineRow(item) {
+  const row = el('li', 'memory-line')
+  row.dataset.kind = item.kind
+  const time = new Date(item.at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  row.append(el('span', 'memory-who', `${whoSaid(item)} · ${time}`), el('p', 'memory-text', item.text))
+  return row
+}
+
+function memoryMark() {
+  const mark = el('span', 'mark')
+  mark.append(icon('i-clock-counter-clockwise'))
+  return mark
+}
+
+function conversationEntry(c, { isOpen = false } = {}) {
+  const item = el('li', 'entry memory-entry')
+  item.dataset.kind = 'memory'
+  const meta = el('p', 'meta')
+  meta.append(el('strong', '', longDay(c.day)), el('span', '', `#${c.id}`), el('span', '', `${c.events} ${c.events === 1 ? 'registro' : 'registros'}`))
+  item.append(memoryMark(), meta, el('p', 'what', c.title || c.summary || 'Conversa sem resumo ainda'))
+  if (c.title && c.summary) item.append(el('p', 'memory-summary', c.summary))
+  const details = el('details')
+  const lines = el('ol', 'memory-lines')
+  details.append(el('summary', '', 'Ver conversa'), lines)
+  const fill = async () => {
+    if (lines.childElementCount) return
+    const out = await hub('GET', `/memory/conversation?id=${c.id}&limit=1000`).catch(error => ({ error: error.message }))
+    if (out.error) return lines.append(el('li', 'empty', out.error))
+    lines.append(...out.items.map(lineRow))
+  }
+  details.addEventListener('toggle', () => {
+    if (details.open) void fill()
+  })
+  const actions = el('div', 'memory-actions')
+  const remove = el('button', 'link memory-delete', 'Apagar')
+  remove.type = 'button'
+  remove.addEventListener('click', () => confirmDelete(actions, remove, `Apagar a conversa de ${longDay(c.day)}? Não dá para desfazer.`, () => deleteFromMemory({ conversation: c.id })))
+  actions.append(remove)
+  item.append(details, actions)
+  if (isOpen) details.open = true
+  return item
+}
+
+function hitEntry(hit) {
+  const item = el('li', 'entry memory-entry')
+  item.dataset.kind = 'memory'
+  const meta = el('p', 'meta')
+  meta.append(el('strong', '', longDay(hit.day)), el('span', '', `#${hit.conversation}`), el('span', '', whoSaid(hit)))
+  item.append(memoryMark(), meta, el('p', 'what', hit.text))
+  const actions = el('div', 'memory-actions')
+  const open = el('button', 'link', 'Ver a conversa')
+  open.type = 'button'
+  open.addEventListener('click', async () => {
+    const out = await hub('GET', `/memory/conversation?id=${hit.conversation}&limit=1`).catch(() => null)
+    if (!out?.id) return
+    memoryUi.list.replaceChildren(conversationEntry(out, { isOpen: true }))
+    memoryUi.more.hidden = true
+  })
+  actions.append(open)
+  item.append(actions)
+  return item
+}
+
+async function memoryStatsLine() {
+  const s = await hub('GET', '/memory/stats').catch(() => null)
+  if (!s || s.isAvailable === false) return 'A memória não está disponível agora. O que for dito fica guardado e entra nela depois.'
+  if (!s.events) return 'Nenhuma conversa guardada ainda.'
+  return `${s.conversations} ${s.conversations === 1 ? 'conversa' : 'conversas'} desde ${longDay(s.firstDay)}.`
+}
+
+async function loadMemory({ older = false } = {}) {
+  const query = memoryUi.query.value.trim()
+  memoryUi.stats.textContent = await memoryStatsLine()
+  if (query) {
+    const out = await hub('GET', `/memory/search?q=${encodeURIComponent(query)}&limit=30`).catch(error => ({ error: error.message, hits: [] }))
+    memoryUi.more.hidden = true
+    memoryUi.list.replaceChildren(...(out.hits?.length ? out.hits.map(hitEntry) : [el('li', 'empty', out.error ?? `Nada sobre "${query}".`)]))
+    return
+  }
+  const before = older && memoryOldest ? `&before=${memoryOldest}` : ''
+  const out = await hub('GET', `/memory/conversations?limit=30${before}`).catch(error => ({ error: error.message, conversations: [] }))
+  const rows = out.conversations ?? []
+  if (!older) memoryUi.list.replaceChildren()
+  if (rows.length) memoryOldest = rows.at(-1).startedAt
+  memoryUi.list.append(...rows.map(c => conversationEntry(c)))
+  if (!memoryUi.list.childElementCount) memoryUi.list.append(el('li', 'empty', out.error ?? 'As conversas com a Ceci aparecem aqui.'))
+  memoryUi.more.hidden = rows.length < 30
+}
+
+memoryUi.form.addEventListener('submit', event => {
+  event.preventDefault()
+  void loadMemory()
+})
+memoryUi.query.addEventListener('search', () => void loadMemory())
+memoryUi.more.addEventListener('click', () => void loadMemory({ older: true }))
+memoryUi.wipe.addEventListener('click', () =>
+  confirmDelete(memoryUi.wipe.parentElement, memoryUi.wipe, 'Apagar toda a memória da Ceci, com todas as conversas? Não dá para desfazer.', () => deleteFromMemory({ all: true })),
+)
 
 /* ---------- Settings ---------- */
 
@@ -610,6 +785,59 @@ const clientTools = {
     const out = await hub('GET', `/activity?session=${encodeURIComponent(session || '')}`).catch(error => ({ text: error.message }))
     return quoteUntrusted(out.text)
   },
+  // Ceci's permanent memory. Reading needs no "posso?"; what the sessions wrote comes back quoted.
+  luke_memory_search: async ({ query, from, to }) => {
+    const params = new URLSearchParams({ q: String(query ?? ''), limit: '8' })
+    if (from) params.set('from', String(from))
+    if (to) params.set('to', String(to))
+    const out = await hub('GET', `/memory/search?${params}`).catch(error => ({ error: error.message }))
+    if (out.error) return `Memory search failed: ${out.error}`
+    if (!out.hits?.length) return 'Nothing found in the memory for that.'
+    return out.hits.map(memoryLine).join('\n')
+  },
+  luke_memory_conversation: async ({ which, offset }) => {
+    const id = String(which ?? 'last').replace(/^#/, '') || 'last'
+    const out = await hub('GET', `/memory/conversation?id=${encodeURIComponent(id)}&offset=${Number(offset) || 0}&limit=60`).catch(error => ({ error: error.message }))
+    if (out.error) return out.error === 'No such conversation.' ? 'There is no such conversation in the memory.' : `Memory read failed: ${out.error}`
+    const head = `Conversation #${out.id}, ${out.day}${out.title ? `: ${out.title}` : ''}. ${out.events} lines in all${out.offset ? `, from line ${out.offset + 1}` : ''}.${out.summary ? ` Summary: ${out.summary}` : ''}`
+    const more = out.offset + out.items.length < out.events ? `\n(more: offset ${out.offset + out.items.length})` : ''
+    return `${head}\n${out.items.map(memoryLine).join('\n')}${more}`
+  },
+  luke_memory_timeline: async ({ from, to }) => {
+    const params = new URLSearchParams()
+    if (from) params.set('from', String(from))
+    if (to) params.set('to', String(to))
+    const out = await hub('GET', `/memory/timeline?${params}`).catch(error => ({ error: error.message }))
+    if (out.error) return `Memory read failed: ${out.error}`
+    const lines = [...(out.months ?? []).map(m => `${m.period}: ${m.text}`), ...(out.days ?? []).map(d => `${d.period}: ${d.text}`)]
+    return lines.length ? lines.join('\n') : 'Nothing in the memory for that period.'
+  },
+  // Deleting is for good: only after the user's own yes, like the tools that act on the computer.
+  luke_memory_delete: async args => {
+    if (!gate.allows()) return REFUSED
+    const scope = memoryScope(args)
+    if (!scope) return 'Say what to delete: a conversation, a day, some words, or all of it.'
+    const out = await hub('POST', '/memory/delete', { scope, how: 'voice' }).catch(error => ({ error: error.message }))
+    if (out.error) return `The memory was not changed: ${out.error}`
+    addLog('memory', `Apaguei ${out.deleted} ${out.deleted === 1 ? 'registro' : 'registros'}.`)
+    return out.deleted ? `Deleted ${out.deleted} lines from the memory.` : 'Nothing in the memory matched, so nothing was deleted.'
+  },
+}
+
+// One remembered line for the brain: when, which conversation, who, and what (quoted if not the user's).
+function memoryLine(hit) {
+  const who = { user: 'usuário', ceci: 'ceci', notice: 'aviso' }[hit.kind] ?? `${hit.kind}${hit.session ? ` ${hit.session}` : ''}`
+  const text = String(hit.text ?? '').replace(/\s+/g, ' ').slice(0, 600)
+  return `${hit.day} #${hit.conversation} ${who}: ${hit.untrusted ? quoteUntrusted(text) : text}`
+}
+
+// The scope of a delete the brain asked for: exactly one of conversation, day, search or all.
+function memoryScope({ conversation, day, search, all } = {}) {
+  if (all === true || all === 'true') return { all: true }
+  if (conversation !== undefined && conversation !== '' && Number.isInteger(Number(String(conversation).replace(/^#/, '')))) return { conversation: Number(String(conversation).replace(/^#/, '')) }
+  if (/^\d{4}-\d{2}(-\d{2})?$/.test(String(day ?? ''))) return { day: String(day) }
+  if (String(search ?? '').trim()) return { search: String(search) }
+  return null
 }
 
 // The microphone, or a clear error instead of a call stuck at "connecting".
@@ -679,6 +907,11 @@ async function startCall() {
         setCall('live')
         const snapshot = await hub('GET', '/activity').catch(() => ({ text: '' }))
         conversation?.sendContextualUpdate(`${sessionsLine()}\n[activity]\n${quoteUntrusted(snapshot.text)}`)
+        // The ElevenLabs agent has no access to the memory otherwise: what it holds goes in now.
+        if (engine?.name === 'elevenlabs') {
+          const remembered = await hub('GET', '/memory/digest').catch(() => ({ text: '' }))
+          if (remembered.text) conversation?.sendContextualUpdate(`[memory]\n${remembered.text}`)
+        }
       },
       onDisconnect: details => {
         // A session ended because its call was ended while it connected: nothing to show.
@@ -711,6 +944,7 @@ async function startCall() {
       },
       onMessage: ({ source, message }) => {
         if (!isCurrent()) return
+        rememberSaid(source, message)
         if (source === 'user') {
           gate.userSpoke(message)
           const change = quiet.userSpoke(message)
@@ -744,6 +978,8 @@ async function endCall() {
   speech.clear()
   quiet.clear()
   await current?.endSession().catch(() => {})
+  // The last words reach the memory before the call is closed there.
+  await flushMemory()
   setCall('idle', 'Chamada encerrada. Toque em Chamar para falar de novo.')
 }
 

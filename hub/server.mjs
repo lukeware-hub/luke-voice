@@ -19,6 +19,8 @@ import { createNotices } from './notices.mjs'
 import { COMMON_QUESTIONS, MAX_PICK_CHARS, createQuestionTakes, isYesNoQuestion } from './question-pick.mjs'
 import { route as routeUtterance } from './router.mjs'
 import { withoutPromptLeak } from './asr-leak.mjs'
+import { dayOf, openMemory, rangeOf } from './memory.mjs'
+import { quoteUntrusted } from '../window/guard.js'
 import { contentType, vendorFile } from './vendor.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -28,6 +30,14 @@ const MAX_BODY = 64 * 1024
 const MAX_AUDIO = 4 * 1024 * 1024
 const MAX_TTS_CHARS = 360
 const MAX_ACTIVITY = 60
+// Ceci's memory (hub/memory.mjs): a session's report kinds as memory kinds, and the most text kept
+// per event (a whole tool output can be long; the memory keeps it, up to this).
+const SESSION_KINDS = { prompt: 'session_prompt', tool: 'session_tool', failure: 'session_failure', done: 'session_done', task_done: 'task_result', task_progress: 'session_info', attention: 'session_info', info: 'session_info' }
+const MEMORY_TEXT = 100_000
+// What the brain reads of the memory on every turn: each hit clipped, the whole block capped.
+const MEMORY_HIT_CHARS = 300
+const MEMORY_BLOCK_CHARS = 3000
+const WEEKDAYS = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado']
 const ACK_WAIT_MS = 15_000
 // The router answers in ~0.3 s; past this, the utterance goes to the brain instead.
 const ROUTER_WAIT_MS = 1500
@@ -338,7 +348,7 @@ export function createEngineRunner({ engine, setDownload, warmQuestions = () => 
   }
 }
 
-export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, engine = null, profile = () => null, voiceRef = null, onLocalVoice = () => {}, onSetup = () => ({ started: false }), engineState = () => 'off', macVoice = () => null, macVoiceGender = () => null, macVoiceSiri = () => null, macSay = sayWav, platform = process.platform, log = () => {}, onShutdown = () => process.exit(0), questionsDir = join(stateDir(), 'cache', 'questions'), staleMs = STALE_SESSION_MS, sweepMs = 10_000, sttWaitMs = STT_WAIT_MS, clock = Date.now, noticesFile = stateFile('notices.json'), reopenMs = REOPEN_FOR_NOTICE_MS, windowLog = stateFile('window.log') }) {
+export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, engine = null, profile = () => null, voiceRef = null, onLocalVoice = () => {}, onSetup = () => ({ started: false }), engineState = () => 'off', macVoice = () => null, macVoiceGender = () => null, macVoiceSiri = () => null, macSay = sayWav, platform = process.platform, log = () => {}, onShutdown = () => process.exit(0), questionsDir = join(stateDir(), 'cache', 'questions'), staleMs = STALE_SESSION_MS, sweepMs = 10_000, sttWaitMs = STT_WAIT_MS, clock = Date.now, noticesFile = stateFile('notices.json'), reopenMs = REOPEN_FOR_NOTICE_MS, windowLog = stateFile('window.log'), memory = null, summarizeEveryMs = 120_000 }) {
   const sessions = new Map() // token -> session
   const launches = new Map() // one-time launch code -> when it expires
   const replaced = new Set() // tokens a newer subscription of the same Claude session took over
@@ -369,6 +379,44 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
   }
   rememberKey(key)
   let lastBusy = Date.now()
+
+  // Ceci's memory. Recording never fails a request: memory.append() keeps what it cannot write.
+  const remember = event => {
+    if (!memory) return
+    try {
+      memory.append(event)
+    } catch (error) {
+      log(`memory: ${error?.message ?? error}`)
+    }
+  }
+
+  // The memory as the brain reads it: the life summary, the last conversations and the hits for
+  // what the user just said. Hits from the sessions are quoted as untrusted, like the activity.
+  const memoryBlock = text => {
+    if (!memory?.isAvailable) return ''
+    try {
+      const d = memory.digest(text)
+      const lines = []
+      if (d.firstDay) lines.push(`Primeira conversa: ${d.firstDay}.`)
+      if (d.life) lines.push(`Resumo de tudo: ${d.life}`)
+      if (d.recent.length) lines.push(`Últimas conversas: ${d.recent.map(c => `${c.day} (#${c.id})${c.title ? ` ${c.title}` : ''}`).join('; ')}.`)
+      for (const hit of d.hits) {
+        const who = hit.kind === 'user' ? 'usuário' : hit.kind === 'ceci' ? 'ceci' : hit.kind
+        const text = hit.text.replace(/\s+/g, ' ').slice(0, MEMORY_HIT_CHARS)
+        lines.push(`${hit.day} (#${hit.conversation}) ${who}: ${hit.untrusted ? quoteUntrusted(text) : text}`)
+      }
+      // Whole lines only, so an untrusted quote is never cut open.
+      let block = ''
+      for (const line of lines) {
+        if (block.length + line.length + 1 > MEMORY_BLOCK_CHARS) break
+        block += `${block ? '\n' : ''}${line}`
+      }
+      return block
+    } catch (error) {
+      log(`memory: ${error?.message ?? error}`)
+      return ''
+    }
+  }
 
   // The voice the window uses: the one chosen in Claude Code (config or /luke-voice voz), else
   // LUKE_VOICE_PROVIDER, else ElevenLabs while a key is set, else the free local voice.
@@ -440,6 +488,103 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     sendRoster()
   }
 
+  // What a command to a session answered, kept in the memory.
+  const recorded = (result, session) => {
+    remember({ kind: 'tool_result', text: `${result.ok ? 'Feito' : 'Falhou'}: ${result.message ?? ''}`.trim(), session: session.name, untrusted: true })
+    return result
+  }
+
+  // ---- Ceci's memory: reading, deleting, summaries ----
+
+  const num = value => (value === null || value === undefined || value === '' ? null : Number.isFinite(Number(value)) ? Number(value) : null)
+  // A period from the window, the brain or a command: a date ("2026-11-03"), a month ("2026-11") or ms.
+  const edge = (value, side) => {
+    if (value === null || value === undefined || value === '') return null
+    const range = rangeOf(/^\d+$/.test(String(value)) ? Number(value) : String(value))
+    return range ? range[side] : null
+  }
+
+  // The memory's routes, the same for the call window and a session's mod. `how` says who deletes.
+  const memoryRoutes = how => ({
+    'GET /memory/stats': () => [200, memory ? memory.stats() : { isAvailable: false }],
+    // The memory as the brain reads it, for a voice whose brain is not ours (ElevenLabs): sent at call start.
+    'GET /memory/digest': () => [200, { text: memoryBlock('') }],
+    'GET /memory/search': (_none, _body, url) => {
+      if (!memory) return [503, { error: 'The memory is not available.' }]
+      const p = url.searchParams
+      const hits = memory.search(p.get('q') ?? '', { from: edge(p.get('from'), 0), to: edge(p.get('to'), 1), kind: p.get('kind') || null, limit: num(p.get('limit')) ?? 10 })
+      return [200, { hits }]
+    },
+    'GET /memory/conversations': (_none, _body, url) => {
+      if (!memory) return [503, { error: 'The memory is not available.' }]
+      const p = url.searchParams
+      return [200, { conversations: memory.conversations({ before: num(p.get('before')), limit: num(p.get('limit')) ?? 30, includeBackground: p.get('background') === '1' }) }]
+    },
+    'GET /memory/conversation': (_none, _body, url) => {
+      if (!memory) return [503, { error: 'The memory is not available.' }]
+      const p = url.searchParams
+      const which = p.get('id') ?? 'last'
+      const found = memory.conversation(/^\d+$/.test(which) ? Number(which) : which, { offset: num(p.get('offset')) ?? 0, limit: num(p.get('limit')) ?? 200, includeBackground: true })
+      return found ? [200, found] : [404, { error: 'No such conversation.' }]
+    },
+    'GET /memory/timeline': (_none, _body, url) => {
+      if (!memory) return [503, { error: 'The memory is not available.' }]
+      const p = url.searchParams
+      return [200, memory.timeline({ from: edge(p.get('from'), 0), to: edge(p.get('to'), 1) })]
+    },
+    'POST /memory/preview': (_none, body) => {
+      if (!memory) return [503, { error: 'The memory is not available.' }]
+      return [200, memory.preview(body.scope ?? {})]
+    },
+    // Deleting is for good. The window and the commands confirm before they ask; the voice only
+    // asks after the user's yes to "posso?" (the brain's luke_memory_delete is a pending tool).
+    'POST /memory/delete': (_none, body) => {
+      if (!memory) return [503, { error: 'The memory is not available.' }]
+      const scope = body.scope ?? {}
+      const result = memory.deleteMemory(scope, { how: String(body.how ?? how).slice(0, 20) })
+      broadcast({ type: 'memory', deleted: result.deleted })
+      return [200, { ok: true, ...result }]
+    },
+  })
+
+  // Summaries are written by a session's brain, one batch at a time, while no call is live.
+  let isSummarizing = false
+  let summaryTimer = null
+  async function summarize() {
+    if (!memory?.isAvailable || isSummarizing || call === 'live') return
+    const session = [...sessions.values()].find(s => s.name === focused && s.canSummarize) ?? [...sessions.values()].find(s => s.canSummarize)
+    if (!session) return
+    const items = memory.pendingSummaries({ max: 4 })
+    if (items.length === 0) return
+    isSummarizing = true
+    try {
+      const result = await enqueue(session, { type: 'summarize', items: items.map(({ level, period, toEvent, day, text }) => ({ level, period, toEvent, day, text })) }, BRAIN_WAIT_MS * 3)
+      if (!result.ok) return log(`memory: summaries not written: ${result.message}`)
+      let written = []
+      try {
+        written = JSON.parse(result.message)
+      } catch {
+        return log('memory: summaries came back not as JSON')
+      }
+      let saved = 0
+      for (const item of Array.isArray(written) ? written : []) {
+        const asked = items.find(i => i.level === item?.level && i.period === String(item?.period))
+        if (asked && memory.saveSummary({ ...asked, text: String(item.text ?? ''), title: item.title ?? null })) saved++
+      }
+      if (saved) log(`memory: wrote ${saved} summaries`)
+      // More may be waiting (a day once its conversations are done, then the month, then life).
+      if (saved) scheduleSummaries(1000)
+    } finally {
+      isSummarizing = false
+    }
+  }
+  function scheduleSummaries(ms) {
+    if (!memory?.isAvailable) return
+    clearTimeout(summaryTimer)
+    summaryTimer = setTimeout(() => void summarize().catch(error => log(`memory: ${error?.message ?? error}`)), ms)
+    summaryTimer.unref?.()
+  }
+
   function activityText(session) {
     if (!session) return 'No Claude session is connected.'
     const lines = session.activity.map(a => `${a.kind}: ${a.text}`)
@@ -451,8 +596,11 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     // /luke-voice setup: prepare the free voice again (download what is missing, pick the profile)
     // in the background; /luke-voice status shows the progress.
     'POST /setup': () => [200, onSetup()],
+    ...memoryRoutes('command'),
     'POST /events': (session, body) => {
       const events = Array.isArray(body.events) ? body.events.slice(0, 50) : []
+      // Everything the sessions report is kept in Ceci's memory, marked as not the user's words.
+      for (const event of events) remember({ kind: SESSION_KINDS[String(event.kind)] ?? 'session_info', text: String(event.text ?? '').slice(0, MEMORY_TEXT), session: session.name, untrusted: true })
       for (const event of events) {
         const item = { kind: String(event.kind ?? 'info').slice(0, 20), text: String(event.text ?? '').slice(0, 2000) }
         session.activity.push(item)
@@ -599,14 +747,19 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
         const prompt = String(body.prompt ?? '').trim()
         if (!prompt) return [400, { ok: false, message: 'The prompt is empty.' }]
         const when = body.when === 'after_current' ? 'after_current' : 'now'
-        return [200, await enqueue(session, { type: 'send', prompt: prompt.slice(0, 8000), when })]
+        remember({ kind: 'task', text: `Mandar ao Claude: ${prompt}`, session: session.name, meta: { type: 'send', when } })
+        return [200, recorded(await enqueue(session, { type: 'send', prompt: prompt.slice(0, 8000), when }), session)]
       }
       if (body.type === 'task') {
         const task = String(body.task ?? '').trim()
         if (!task) return [400, { ok: false, message: 'The task is empty.' }]
-        return [200, await enqueue(session, { type: 'task', task: task.slice(0, 8000) })]
+        remember({ kind: 'task', text: `Tarefa: ${task}`, session: session.name, meta: { type: 'task' } })
+        return [200, recorded(await enqueue(session, { type: 'task', task: task.slice(0, 8000) }), session)]
       }
-      if (body.type === 'stop') return [200, await enqueue(session, { type: 'stop' })]
+      if (body.type === 'stop') {
+        remember({ kind: 'task', text: 'Parar o Claude.', session: session.name, meta: { type: 'stop' } })
+        return [200, recorded(await enqueue(session, { type: 'stop' }), session)]
+      }
       return [400, { ok: false, message: 'Unknown command.' }]
     },
     'GET /config': () => {
@@ -631,11 +784,18 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
         sessions: roster(),
         focused,
         persona: personaNow(),
+        today: `${dayOf(clock())}, ${WEEKDAYS[new Date(clock()).getDay()]}`,
+        memory: memoryBlock(['user', 'tool_result'].includes(body.kind) || !body.kind ? clip(body.text, 500) : ''),
       }
+      // A tool's answer read by the brain is kept too, as data from the computer.
+      if (request.kind === 'tool_result') remember({ kind: 'tool_result', text: request.text, untrusted: true })
       const result = await enqueue(session, { type: 'think', request }, BRAIN_WAIT_MS)
       if (!result.ok) return [502, { error: result.message }]
       try {
         const reply = JSON.parse(result.message)
+        for (const [field, tool] of [['tool', reply.tool], ['pending', reply.pending]]) {
+          if (tool?.name) remember({ kind: 'tool_call', text: `${field === 'pending' ? 'Perguntou antes de usar' : 'Usou'} ${tool.name}: ${JSON.stringify(tool.args ?? {})}`, meta: { field, tool } })
+        }
         return [200, { say: String(reply.say ?? ''), tool: reply.tool ?? null, pending: reply.pending ?? null }]
       } catch {
         return [502, { error: 'The brain answered something that is not JSON.' }]
@@ -662,8 +822,30 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       return [200, { text: session ? activityText(session) : missing(name) }]
     },
     'POST /call': (_none, body) => {
+      const was = call
       call = ['idle', 'connecting', 'live', 'error'].includes(body.state) ? body.state : 'idle'
+      // A call that goes live is a new conversation in the memory; one that ends closes it, and its
+      // summary is written soon after.
+      if (memory && call === 'live' && was !== 'live') memory.startCall({ persona: personaNow(), voice: voiceProvider() })
+      if (memory && call !== 'live' && was === 'live') {
+        memory.endCall()
+        scheduleSummaries(65_000)
+      }
       sendRoster()
+      return [200, { ok: true }]
+    },
+    ...memoryRoutes('window'),
+    // What the user and Ceci said, sent by the window in batches. Automatic notices are kept as such.
+    'POST /memory/events': (_none, body) => {
+      const events = Array.isArray(body.events) ? body.events.slice(0, 200) : []
+      const at = clock()
+      for (const event of events) {
+        const kind = ['user', 'ceci', 'notice'].includes(event?.kind) ? event.kind : null
+        if (!kind) continue
+        // A time from the window, if sane (a batch held a while is still in order); else now.
+        const when = Number(event.at)
+        remember({ kind, text: String(event.text ?? '').slice(0, MEMORY_TEXT), at: Number.isFinite(when) && Math.abs(at - when) < 86_400_000 ? when : at })
+      }
       return [200, { ok: true }]
     },
     'POST /focus': (_none, body) => {
@@ -936,7 +1118,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
           replaced.add(previous.token)
           wake(previous)
         }
-        const session = { token, sessionId, name: previous?.name ?? uniqueName(body.cwd), cwd: String(body.cwd ?? ''), canThink: typeof body.version === 'string' || typeof body.provider === 'string', inbox: previous?.inbox ?? [], waiters: [], activity: [], isBusy: false, needsYou: false, seenAt: Date.now() }
+        const session = { token, sessionId, name: previous?.name ?? uniqueName(body.cwd), cwd: String(body.cwd ?? ''), canThink: typeof body.version === 'string' || typeof body.provider === 'string', canSummarize: body.canSummarize === true, inbox: previous?.inbox ?? [], waiters: [], activity: [], isBusy: false, needsYou: false, seenAt: Date.now() }
         sessions.set(token, session)
         focused ??= session.name
         sendRoster()
@@ -951,7 +1133,8 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
         return
       }
 
-      if (sessionRoutes[route]) {
+      // The memory's routes are both: a request with no session token goes on to the window's.
+      if (sessionRoutes[route] && (bearer || !windowRoutes[route])) {
         const session = sessions.get(bearer)
         // A reloaded mod may still ack a command it pulled before the reload: acks are by command id.
         const isLateAck = route === 'POST /ack' && replaced.has(bearer)
@@ -1065,6 +1248,13 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     if (sessions.size > 0 || streams.size > 0) lastBusy = now
   }, sweepMs)
   sweep.unref()
+  // Summaries left to write (a day that ended, a month) are looked for now and then.
+  const summaries = setInterval(() => void summarize().catch(error => log(`memory: ${error?.message ?? error}`)), summarizeEveryMs)
+  summaries.unref()
+  server.on('close', () => {
+    clearInterval(summaries)
+    clearTimeout(summaryTimer)
+  })
 
   server.on('close', () => clearInterval(sweep))
   server.idleFor = () => Date.now() - lastBusy
@@ -1103,7 +1293,16 @@ if (isMainModule(import.meta.url, process.argv[1])) {
     })
   }
   lookForMacVoice()
+  // Ceci's memory: created here when it is missing (no question asked), opened when it is there.
+  let memory = null
+  try {
+    memory = openMemory({ log })
+    log(`memory: ${memory.file}`)
+  } catch (error) {
+    log(`memory: could not open it: ${error?.message ?? error}`)
+  }
   const hub = createHub({
+    memory,
     serviceToken,
     windowKey,
     apiKey: process.env.ELEVENLABS_API_KEY ?? '',

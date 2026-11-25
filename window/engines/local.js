@@ -24,6 +24,7 @@ const DONE_SAY = {
   luke_run_task: 'Comecei, te aviso quando terminar.',
   luke_send_to_claude: 'Mandei para o Claude.',
   luke_stop_claude: STOPPED,
+  luke_memory_delete: 'Apaguei da memória.',
 }
 const DENIED = 'Tá bom, deixei pra lá.'
 // Said at once when the brain takes longer than ACK_AFTER_MS on a request, so the user knows
@@ -52,7 +53,7 @@ const ECHO_MARGIN = 2
 // engine (it makes audio at ~2x real time), little enough not to be heard as a wait.
 const FIRST_AUDIO_S = 0.25
 // Tool answers that mean it worked; anything else goes back to the brain to explain.
-const TOOL_OK = /^(Started|Claude started|Added as a note|Queued|Stopped|Sent)/i
+const TOOL_OK = /^(Started|Claude started|Added as a note|Queued|Stopped|Sent|Deleted)/i
 
 // The acknowledgements, made once per voice and kept for the page: a second call in the same window
 // plays them with no new synthesis. voice ('native', or the browser model) -> text -> audio.

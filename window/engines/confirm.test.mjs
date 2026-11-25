@@ -62,3 +62,17 @@ test('a yes the fast path missed, read as a yes by the brain, runs the action Ce
   const changed = { name: 'luke_run_task', args: { task: 'só na pasta site' } }
   assert.deepEqual(decide({ kind: 'user', reply: { say: 'Só na pasta site, posso?', tool: null, pending: changed }, now: 3, answering: asked }).pending, { tool: changed, at: 3 })
 })
+
+test('deleting from the memory waits for a "sim", like the tools that act on the computer; reading it runs at once', () => {
+  const del = { name: 'luke_memory_delete', args: { conversation: 3 } }
+  const asked = decide({ kind: 'user', reply: { say: 'Apago a conversa #3, posso?', tool: null, pending: del }, now: 1 })
+  assert.deepEqual(asked, { action: 'pend', say: 'Apago a conversa #3, posso?', pending: { tool: del, at: 1 } })
+  // Called at once, it only asks.
+  const atOnce = decide({ kind: 'user', reply: { say: 'Apaguei.', tool: del, pending: null }, now: 2 })
+  assert.equal(atOnce.action, 'pend')
+  assert.match(atOnce.say, /posso apagar/i)
+  // A notice never deletes.
+  assert.equal(decide({ kind: 'notice', reply: { say: '', tool: del, pending: null }, now: 3 }).action, 'say')
+  const search = { name: 'luke_memory_search', args: { query: 'girassol' } }
+  assert.equal(decide({ kind: 'user', reply: { say: '', tool: search, pending: null }, now: 4 }).action, 'run')
+})
