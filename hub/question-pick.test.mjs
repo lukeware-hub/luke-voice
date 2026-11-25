@@ -53,7 +53,7 @@ test('in the background, takes are made only while no live line is wanted, and a
     return Promise.resolve(seed >= 104 ? rising : flat)
   }
   const dir = mkdtempSync(join(tmpdir(), 'luke-voice-takes-'))
-  const takes = createQuestionTakes({ say, dir, voiceKey: 'v', idleMs: 20 })
+  const takes = createQuestionTakes({ say, dir, voiceKey: 'v', idleMs: 20, maxTakes: 9 })
   takes.warm(['Posso?'])
   await new Promise(r => setTimeout(r, 60))
   assert.deepEqual(calls, [101])
@@ -86,7 +86,7 @@ test('while the voice server is down, the background search backs off instead of
     return isUp ? flat : null
   }
   const dir = mkdtempSync(join(tmpdir(), 'luke-voice-takes-'))
-  const takes = createQuestionTakes({ say: (_text, seed) => say(seed), dir, voiceKey: 'v', idleMs: 0, retryMs: 50 })
+  const takes = createQuestionTakes({ say: (_text, seed) => say(seed), dir, voiceKey: 'v', idleMs: 0, retryMs: 50, maxTakes: 9 })
   takes.warm(['Posso?'])
   // Retries at about 0, 50, 150 and 350 ms: never a take every few milliseconds.
   await new Promise(r => setTimeout(r, 300))

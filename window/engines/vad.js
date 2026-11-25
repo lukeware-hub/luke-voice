@@ -9,7 +9,7 @@ export const RATE = 16_000
 const DEFAULTS = {
   minLevel: 0.012, // below this RMS nothing counts as speech, however quiet the room
   ratio: 3, // speech is this many times louder than the noise floor
-  bargeRatio: 2.5, // while Ceci speaks, the bar is this many times higher
+  bargeRatio: 3, // while Ceci speaks, the bar is this many times higher
   startFrames: 3, // ~100 ms of speech starts an utterance
   bargeFrames: 8, // ~250 ms of loud speech interrupts Ceci
   endFrames: 40, // ~1.3 s of silence ends it (breaths mid-sentence last up to ~1 s)
@@ -40,7 +40,7 @@ export function rms(frame) {
   return Math.sqrt(sum / (frame.length || 1))
 }
 
-// push(frame, { isSpeaking }) returns null, or one event: { type: 'start' }, { type: 'barge' },
+// push(frame, { isSpeaking, echo }) returns null, or one event: { type: 'start' }, { type: 'barge' },
 // { type: 'end', audio: Float32Array }, { type: 'drop' } for a blip too short to transcribe, or
 // { type: 'candidate', audio, id } once per pause of candidateFrames. The caller asks the turn model
 // and, if the user is done, calls endNow(id) to get the 'end' event without waiting longer.
@@ -87,12 +87,16 @@ export function createVad(options = {}) {
     get floor() {
       return floor
     },
-    push(frame, { isSpeaking = false } = {}) {
+    push(frame, { isSpeaking = false, echo = 0 } = {}) {
       const level = rms(frame)
       const normalBar = Math.max(o.minLevel, floor * o.ratio)
       // The higher bar only keeps Ceci's voice from starting a turn: once the user is talking, Ceci
       // starting a line must not make their words count as quiet and end the turn under them.
-      const bar = normalBar * (isSpeaking && !inSpeech ? o.bargeRatio : 1)
+      // `echo` is how loud Ceci's own voice is expected in the mic right now (local.js learns it
+      // from her output level): while she speaks it is never speech, in or out of a turn, so her
+      // echo neither interrupts her nor keeps a turn going after the user stopped.
+      const echoBar = isSpeaking ? echo : 0
+      const bar = Math.max(normalBar * (isSpeaking && !inSpeech ? o.bargeRatio : 1), echoBar)
       const isLoud = level >= bar
 
       // The room got louder: every frame above the bar for creepFrames, and Ceci quiet (her voice

@@ -24,3 +24,13 @@ export function isNotSpeech(text) {
   const words = normalize(text)
   return !words || PHANTOM_ONLY.test(words)
 }
+
+// Ceci's own voice, heard back through the mic and written down: most of the words are ones she
+// just said. Only asked of a turn that started while she spoke (a barge-in), so a user who answers
+// with her words ("pode rodar os testes") in a turn of their own is never taken for her echo.
+export function isEcho(text, said, share = 0.7) {
+  const words = normalize(text).split(' ').filter(Boolean)
+  if (words.length === 0) return false
+  const hers = new Set(normalize(said).split(' ').filter(Boolean))
+  return words.filter(word => hers.has(word)).length / words.length >= share
+}

@@ -216,3 +216,18 @@ test('while Ceci talks and the user is not in a turn, the high barge bar still h
   assert.deepEqual(feed(vad, Array(60).fill(0).map(() => tone(0.02)), { isSpeaking: true }), [])
   assert.equal(vad.inSpeech, false)
 })
+
+test("Ceci's expected echo raises the bar while she speaks: her echo neither barges in nor keeps a turn open", () => {
+  // Her echo at 0.06 would barge in with the plain bar (3 x 0.012); with the echo level given, it does not.
+  assert.equal(feed(createVad(), Array(40).fill(0).map(() => tone(0.06)), { isSpeaking: true })[0]?.type, 'barge')
+  assert.deepEqual(feed(createVad(), Array(40).fill(0).map(() => tone(0.06)), { isSpeaking: true, echo: 0.1 }), [])
+  // The user, louder than her echo, still barges in.
+  const vad = createVad()
+  const events = feed(vad, Array(20).fill(0).map(() => tone(0.3)), { isSpeaking: true, echo: 0.1 })
+  assert.equal(events[0]?.type, 'barge')
+  // They stop and only her echo is left: that counts as quiet, so the turn ends.
+  const after = feed(vad, Array(45).fill(0).map(() => tone(0.06)), { isSpeaking: true, echo: 0.1 })
+  assert.deepEqual(after.map(e => e.type), ['end'])
+  // Without Ceci speaking, the echo level is ignored.
+  assert.equal(feed(createVad(), Array(10).fill(0).map(() => tone(0.06)), { echo: 0.1 })[0]?.type, 'start')
+})

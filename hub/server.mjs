@@ -1008,10 +1008,12 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
   server.on('close', () => clearInterval(sweep))
   server.idleFor = () => Date.now() - lastBusy
   server.setEngineDownload = setEngineDownload
-  // Once the engine is up: the questions Ceci asks most get their natural takes in the background.
-  // Only while the voice is up and has its reference: a take asked of a server that is down comes
-  // back empty at once.
+  // Once the engine is up, only with LUKE_VOICE_WARM_QUESTIONS=1: the questions Ceci asks most get
+  // their natural takes in the background. Off by default, so a hub that just started leaves the GPU
+  // alone; a question still gets its takes the first time Ceci asks it. Only while the voice is up
+  // and has its reference: a take asked of a server that is down comes back empty at once.
   server.warmQuestions = () => {
+    if (process.env.LUKE_VOICE_WARM_QUESTIONS !== '1') return
     if (engine?.url('tts') && loadVoiceRef()) questionTakes().warm(COMMON_QUESTIONS)
   }
   server.on('close', () => questions?.stop())

@@ -509,13 +509,14 @@ code {
   background: var(--red);
 }
 
+/* Opacity only: the compositor runs it, with no repaint every frame (a growing box-shadow did). */
 @keyframes beacon {
-  0% {
-    box-shadow: 0 0 0 0 var(--green-soft);
-  }
-  70%,
+  0%,
   100% {
-    box-shadow: 0 0 0 7px transparent;
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
   }
 }
 
@@ -1773,6 +1774,15 @@ body[data-compact='true'] .ghost {
   .stage {
     padding-bottom: 18px;
   }
+}
+
+/* No call, or the window hidden: the decorative loops stop, so an idle window costs no CPU or GPU. */
+body:not([data-call='live']):not([data-call='connecting']) .orb .halo,
+body:not([data-call='live']):not([data-call='connecting']) .wave,
+body[data-hidden='true'] *,
+body[data-hidden='true'] *::before,
+body[data-hidden='true'] *::after {
+  animation-play-state: paused !important;
 }
 
 @media (prefers-reduced-motion: reduce) {

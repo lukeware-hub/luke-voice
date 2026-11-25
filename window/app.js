@@ -288,6 +288,8 @@ function setMuted(next) {
 
 function setCall(state, caption) {
   callState = state
+  // The stylesheet pauses the decorative loops while no call runs.
+  document.body.dataset.call = state
   setStatus(state)
   const isLive = state === 'live' || state === 'connecting'
   ui.call.dataset.live = String(isLive)
@@ -742,12 +744,19 @@ ui.winClose.addEventListener('click', () => void closeWindow())
 window.addEventListener('resize', syncMaxIcon)
 window.addEventListener('beforeunload', () => void conversation?.endSession())
 
-// The orb follows the agent's voice.
+// The orb follows the agent's voice: every frame while she speaks, and only four times a second
+// otherwise (the level is 0 then), so an idle window does not run a loop at the display's rate.
+let shownLevel = ''
 function animate() {
-  const level = conversation && mode === 'speaking' ? Math.min(1, conversation.getOutputVolume() * 2.5) : 0
-  ui.orb.style.setProperty('--level', level.toFixed(3))
-  requestAnimationFrame(animate)
+  const isSpeaking = Boolean(conversation) && mode === 'speaking' && !document.hidden
+  const level = (isSpeaking ? Math.min(1, conversation.getOutputVolume() * 2.5) : 0).toFixed(3)
+  if (level !== shownLevel) ui.orb.style.setProperty('--level', (shownLevel = level))
+  if (isSpeaking) requestAnimationFrame(animate)
+  else setTimeout(animate, 250)
 }
+const syncHidden = () => (document.body.dataset.hidden = String(document.hidden))
+document.addEventListener('visibilitychange', syncHidden)
+syncHidden()
 
 ui.log.append(el('li', 'empty', 'Nada por aqui ainda. O que você pedir por voz aparece nesta lista.'))
 
