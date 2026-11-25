@@ -3,6 +3,8 @@
 // it a per-call token. The client comes from a pinned CDN file checked with its integrity hash,
 // loaded only when an ElevenLabs call starts: the free voice never waits on the CDN.
 
+import { pickGreeting } from '/engines/greetings.js'
+
 export const name = 'elevenlabs'
 
 export const CLIENT_URL = 'https://cdn.jsdelivr.net/npm/@elevenlabs/client@1.26.0/dist/lib.iife.js'
@@ -50,7 +52,9 @@ export async function startSession({ hub, prepare = async () => {}, windowKey: _
   const { token } = await hub('POST', '/token')
   const { Conversation } = await client
   await prepare()
-  return Conversation.startSession({ conversationToken: token, connectionType: 'webrtc', ...options })
+  // A different greeting each call (greetings.js); agent/agent.json allows this override.
+  const overrides = { ...options.overrides, agent: { firstMessage: pickGreeting(), ...options.overrides?.agent } }
+  return Conversation.startSession({ conversationToken: token, connectionType: 'webrtc', ...options, overrides })
 }
 
 // What to say when the call drops in its first seconds.

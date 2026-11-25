@@ -91,7 +91,7 @@ To install without questions, set `LUKE_VOICE_NO_PROMPT=1` before you run it; ad
 
 **On a Mac:** the first call asks whether Chrome may use the microphone: click **Allow**. A Mac with Apple silicon gets the natural voice; an Intel Mac gets the light voice.
 
-**Done when:** you hear "Oi! Eu sou a Ceci. O que vamos fazer hoje?". If anything is missing, type `/luke-voice help`: it checks your setup and says what to fix.
+**Done when:** you hear Ceci greet you, for example "Oi! Eu sou a Ceci. O que vamos fazer hoje?" (the words change each call). If anything is missing, type `/luke-voice help`: it checks your setup and says what to fix.
 
 ## Use
 

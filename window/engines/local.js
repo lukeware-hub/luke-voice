@@ -3,6 +3,7 @@
 // and Kokoro speaks it. Only the brain leaves the machine (through the hub, to Claude).
 // It gives the window the same session the ElevenLabs engine does.
 import { decide, liveAction } from '/engines/confirm.js'
+import { pickGreeting } from '/engines/greetings.js'
 import { isConfirm, isDeny, stopTarget } from '/engines/fast-path.js'
 import { speechChunks } from '/engines/speech-text.js'
 import { trimContext } from '/engines/context.js'
@@ -13,7 +14,6 @@ import { FRAME, RATE, createVad, rms } from '/engines/vad.js'
 
 export const name = 'local'
 
-const GREETING = 'Oi! Eu sou a Ceci. O que vamos fazer hoje?'
 const BRAIN_FAILED = 'Não consegui pensar numa resposta agora. Tente de novo.'
 const STOPPED = 'Parei o Claude.'
 const NOT_STOPPED = 'O Claude não está trabalhando agora.'
@@ -561,7 +561,8 @@ export async function startSession({
 
   // "Certo." while the brain thinks. Not over Ceci's own voice, and never added to the conversation.
   function sayAck() {
-    if (isEnded || isStale() || mode === 'speaking' || ackAudio.size === 0) return
+    // `saying`: a line (the greeting) is still being made; an ack now would cut it off.
+    if (isEnded || isStale() || mode === 'speaking' || saying !== 0 || ackAudio.size === 0) return
     const text = ACKS[nextAck++ % ACKS.length]
     const made = ackAudio.get(text)
     if (!made) return
@@ -804,10 +805,10 @@ export async function startSession({
   }
 
   onConnect()
-  // Ceci greets like the ElevenLabs agent does (agent/agent.json first_message), so a call
-  // sounds the same with either voice and the user knows she is listening.
-  // Then, while nobody talks, the acknowledgements. A failed greeting is only logged.
-  void say(isLuke ? GREETING.replace('Eu sou a Ceci', 'Eu sou o Luke') : GREETING.replace('Ceci', herName))
+  // Ceci greets from the same lines as the ElevenLabs agent (greetings.js), a different one each
+  // call, so the user knows she is listening. Then, while nobody talks, the acknowledgements.
+  // A failed greeting is only logged.
+  void say(pickGreeting({ name: isLuke ? 'Luke' : herName }))
     .catch(error => console.warn(`[luke-voice] the greeting failed: ${error?.message ?? error}`))
     .then(warmAcks)
   return session

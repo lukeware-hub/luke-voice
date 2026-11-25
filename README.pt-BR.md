@@ -91,7 +91,7 @@ Para instalar sem perguntas, defina `LUKE_VOICE_NO_PROMPT=1` antes de rodar; acr
 
 **No Mac:** na primeira chamada, o Mac pergunta se o Chrome pode usar o microfone: clique em **Permitir**. Um Mac com chip Apple fica com a voz natural; um Mac com Intel fica com a voz leve.
 
-**Deu certo quando:** você ouve "Oi! Eu sou a Ceci. O que vamos fazer hoje?". Se faltar alguma coisa, digite `/luke-voice help`: ele confere a sua instalação e diz o que arrumar.
+**Deu certo quando:** você ouve a Ceci te cumprimentar, por exemplo "Oi! Eu sou a Ceci. O que vamos fazer hoje?" (as palavras mudam a cada chamada). Se faltar alguma coisa, digite `/luke-voice help`: ele confere a sua instalação e diz o que arrumar.
 
 ## Como usar
 
