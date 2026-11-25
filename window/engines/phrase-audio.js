@@ -34,3 +34,15 @@ export function trimEdges(audio, rate, { start = false, end = false } = {}) {
   const to = end ? Math.min(audio.length, (last + 1) * frame + keep) : audio.length
   return audio.subarray(from, to)
 }
+
+// Whether a reply's held phrases may start playing. Once a phrase plays, the next must be ready by
+// the time it and its pause end, or the comma pause stretches into a gap ("Certo," lasts 0.5 s,
+// the long phrase after it takes 1.5 s to make). So playback starts once the audio ready to play
+// covers what is left to make, at the speed the voice made it so far (with a margin); with
+// nothing left to make, at once. The wait is about what the whole line took to make before it was
+// said phrase by phrase.
+const MARGIN = 1.15
+export function isReadyToStart({ readyS, madeS, madeChars, leftChars }) {
+  if (leftChars <= 0 || madeChars <= 0) return leftChars <= 0
+  return readyS >= (madeS / madeChars) * leftChars * MARGIN
+}

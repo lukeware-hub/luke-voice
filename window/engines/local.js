@@ -6,7 +6,7 @@ import { decide, liveAction } from '/engines/confirm.js'
 import { pickGreeting } from '/engines/greetings.js'
 import { isConfirm, isDeny, stopTarget } from '/engines/fast-path.js'
 import { phrases, speechChunks } from '/engines/speech-text.js'
-import { COMMA_PAUSE_S, trimEdges } from '/engines/phrase-audio.js'
+import { COMMA_PAUSE_S, isReadyToStart, trimEdges } from '/engines/phrase-audio.js'
 import { trimContext } from '/engines/context.js'
 import { createCutReply, createTurnJoiner, createTurnLog } from '/engines/turn-join.js'
 import { risingPercent } from '/engines/progress.js'
@@ -492,6 +492,23 @@ export async function startSession({
     const stop = new AbortController()
     nativeStop = stop
     let lastNode = null
+    // Phrases made but not yet playing, and how fast the voice has made them so far.
+    const held = []
+    let isStarted = false
+    let madeS = 0
+    let madeChars = 0
+    const replyStarted = performance.now()
+    // What is ready to play: the held phrases with their pauses, and what still plays.
+    const readyS = () =>
+      held.reduce((s, h) => s + h.audio.length / h.rate + (h.pauseAfter ? COMMA_PAUSE_S : 0), 0) + (playing.size ? Math.max(0, playhead - outContext.currentTime) : 0)
+    const startHeld = () => {
+      if (!isStarted && held.length) timing('speak', Math.round(performance.now() - replyStarted), 'to first audio (native, phrases)')
+      isStarted = true
+      for (const h of held.splice(0)) {
+        if (h.audio.length) lastNode = play(h.audio, h.rate, mine, false)
+        if (h.pauseAfter && playing.size) playhead += COMMA_PAUSE_S
+      }
+    }
     for (let i = 0; i < parts.length; i++) {
       if (mine !== speech || isEnded) return
       const started = performance.now()
@@ -533,11 +550,17 @@ export async function startSession({
           at += piece.length
         }
         const audio = trimEdges(whole, sampleRate, { start: afterComma, end: beforeComma })
-        if (i === 0) timing('speak', Math.round(performance.now() - started), 'to first audio (native)')
-        if (audio.length) lastNode = play(audio, sampleRate, mine, false)
-        if (beforeComma && playing.size) playhead += COMMA_PAUSE_S
+        madeS += (performance.now() - started) / 1000
+        madeChars += parts[i].length
+        held.push({ audio, rate: sampleRate, pauseAfter: beforeComma })
+        // Held until the audio ready covers what is left to make (phrase-audio.js): then every
+        // comma gets its short pause, never a gap while the next phrase is still being made.
+        const leftChars = parts.slice(i + 1).reduce((n, part) => n + part.length, 0)
+        if (isStarted || isReadyToStart({ readyS: readyS(), madeS, madeChars, leftChars })) startHeld()
         continue
       }
+      // A chunk with no comma at its edges streams as it comes: what is held plays first.
+      startHeld()
       let pending = []
       let pendingLength = 0
       let isFirst = true
@@ -573,6 +596,7 @@ export async function startSession({
       flush()
     }
     if (mine !== speech || isEnded) return
+    startHeld()
     // Back to listening when the last piece ends (or now, if nothing played).
     if (lastNode && playing.has(lastNode)) lastNode.isLast = true
     else if (playing.size === 0) setMode('listening')
