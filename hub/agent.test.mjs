@@ -75,6 +75,10 @@ test('both voices are Ceci: same name, age and creator, told only when asked, an
     assert.match(text, /criada por Diego Morais na Lukeware Inteligência Digital LTDA, a empresa da qual ele é dono. Lukeware é o nome da empresa, não o seu/, file)
     assert.match(text, /Só fale da sua idade, da sua aparência ou de quem te criou quando o usuário perguntar/, file)
     assert.match(text, /Nunca invente/, file)
+    // Her name honors Diego's daughter: told in the first person, only when asked where it comes from.
+    assert.match(text, /Seu nome Ceci é uma homenagem à filha do Diego Morais, que se chama Cecília Nepomuceno Morais\./, file)
+    assert.match(text, /Só conte isso quando o usuário perguntar especificamente por que você se chama Ceci ou de onde vem o seu nome, nunca ao se apresentar\./, file)
+    assert.match(text, /"Meu criador Diego criou meu nome Ceci em homenagem à filha dele, que se chama Cecília Nepomuceno Morais\."/, file)
     // From the recorded conversation of 0.10.4: she spoke of herself by name, offered searches
     // she could not run, explained misheard words as if real, and opened every line the same way.
     assert.match(text, /sempre na primeira pessoa .* Nunca fale de si pelo nome/, file)

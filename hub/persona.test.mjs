@@ -39,6 +39,9 @@ test("Luke's brain prompt is a man's: no Ceci, nothing in the feminine", async (
   assert.match(prompt, /Fale de si no masculino/)
   assert.match(prompt, /Você foi criado por Diego Morais/)
   assert.doesNotMatch(prompt, /Ceci|mulher|linda|feminino|pronta|criada/)
+  // The name's origin is Ceci's alone: Luke says he does not know his name's story.
+  assert.doesNotMatch(prompt, /Cecília|homenagem|Lukelia/)
+  assert.match(prompt, /Se perguntarem de onde vem o seu nome, diga com leveza que não conhece essa história, sem inventar\./)
   // The conversation still marks the assistant's own lines "ceci:" (brainInput in the mod).
   assert.match(prompt, /"ceci:"/)
 })
@@ -59,6 +62,8 @@ test("Nara's brain prompt is Ceci's with her name: still a woman, in the feminin
   assert.match(prompt, /Seu nome é Nara\. Você é uma mulher de 22 anos, e linda\./)
   assert.match(prompt, /Fale de si no feminino/)
   assert.doesNotMatch(prompt, /Ceci/)
+  assert.doesNotMatch(prompt, /Cecília|homenagem|Narália/)
+  assert.match(prompt, /Se perguntarem de onde vem o seu nome, diga com leveza que não conhece essa história, sem inventar\./)
   assert.match(prompt, /"ceci:"/)
   assert.match(asPersona(JSON.stringify(REPLIES), 'nara'), /Eu sou a Nara!/)
 })
