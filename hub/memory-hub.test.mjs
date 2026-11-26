@@ -15,10 +15,13 @@ const WINDOW = 'window-key'
 let hub
 let port
 let memory
+// The knowledge graph's updater (hub/graph.mjs), faked: it only records when it is asked.
+const graphAsks = []
+const graph = { schedule: ms => graphAsks.push(ms), stop: () => {} }
 
 before(async () => {
   memory = openMemory({ dir: mkdtempSync(join(tmpdir(), 'ceci-memory-')) })
-  hub = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {}, memory, summarizeEveryMs: 60_000 })
+  hub = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {}, memory, graph, summarizeEveryMs: 60_000 })
   await new Promise(resolve => hub.listen(0, '127.0.0.1', resolve))
   port = hub.address().port
 })
@@ -70,7 +73,10 @@ test('a call is recorded whole: words, commands and their answers, the sessions\
   await serve(session.token, () => ({ message: 'Started.' }))
   assert.equal((await sent).body.ok, true)
   await call('POST', '/events', { auth: session.token, body: { events: [{ kind: 'tool', text: 'Bash: npm test' }, { kind: 'task_done', text: 'Os testes do Girassol passaram.' }] } })
+  graphAsks.length = 0
   await call('POST', '/call', { key: WINDOW, body: { state: 'idle' } })
+  // The call's end asks the knowledge graph for an update, a minute later, with the summaries.
+  assert.deepEqual(graphAsks, [65_000])
 
   const last = (await call('GET', '/memory/conversation?id=last', { key: WINDOW })).body
   const kinds = last.items.map(i => i.kind)

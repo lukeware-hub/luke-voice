@@ -20,6 +20,7 @@ import { COMMON_QUESTIONS, MAX_PICK_CHARS, createQuestionTakes, isYesNoQuestion 
 import { route as routeUtterance } from './router.mjs'
 import { withoutPromptLeak } from './asr-leak.mjs'
 import { dayOf, openMemory, rangeOf, scopeFromArgs } from './memory.mjs'
+import { createGraphUpdater } from './graph.mjs'
 import { quoteUntrusted } from '../window/guard.js'
 import { contentType, vendorFile } from './vendor.mjs'
 
@@ -350,7 +351,7 @@ export function createEngineRunner({ engine, setDownload, warmQuestions = () => 
   }
 }
 
-export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, engine = null, profile = () => null, voiceRef = null, onLocalVoice = () => {}, onSetup = () => ({ started: false }), engineState = () => 'off', macVoice = () => null, macVoiceGender = () => null, macVoiceSiri = () => null, macSay = sayWav, platform = process.platform, log = () => {}, onShutdown = () => process.exit(0), questionsDir = join(stateDir(), 'cache', 'questions'), staleMs = STALE_SESSION_MS, sweepMs = 10_000, sttWaitMs = STT_WAIT_MS, clock = Date.now, noticesFile = stateFile('notices.json'), reopenMs = REOPEN_FOR_NOTICE_MS, windowLog = stateFile('window.log'), memory = null, summarizeEveryMs = 120_000, endedFile = stateFile('ended.json') }) {
+export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, engine = null, profile = () => null, voiceRef = null, onLocalVoice = () => {}, onSetup = () => ({ started: false }), engineState = () => 'off', macVoice = () => null, macVoiceGender = () => null, macVoiceSiri = () => null, macSay = sayWav, platform = process.platform, log = () => {}, onShutdown = () => process.exit(0), questionsDir = join(stateDir(), 'cache', 'questions'), staleMs = STALE_SESSION_MS, sweepMs = 10_000, sttWaitMs = STT_WAIT_MS, clock = Date.now, noticesFile = stateFile('notices.json'), reopenMs = REOPEN_FOR_NOTICE_MS, windowLog = stateFile('window.log'), memory = null, graph = null, summarizeEveryMs = 120_000, endedFile = stateFile('ended.json') }) {
   const sessions = new Map() // token -> session
   const launches = new Map() // one-time launch code -> when it expires
   const replaced = new Set() // tokens a newer subscription of the same Claude session took over
@@ -866,6 +867,9 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       if (memory && call !== 'live' && was === 'live') {
         memory.endCall()
         scheduleSummaries(65_000)
+        // The knowledge graph (hub/graph.mjs) takes the new conversation at the same moment, in the
+        // background, at most once per its safety gap.
+        graph?.schedule(65_000)
       }
       sendRoster()
       return [200, { ok: true }]
@@ -1297,6 +1301,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
   server.on('close', () => {
     clearInterval(summaries)
     clearTimeout(summaryTimer)
+    graph?.stop()
   })
 
   server.on('close', () => clearInterval(sweep))
@@ -1312,6 +1317,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
   }
   server.on('close', () => questions?.stop())
   server.voiceProvider = voiceProvider
+  server.callState = () => call
   return server
 }
 
@@ -1344,8 +1350,11 @@ if (isMainModule(import.meta.url, process.argv[1])) {
   } catch (error) {
     log(`memory: could not open it: ${error?.message ?? error}`)
   }
+  // Ceci's knowledge graph, kept up to date from the memory after each call (CECI_GRAPH=0 turns it off).
+  const graph = memory?.isAvailable ? createGraphUpdater({ isCallLive: () => hub?.callState() === 'live', log }) : null
   const hub = createHub({
     memory,
+    graph,
     serviceToken,
     windowKey,
     apiKey: process.env.ELEVENLABS_API_KEY ?? '',
