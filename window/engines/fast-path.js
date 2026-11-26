@@ -37,17 +37,31 @@ export const stopTarget = text => (isStopClaude(text) ? 'claude' : isStopOnly(te
 const YES = new Set([
   'sim', 'pode', 'pod', 'podi', 'claro', 'manda', 'bora', 'isso', 'ok', 'okay', 'okei', 'oquei', 'oke', 'okey', 'beleza', 'certo', 'positivo', 'faz', 'faca', 'vai', 'confirmo', 'confirmado',
   'perfeito', 'show', 'fechado', 'fechou', 'combinado', 'certeza', 'yes', 'ta', 'uhum', 'aham', 'exato', 'exatamente', 'segue',
+  // More ways to agree: slang, formal and English ones ("blz", "autorizado", "yeah"), and "ahã" as the ears write it.
+  'blz', 'logico', 'obvio', 'otimo', 'legal', 'tranquilo', 'joia', 'massa', 'bacana', 'demorou', 'certinho', 'aha', 'dale',
+  'concordo', 'aceito', 'autorizo', 'autorizado', 'aprovado', 'confirma', 'confirmar', 'vamos', 'vamo',
+  'yeah', 'yep', 'yup', 'sure',
 ])
+// Agreements of several words, said as one: each becomes "sim" before the words are counted
+// ("sem problema", "tudo bem", "de acordo"). Alone, their words are not a yes ("problema", "acordo").
+const YES_PHRASES = [
+  'sem problema', 'sem problemas', 'tudo bem', 'tudo certo', 'esta bem', 'esta certo', 'ta bem', 'ta certo', 'ta legal', 'esta bom', 'de acordo(?! com)',
+  'sim senhor', 'sim senhora', 'pode crer', 'vamos nessa', 'vamos la', 'bora la', 'manda brasa', 'vai fundo', 'toca ficha', 'da-lhe', 'da lhe',
+  'com certeza', 'claro que sim', 'pode sim', 'isso mesmo', 'e isso', 'e isso ai',
+]
+const YES_PHRASES_RE = new RegExp(`\\b(?:${YES_PHRASES.join('|')})\\b`, 'g')
 const NO = new Set(['nao', 'negativo', 'esquece', 'deixa', 'cancela', 'cancelar', 'nem'])
 const FILLER = new Set([
   ...NAMES, 'por', 'favor', 'pode', 'sim', 'ver', 'ai', 'ja', 'agora', 'mesmo', 'com', 'certeza',
   'fazer', 'mandar', 'ir', 'pra', 'para', 'la', 'precisa', 'obrigado', 'obrigada', 'e', 'o', 'a', 'se', 'ya', 'isso', 'melhor', 'tudo', 'bem', 'bom', 'ser', 'que', 'bala',
   'rodar', 'roda', 'seguir', 'continuar', 'continua', 'em', 'frente',
+  'gentileza', 'senhor', 'senhora', 'valeu',
 ])
 const MAX_ANSWER_WORDS = 7
 
-function shortAnswer(text, strong) {
-  const words = plain(text).split(/[^a-z]+/).filter(Boolean)
+function shortAnswer(text, strong, phrases = null) {
+  const heard = phrases ? plain(text).replace(phrases, 'sim') : plain(text)
+  const words = heard.split(/[^a-z]+/).filter(Boolean)
   if (words.length === 0 || words.length > MAX_ANSWER_WORDS) return false
   return words.some(w => strong.has(w)) && words.every(w => strong.has(w) || FILLER.has(w))
 }
@@ -55,7 +69,7 @@ function shortAnswer(text, strong) {
 // "sim", "pode", "manda ver", "Sim, pode-se." (as Whisper writes it), "claro, pode fazer".
 // A question back ("tá aí?", "pode ser?", "o que?") is never a yes, even when made of yes words.
 const QUESTION = new RegExp(`\\?\\W*$|^\\W*(${NAME}\\W+)*(o que|que|como|onde|quando|por que|porque|qual|quem|cade|ta ai)\\b`)
-const isPlainYes = text => !QUESTION.test(plain(text)) && !isDeny(text) && shortAnswer(text, YES)
+const isPlainYes = text => !QUESTION.test(plain(text)) && !isDeny(text) && shortAnswer(text, YES, YES_PHRASES_RE)
 
 // How many of the words of `text` are words of `said`, from 0 to 1.
 function shareOf(text, said) {

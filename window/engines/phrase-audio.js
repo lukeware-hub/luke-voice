@@ -5,10 +5,10 @@
 // both sides of every phrase, and the page puts one steady pause of its own after it.
 
 // A short, natural pause inside a sentence in pt-BR.
-export const COMMA_PAUSE_S = 0.15
+export const COMMA_PAUSE_S = 0.12
 // After a sentence (. ! ?), a little longer; after "...", longer still, as a person trails off.
-export const SENTENCE_PAUSE_S = 0.3
-export const ELLIPSIS_PAUSE_S = 0.4
+export const SENTENCE_PAUSE_S = 0.24
+export const ELLIPSIS_PAUSE_S = 0.34
 // A frame quieter than this share of the phrase's loudest frame is silence.
 const SILENCE_SHARE = 0.06
 // What is kept of the silence at a cut edge, so a soft start or a fading end is not clipped.
@@ -61,7 +61,7 @@ export function sentenceLeft(phrases, i) {
 // what is left of it to make, at the speed the voice made it so far (with a margin); with nothing
 // left of it to make, at once. Only the sentence counts, not the whole reply: Ceci starts as soon
 // as her first sentence is ready, and the next one is made while she says it.
-const MARGIN = 1.15
+const MARGIN = 1.05
 export function isReadyToStart({ readyS, madeS, madeChars, leftChars }) {
   if (leftChars <= 0 || madeChars <= 0) return leftChars <= 0
   return readyS >= (madeS / madeChars) * leftChars * MARGIN
