@@ -20,7 +20,7 @@ try {
   sqliteError = String(error?.message ?? error)
 }
 
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 2
 
 export const KINDS = ['user', 'ceci', 'notice', 'tool_call', 'tool_result', 'task', 'task_result', 'session_prompt', 'session_tool', 'session_done', 'session_failure', 'session_info']
 
@@ -34,6 +34,15 @@ export const dayOf = at => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 export const monthOf = at => dayOf(at).slice(0, 7)
+
+// The exact local time of a moment, with seconds and the UTC offset: "2026-11-25T14:03:09-03:00".
+export const stampOf = at => {
+  const d = new Date(at)
+  const p = n => String(n).padStart(2, '0')
+  const off = -d.getTimezoneOffset()
+  const sign = off < 0 ? '-' : '+'
+  return `${dayOf(at)}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}${sign}${p(Math.floor(Math.abs(off) / 60))}:${p(Math.abs(off) % 60)}`
+}
 const startOfDay = day => new Date(`${day}T00:00:00`).getTime()
 const nextDay = day => {
   const d = new Date(`${day}T00:00:00`)
@@ -51,6 +60,13 @@ const nextMonth = month => {
 export function rangeOf(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return [value, value + 1]
   const text = String(value ?? '').trim()
+  // A date and time ("2026-11-03T14:30" or "2026-11-03 14:30:05"): that minute, or that second.
+  const moment = text.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(:\d{2})?$/)
+  if (moment) {
+    const t = new Date(`${moment[1]}T${moment[2]}${moment[3] ?? ':00'}`).getTime()
+    if (Number.isNaN(t)) return null
+    return [t, t + (moment[3] ? 1000 : 60_000)]
+  }
   if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return [startOfDay(text), nextDay(text)]
   if (/^\d{4}-\d{2}$/.test(text)) return [startOfMonth(text), nextMonth(text)]
   return null
@@ -105,7 +121,8 @@ CREATE TABLE IF NOT EXISTS events (
   session TEXT,
   text TEXT NOT NULL,
   meta TEXT,
-  untrusted INTEGER NOT NULL DEFAULT 0
+  untrusted INTEGER NOT NULL DEFAULT 0,
+  at_text TEXT
 );
 CREATE INDEX IF NOT EXISTS events_conversation ON events(conversation_id, id);
 CREATE INDEX IF NOT EXISTS events_at ON events(at);
@@ -158,6 +175,15 @@ export function openMemory({ dir = memoryDir(), now = Date.now, log = () => {} }
   if (version < SCHEMA_VERSION) {
     // Migrations only add: a table, a column, an index. They never drop or rewrite what is there.
     db.exec(SCHEMA)
+    // v2: every event also carries its exact local time as text. Older rows get it from their `at`.
+    if (!db.prepare("SELECT 1 FROM pragma_table_info('events') WHERE name = 'at_text'").get()) db.exec('ALTER TABLE events ADD COLUMN at_text TEXT')
+    const old = db.prepare('SELECT id, at FROM events WHERE at_text IS NULL').all()
+    if (old.length) {
+      const fill = db.prepare('UPDATE events SET at_text = ? WHERE id = ?')
+      db.exec('BEGIN')
+      for (const row of old) fill.run(stampOf(row.at), row.id)
+      db.exec('COMMIT')
+    }
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`)
   }
   if (isNew) log(`memory: created ${file}`)
@@ -168,7 +194,7 @@ export function openMemory({ dir = memoryDir(), now = Date.now, log = () => {} }
     conversationById: db.prepare('SELECT * FROM conversations WHERE id = ?'),
     background: db.prepare("SELECT id FROM conversations WHERE kind = 'background' AND day = ? ORDER BY id DESC LIMIT 1"),
     lastEventAt: db.prepare('SELECT MAX(at) AS at FROM events WHERE conversation_id = ?'),
-    insertEvent: db.prepare('INSERT INTO events (conversation_id, at, kind, session, text, meta, untrusted) VALUES (?, ?, ?, ?, ?, ?, ?)'),
+    insertEvent: db.prepare('INSERT INTO events (conversation_id, at, kind, session, text, meta, untrusted, at_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
     callAt: db.prepare("SELECT id FROM conversations WHERE kind = 'call' AND started_at <= ? AND ended_at >= ? ORDER BY started_at DESC LIMIT 1"),
   }
 
@@ -220,7 +246,7 @@ export function openMemory({ dir = memoryDir(), now = Date.now, log = () => {} }
     try {
       const talk = k === 'user' || k === 'ceci' || k === 'notice'
       const id = conversation ?? conversationFor(at, talk)
-      return Number(q.insertEvent.run(id, at, k, session, body, meta ? JSON.stringify(meta) : null, untrusted ? 1 : 0).lastInsertRowid)
+      return Number(q.insertEvent.run(id, at, k, session, body, meta ? JSON.stringify(meta) : null, untrusted ? 1 : 0, stampOf(at)).lastInsertRowid)
     } catch (error) {
       log(`memory: could not record an event (${error?.message ?? error}); kept in ${pendingFile}`)
       try {
@@ -255,7 +281,7 @@ export function openMemory({ dir = memoryDir(), now = Date.now, log = () => {} }
           }
           if (talk) callAt = event.at
           const id = talk ? call : (q.background.get(day)?.id ?? Number(q.insertConversation.run(event.at, 'background', day, null, null).lastInsertRowid))
-          q.insertEvent.run(id, event.at, event.kind, event.session ?? null, String(event.text), event.meta ? JSON.stringify(event.meta) : null, event.untrusted ? 1 : 0)
+          q.insertEvent.run(id, event.at, event.kind, event.session ?? null, String(event.text), event.meta ? JSON.stringify(event.meta) : null, event.untrusted ? 1 : 0, stampOf(event.at))
           count++
         } catch {
           // A torn last line (the process died mid-write) is skipped.
@@ -273,7 +299,7 @@ export function openMemory({ dir = memoryDir(), now = Date.now, log = () => {} }
   }
   replayPending()
 
-  const hitRow = row => ({ id: row.id, conversation: row.conversation_id, at: row.at, day: dayOf(row.at), kind: row.kind, session: row.session, text: row.text, untrusted: Boolean(row.untrusted) })
+  const hitRow = row => ({ id: row.id, conversation: row.conversation_id, at: row.at, when: row.at_text ?? stampOf(row.at), day: dayOf(row.at), kind: row.kind, session: row.session, text: row.text, untrusted: Boolean(row.untrusted) })
 
   // Full-text search, best first: BM25, with a little weight for recent events.
   function search(query, { from = null, to = null, kind = null, limit = 10 } = {}) {
@@ -301,7 +327,9 @@ export function openMemory({ dir = memoryDir(), now = Date.now, log = () => {} }
       kind: row.kind,
       day: row.day,
       startedAt: row.started_at,
+      startedAtText: stampOf(row.started_at),
       endedAt: row.ended_at,
+      endedAtText: row.ended_at ? stampOf(row.ended_at) : null,
       persona: row.persona,
       voice: row.voice,
       title: row.title,
@@ -376,9 +404,8 @@ export function openMemory({ dir = memoryDir(), now = Date.now, log = () => {} }
     const transcript = id => {
       const rows = db.prepare('SELECT at, kind, session, text, untrusted FROM events WHERE conversation_id = ? ORDER BY id').all(id)
       const lines = rows.map(r => {
-        const d = new Date(r.at)
         const who = { user: 'usuário', ceci: 'ceci', notice: 'aviso' }[r.kind] ?? `${r.kind}${r.session ? ` ${r.session}` : ''}`
-        return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} ${who}: ${r.text.replace(/\s+/g, ' ').slice(0, 600)}`
+        return `${stampOf(r.at).slice(11, 19)} ${who}: ${r.text.replace(/\s+/g, ' ').slice(0, 600)}`
       })
       const all = lines.join('\n')
       // A long one: its start and its end, which say what it was about and how it ended.

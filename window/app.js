@@ -517,7 +517,7 @@ async function deleteFromMemory(scope) {
 function lineRow(item) {
   const row = el('li', 'memory-line')
   row.dataset.kind = item.kind
-  const time = new Date(item.at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  const time = new Date(item.at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
   row.append(el('span', 'memory-who', `${whoSaid(item)} · ${time}`), el('p', 'memory-text', item.text))
   return row
 }
@@ -561,7 +561,7 @@ function hitEntry(hit) {
   const item = el('li', 'entry memory-entry')
   item.dataset.kind = 'memory'
   const meta = el('p', 'meta')
-  meta.append(el('strong', '', longDay(hit.day)), el('span', '', `#${hit.conversation}`), el('span', '', whoSaid(hit)))
+  meta.append(el('strong', '', longDay(hit.day)), el('span', '', `#${hit.conversation}`), el('span', '', whoSaid(hit)), el('span', '', new Date(hit.at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })))
   item.append(memoryMark(), meta, el('p', 'what', hit.text))
   const actions = el('div', 'memory-actions')
   const open = el('button', 'link', 'Ver a conversa')
@@ -812,7 +812,7 @@ const clientTools = {
     const id = String(which ?? 'last').replace(/^#/, '') || 'last'
     const out = await hub('GET', `/memory/conversation?id=${encodeURIComponent(id)}&offset=${Number(offset) || 0}&limit=60`).catch(error => ({ error: error.message }))
     if (out.error) return out.error === 'No such conversation.' ? 'There is no such conversation in the memory.' : `Memory read failed: ${out.error}`
-    const head = `Conversation #${out.id}, ${out.day}${out.title ? `: ${out.title}` : ''}. ${out.events} lines in all${out.offset ? `, from line ${out.offset + 1}` : ''}.${out.summary ? ` Summary: ${out.summary}` : ''}`
+    const head = `Conversation #${out.id}, ${out.startedAtText ?? out.day}${out.endedAtText ? ` to ${out.endedAtText}` : ''}${out.title ? `: ${out.title}` : ''}. ${out.events} lines in all${out.offset ? `, from line ${out.offset + 1}` : ''}.${out.summary ? ` Summary: ${out.summary}` : ''}`
     const more = out.offset + out.items.length < out.events ? `\n(more: offset ${out.offset + out.items.length})` : ''
     return `${head}\n${out.items.map(memoryLine).join('\n')}${more}`
   },
@@ -841,7 +841,7 @@ const clientTools = {
 function memoryLine(hit) {
   const who = { user: 'usuário', ceci: 'ceci', notice: 'aviso' }[hit.kind] ?? `${hit.kind}${hit.session ? ` ${hit.session}` : ''}`
   const text = String(hit.text ?? '').replace(/\s+/g, ' ').slice(0, 600)
-  return `${hit.day} #${hit.conversation} ${who}: ${hit.untrusted ? quoteUntrusted(text) : text}`
+  return `${hit.when ?? hit.day} #${hit.conversation} ${who}: ${hit.untrusted ? quoteUntrusted(text) : text}`
 }
 
 // The scope of a delete the brain asked for: exactly one of conversation, day, search or all.
