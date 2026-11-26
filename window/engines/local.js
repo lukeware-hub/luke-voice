@@ -7,7 +7,7 @@ import { ACKS, pickAck } from '/engines/acks.js'
 import { pickGreeting } from '/engines/greetings.js'
 import { isConfirm, isDeny, stopTarget } from '/engines/fast-path.js'
 import { phrases, speechChunks } from '/engines/speech-text.js'
-import { COMMA_PAUSE_S, isReadyToStart, trimEdges } from '/engines/phrase-audio.js'
+import { isReadyToStart, pauseAfter, sentenceLeft, trimEdges } from '/engines/phrase-audio.js'
 import { trimContext } from '/engines/context.js'
 import { createCutReply, createTurnJoiner, createTurnLog } from '/engines/turn-join.js'
 import { risingPercent } from '/engines/progress.js'
@@ -50,9 +50,6 @@ const DUCK_GAIN = 0.2
 const ECHO_START = 0.15
 const ECHO_MAX = 0.5
 const ECHO_MARGIN = 2
-// The first audio of each chunk of the natural voice: enough to ride over a slow moment of the
-// engine (it makes audio at ~2x real time), little enough not to be heard as a wait.
-const FIRST_AUDIO_S = 0.25
 // Tool answers that mean it worked; anything else goes back to the brain to explain.
 const TOOL_OK = /^(Started|Claude started|Added as a note|Queued|Stopped|Sent|Deleted)/i
 
@@ -478,8 +475,8 @@ export async function startSession({
     return node
   }
 
-  // The native voice streams each chunk: playback starts on the first ~250 ms, the rest follows
-  // in pieces of ~300 ms, back to back.
+  // The native voice says a reply phrase by phrase. The engine sends a phrase's audio in one burst at
+  // its end (measured: streaming brought it no sooner), so each phrase is read whole.
   async function speakNative(text) {
     // Phrase by phrase, so each comma gets its pause (speech-text.js, phrase-audio.js).
     const parts = speechChunks(text, { isNative: true }).flatMap(chunk => phrases(chunk))
@@ -505,14 +502,13 @@ export async function startSession({
     let madeChars = 0
     const replyStarted = performance.now()
     // What is ready to play: the held phrases with their pauses, and what still plays.
-    const readyS = () =>
-      held.reduce((s, h) => s + h.audio.length / h.rate + (h.pauseAfter ? COMMA_PAUSE_S : 0), 0) + (playing.size ? Math.max(0, playhead - outContext.currentTime) : 0)
+    const readyS = () => held.reduce((s, h) => s + h.audio.length / h.rate + h.pause, 0) + (playing.size ? Math.max(0, playhead - outContext.currentTime) : 0)
     const startHeld = () => {
-      if (!isStarted && held.length) timing('speak', Math.round(performance.now() - replyStarted), 'to first audio (native, phrases)')
+      if (!isStarted && held.length) timing('speak', Math.round(performance.now() - replyStarted), 'to first audio (native)')
       isStarted = true
       for (const h of held.splice(0)) {
         if (h.audio.length) lastNode = play(h.audio, h.rate, mine, false)
-        if (h.pauseAfter && playing.size) playhead += COMMA_PAUSE_S
+        if (playing.size) playhead += h.pause
       }
     }
     for (let i = 0; i < parts.length; i++) {
@@ -540,66 +536,24 @@ export async function startSession({
         console.warn(`[luke-voice] the native voice could not say: ${parts[i]}`)
         continue
       }
-      // A phrase that meets another at a comma comes whole (a phrase is short, and the engine sends
-      // one that short in one go anyway): its silence on that side is cut, and after a comma the
-      // page waits COMMA_PAUSE_S, so every comma gets the same short pause.
-      const afterComma = i > 0 && parts[i - 1].endsWith(',')
-      const beforeComma = i < parts.length - 1 && parts[i].endsWith(',')
-      if (afterComma || beforeComma) {
-        const pieces = []
-        const sampleRate = await readWavStream(response, piece => pieces.push(piece), () => mine !== speech || isEnded)
-        if (mine !== speech || isEnded || sampleRate === null) return
-        const whole = new Float32Array(pieces.reduce((n, p) => n + p.length, 0))
-        let at = 0
-        for (const piece of pieces) {
-          whole.set(piece, at)
-          at += piece.length
-        }
-        const audio = trimEdges(whole, sampleRate, { start: afterComma, end: beforeComma })
-        madeS += (performance.now() - started) / 1000
-        madeChars += parts[i].length
-        held.push({ audio, rate: sampleRate, pauseAfter: beforeComma })
-        // Held until the audio ready covers what is left to make (phrase-audio.js): then every
-        // comma gets its short pause, never a gap while the next phrase is still being made.
-        const leftChars = parts.slice(i + 1).reduce((n, part) => n + part.length, 0)
-        if (isStarted || isReadyToStart({ readyS: readyS(), madeS, madeChars, leftChars })) startHeld()
-        continue
-      }
-      // A chunk with no comma at its edges streams as it comes: what is held plays first.
-      startHeld()
-      let pending = []
-      let pendingLength = 0
-      let isFirst = true
-      let rate = 24_000
-      const flush = () => {
-        if (!pendingLength) return
-        const audio = new Float32Array(pendingLength)
-        let at = 0
-        for (const piece of pending) {
-          audio.set(piece, at)
-          at += piece.length
-        }
-        pending = []
-        pendingLength = 0
-        lastNode = play(audio, rate, mine, false)
-      }
-      await readWavStream(
-        response,
-        (piece, sampleRate) => {
-          rate = sampleRate
-          pending.push(piece)
-          pendingLength += piece.length
-          if (isFirst && pendingLength >= rate * FIRST_AUDIO_S) {
-            if (i === 0) timing('speak', Math.round(performance.now() - started), 'to first audio (native)')
-            isFirst = false
-            flush()
-          } else if (pendingLength >= rate * 0.3) flush()
-        },
-        () => mine !== speech || isEnded,
-      )
+      const pieces = []
+      const sampleRate = await readWavStream(response, piece => pieces.push(piece), () => mine !== speech || isEnded)
       // Cut off meanwhile: what is held back is stale and must not play (nor set 'speaking' again).
       if (mine !== speech || isEnded) return
-      flush()
+      if (sampleRate === null) continue
+      const whole = new Float32Array(pieces.reduce((n, p) => n + p.length, 0))
+      let at = 0
+      for (const piece of pieces) {
+        whole.set(piece, at)
+        at += piece.length
+      }
+      madeS += (performance.now() - started) / 1000
+      madeChars += parts[i].length
+      // The phrase's own silence is cut, and the page puts a steady pause after it (phrase-audio.js).
+      held.push({ audio: trimEdges(whole, sampleRate, { start: true, end: true }), rate: sampleRate, pause: i < parts.length - 1 ? pauseAfter(parts[i]) : 0 })
+      // A sentence waits until the audio ready covers what is left of it to make, so no pause
+      // inside it turns into a gap; the next sentence is made while this one plays.
+      if (isReadyToStart({ readyS: readyS(), madeS, madeChars, leftChars: sentenceLeft(parts, i) })) startHeld()
     }
     if (mine !== speech || isEnded) return
     startHeld()

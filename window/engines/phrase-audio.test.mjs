@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { COMMA_PAUSE_S, trimEdges } from './phrase-audio.js'
+import { COMMA_PAUSE_S, ELLIPSIS_PAUSE_S, SENTENCE_PAUSE_S, pauseAfter, sentenceLeft, trimEdges } from './phrase-audio.js'
 
 const RATE = 24_000
 // `lead` s of silence, `speech` s of a tone, `trail` s of silence.
@@ -45,4 +45,25 @@ test('a reply starts once the audio ready covers what is left to make, so no com
   assert.equal(isReadyToStart({ readyS: 3.5, madeS: 2, madeChars: 46, leftChars: 6 }), true)
   // The last phrase is in: start, however long it took.
   assert.equal(isReadyToStart({ readyS: 0.4, madeS: 3, madeChars: 50, leftChars: 0 }), true)
+})
+
+test('each mark gets its own steady pause: a comma short, a sentence end a little longer, "…" longest', () => {
+  assert.ok(COMMA_PAUSE_S < SENTENCE_PAUSE_S && SENTENCE_PAUSE_S < ELLIPSIS_PAUSE_S)
+  // Shorter than the voice's own silence at a sentence end (0.42 s on average, up to ~1 s).
+  assert.ok(SENTENCE_PAUSE_S >= 0.2 && SENTENCE_PAUSE_S <= 0.35)
+  assert.equal(pauseAfter('Certo,'), COMMA_PAUSE_S)
+  for (const phrase of ['Pronto.', 'Bom dia, Diego!', 'Posso rodar?', 'Ele disse "oi."', 'Será?!']) assert.equal(pauseAfter(phrase), SENTENCE_PAUSE_S, phrase)
+  for (const phrase of ['Bom…', 'Hmm...']) assert.equal(pauseAfter(phrase), ELLIPSIS_PAUSE_S, phrase)
+  // A long sentence cut at a space goes on: the short pause, never a sentence end.
+  assert.equal(pauseAfter('O build falhou por causa de uma variável que faltava no'), COMMA_PAUSE_S)
+})
+
+test('only the rest of the sentence counts before Ceci starts, not the rest of the reply', () => {
+  const parts = ['Certo,', 'vou olhar isso agora.', 'Depois eu te conto,', 'tá?']
+  assert.equal(sentenceLeft(parts, 0), 'vou olhar isso agora.'.length)
+  assert.equal(sentenceLeft(parts, 1), 0)
+  assert.equal(sentenceLeft(parts, 2), 3)
+  assert.equal(sentenceLeft(parts, 3), 0)
+  // A sentence cut at a space continues in the next part.
+  assert.equal(sentenceLeft(['uma frase muito longa que', 'continua aqui.', 'Outra.'], 0), 'continua aqui.'.length)
 })

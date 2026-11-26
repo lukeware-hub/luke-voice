@@ -141,6 +141,8 @@ Medido numa RTX 3060 Ti, perfil gpu:
 - fim do turno: cerca de 0,18 s;
 - "sim" depois de "posso?" até "Comecei": cerca de 0,7 s.
 
+A Ceci fala uma resposta frase por frase, cortada em cada vírgula. Ela começa assim que a primeira frase fica pronta, e a frase seguinte é feita enquanto ela fala; ela não espera mais o áudio pronto cobrir a resposta inteira, o que levava até 17 s numa resposta longa. O silêncio da própria voz em volta de cada trecho é cortado, e a janela põe uma pausa fixa depois dele: 0,15 s depois de uma vírgula, 0,3 s depois do fim de uma frase (. ! ?) e 0,4 s depois de "…". O silêncio da própria voz no fim de uma frase era de 0,42 s em média e chegava a cerca de 1 s.
+
 A voz foi escolhida pelo dono, ouvindo:
 - Uma voz anterior, desenhada com o Qwen3-TTS VoiceDesign, foi bem em juízes automáticos, mas o dono ouviu sotaque de Portugal nela. O classificador de sotaque usado na época também chamava de europeias algumas gravações brasileiras reais, então deixou de ser usado como juiz.
 - Agora a Ceci clona uma locutora brasileira real: um trecho do banco CML-TTS em português (veja os Créditos).

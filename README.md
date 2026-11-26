@@ -141,6 +141,8 @@ Measured on an RTX 3060 Ti, gpu profile:
 - end of turn: about 0.18 s;
 - "sim" after "posso?" until "Comecei": about 0.7 s.
 
+Ceci says a reply phrase by phrase, cut at each comma. She starts as soon as her first sentence is ready, and the next sentence is made while she says it; she no longer waits until the audio ready covers the whole reply, which took up to 17 s on a long reply. The voice's own silence around each phrase is cut, and the window puts a steady pause after it: 0.15 s after a comma, 0.3 s after a sentence end (. ! ?) and 0.4 s after "…". The voice's own silence at a sentence end was 0.42 s on average and up to about 1 s.
+
 The voice was chosen by the owner, listening:
 - An earlier voice, designed with Qwen3-TTS VoiceDesign, scored well with automatic judges, but the owner heard a European Portuguese accent in it. The accent classifier used then also called some real Brazilian recordings European, so it was dropped as a judge.
 - Ceci now clones a real Brazilian speaker: a clip from the CML-TTS Portuguese dataset (see Credits).
