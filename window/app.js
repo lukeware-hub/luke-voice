@@ -12,6 +12,7 @@ import {
   quoteUntrusted,
   safeKind,
 } from '/guard.js'
+import { inputOptions, micConstraints, saveMicrophone, savedMicrophone } from '/engines/microphone.js'
 
 // Appearance: follows the system unless the user picked light or dark in Configurações.
 // Runs before the key exchange below awaits, so the saved theme lands on the first frames.
@@ -43,6 +44,23 @@ for (const option of document.querySelectorAll('[data-theme-option]')) {
     }
   })
 }
+
+// Microphone: lists the system's audio inputs and keeps the chosen one for every call.
+const micSelect = document.getElementById('micSelect')
+async function listMicrophones() {
+  if (!micSelect || !navigator.mediaDevices?.enumerateDevices) return
+  const saved = savedMicrophone()
+  const options = inputOptions(await navigator.mediaDevices.enumerateDevices().catch(() => []))
+  micSelect.replaceChildren(
+    new Option('Padrão do sistema', ''),
+    ...options.map(({ id, label }) => new Option(label, id)),
+  )
+  // A saved microphone that is unplugged shows as the default; the choice itself stays saved.
+  micSelect.value = options.some(option => option.id === saved) ? saved : ''
+}
+micSelect?.addEventListener('change', () => saveMicrophone(micSelect.value))
+navigator.mediaDevices?.addEventListener?.('devicechange', listMicrophones)
+listMicrophones()
 
 const params = new URLSearchParams(location.search)
 const STALE_WINDOW = 'Esta janela ficou desatualizada. Feche-a e digite /luke-voice window no Claude Code.'
@@ -861,13 +879,15 @@ async function microphone() {
     setTimeout(() => reject(new Error('Microfone indisponível: libere o microfone nesta janela e toque em Chamar.')), MIC_TIMEOUT_MS),
   )
   const stop = stream => stream.getTracks().forEach(track => track.stop())
-  const request = navigator.mediaDevices.getUserMedia({ audio: true })
+  const request = navigator.mediaDevices.getUserMedia({ audio: micConstraints(savedMicrophone()) })
   // A stream that arrives after the timeout is stopped too, or the mic stays on with no call.
   const stream = await Promise.race([request, timeout]).catch(error => {
     request.then(stop, () => {})
     throw error
   })
   stop(stream)
+  // Names only show once the permission is given.
+  listMicrophones()
 }
 
 // Who answers: Ceci, or Luke or Nara when the Mac speaks with its own voice (the hub's persona).
@@ -905,6 +925,7 @@ async function startCall() {
       hub,
       windowKey: KEY,
       prepare: microphone,
+      inputDeviceId: savedMicrophone() || undefined,
       clientTools,
       onNoticeCut: () => {
         if (isCurrent()) onNoticeCut()
