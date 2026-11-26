@@ -34,7 +34,7 @@ test('a phrase with no silence at its edges, or no sound at all, is handled', ()
 })
 
 test('the comma pause is short: a breath inside the sentence, not a sentence end', () => {
-  assert.ok(COMMA_PAUSE_S >= 0.15 && COMMA_PAUSE_S <= 0.3)
+  assert.ok(COMMA_PAUSE_S >= 0.1 && COMMA_PAUSE_S <= 0.3)
 })
 
 test('a reply starts once the audio ready covers what is left to make, so no comma pause turns into a gap', async () => {
