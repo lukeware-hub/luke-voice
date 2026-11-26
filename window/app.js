@@ -484,11 +484,16 @@ const memoryUi = {
   query: $('memoryQuery'),
   stats: $('memoryStats'),
   list: $('memoryList'),
-  more: $('memoryMore'),
+  pager: $('memoryPager'),
+  size: $('memoryPageSize'),
+  prev: $('memoryPrev'),
+  next: $('memoryNext'),
+  pageText: $('memoryPageText'),
   wipe: $('memoryWipe'),
 }
-let memoryOldest = null
-let memoryLastDay = null
+// The list shows one page at a time, and only that page is asked of the hub.
+let memoryPage = 1
+let memoryPageSize = 10
 
 const longDay = day => {
   const date = new Date(`${day}T12:00:00`)
@@ -585,7 +590,7 @@ function hitEntry(hit) {
     const out = await hub('GET', `/memory/conversation?id=${hit.conversation}&limit=1`).catch(() => null)
     if (!out?.id) return
     memoryUi.list.replaceChildren(conversationEntry(out, { isOpen: true, showDay: true }))
-    memoryUi.more.hidden = true
+    memoryUi.pager.hidden = true
   })
   actions.append(open)
   item.append(actions)
@@ -599,41 +604,63 @@ async function memoryStatsLine() {
   return `${s.conversations} ${s.conversations === 1 ? 'conversa' : 'conversas'} desde ${longDay(s.firstDay)}.`
 }
 
-async function loadMemory({ older = false } = {}) {
+// The pager under the list: "Página X de Y" and the two buttons, from how many items there are.
+function showPager(total) {
+  const pages = Math.max(1, Math.ceil(total / memoryPageSize))
+  memoryUi.pager.hidden = total <= 10
+  memoryUi.pageText.textContent = `Página ${memoryPage} de ${pages}`
+  memoryUi.prev.disabled = memoryPage <= 1
+  memoryUi.next.disabled = memoryPage >= pages
+}
+
+// One page of the memory (the conversations, or a search's hits): only that page is fetched.
+// A page left empty by a delete steps back to the one before.
+async function loadMemory({ page = memoryPage } = {}) {
+  memoryPage = Math.max(1, page)
   const query = memoryUi.query.value.trim()
+  const paging = `limit=${memoryPageSize}&offset=${(memoryPage - 1) * memoryPageSize}`
   memoryUi.stats.textContent = await memoryStatsLine()
   if (query) {
-    const out = await hub('GET', `/memory/search?q=${encodeURIComponent(query)}&limit=30`).catch(error => ({ error: error.message, hits: [] }))
-    memoryUi.more.hidden = true
+    const out = await hub('GET', `/memory/search?q=${encodeURIComponent(query)}&${paging}`).catch(error => ({ error: error.message, hits: [] }))
+    if (!out.hits?.length && memoryPage > 1 && out.total) return loadMemory({ page: Math.ceil(out.total / memoryPageSize) })
     memoryUi.list.replaceChildren(...(out.hits?.length ? out.hits.map(hitEntry) : [el('li', 'empty', out.error ?? `Nada sobre "${query}".`)]))
+    showPager(out.total ?? 0)
     return
   }
-  const before = older && memoryOldest ? `&before=${memoryOldest}` : ''
-  const out = await hub('GET', `/memory/conversations?limit=30${before}`).catch(error => ({ error: error.message, conversations: [] }))
+  const out = await hub('GET', `/memory/conversations?${paging}`).catch(error => ({ error: error.message, conversations: [] }))
   const rows = out.conversations ?? []
-  if (!older) {
-    memoryUi.list.replaceChildren()
-    memoryLastDay = null
-  }
-  if (rows.length) memoryOldest = rows.at(-1).startedAt
-  // Grouped by day: a heading before each day's first conversation (across pages too).
+  if (!rows.length && memoryPage > 1 && out.total) return loadMemory({ page: Math.ceil(out.total / memoryPageSize) })
+  memoryUi.list.replaceChildren()
+  // Grouped by day: a heading before each day's first conversation on this page.
+  let lastDay = null
   for (const c of rows) {
-    if (c.day !== memoryLastDay) {
-      memoryLastDay = c.day
+    if (c.day !== lastDay) {
+      lastDay = c.day
       memoryUi.list.append(el('li', 'memory-day', longDay(c.day)))
     }
     memoryUi.list.append(conversationEntry(c))
   }
-  if (!memoryUi.list.childElementCount) memoryUi.list.append(el('li', 'empty', out.error ?? 'As conversas com a Ceci aparecem aqui.'))
-  memoryUi.more.hidden = rows.length < 30
+  if (!rows.length) memoryUi.list.append(el('li', 'empty', out.error ?? 'As conversas com a Ceci aparecem aqui.'))
+  showPager(out.total ?? 0)
+}
+
+// Changing page brings the top of the list into view.
+async function turnMemoryPage(page) {
+  await loadMemory({ page })
+  memoryUi.stats.scrollIntoView({ block: 'start', behavior: 'smooth' })
 }
 
 memoryUi.form.addEventListener('submit', event => {
   event.preventDefault()
-  void loadMemory()
+  void loadMemory({ page: 1 })
 })
-memoryUi.query.addEventListener('search', () => void loadMemory())
-memoryUi.more.addEventListener('click', () => void loadMemory({ older: true }))
+memoryUi.query.addEventListener('search', () => void loadMemory({ page: 1 }))
+memoryUi.size.addEventListener('change', () => {
+  memoryPageSize = Number(memoryUi.size.value) || 10
+  void loadMemory({ page: 1 })
+})
+memoryUi.prev.addEventListener('click', () => void turnMemoryPage(memoryPage - 1))
+memoryUi.next.addEventListener('click', () => void turnMemoryPage(memoryPage + 1))
 memoryUi.wipe.addEventListener('click', async () => {
   const found = await hub('POST', '/memory/preview', { scope: { all: true } }).catch(() => null)
   const what = found ? `${found.conversations} ${found.conversations === 1 ? 'conversa' : 'conversas'} e ${found.events} ${found.events === 1 ? 'registro' : 'registros'}` : 'todas as conversas'

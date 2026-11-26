@@ -49,6 +49,38 @@ test('search finds words with or without accents, and leaves out empty words', (
   memory.close()
 })
 
+test('the conversations and a search come a page at a time, with how many there are in all', () => {
+  const now = clockAt(Date.parse('2026-04-01T08:00:00'))
+  const memory = openMemory({ dir: fresh(), now })
+  for (let i = 0; i < 23; i++) {
+    memory.startCall()
+    memory.append({ kind: 'user', text: `conversa ${i} sobre o jardim` })
+    memory.endCall()
+    now.advance(DAY)
+  }
+  assert.equal(memory.conversationCount(), 23)
+  const first = memory.conversations({ limit: 10 })
+  const second = memory.conversations({ limit: 10, offset: 10 })
+  const last = memory.conversations({ limit: 10, offset: 20 })
+  assert.deepEqual([first.length, second.length, last.length], [10, 10, 3])
+  // Newest first, with no conversation on two pages and none left out.
+  const ids = [...first, ...second, ...last].map(c => c.id)
+  assert.equal(new Set(ids).size, 23)
+  assert.ok(first[0].startedAt > second[0].startedAt && second.at(-1).startedAt > last[0].startedAt)
+  assert.equal(memory.conversations({ limit: 100 }).length, 23)
+
+  const page = memory.searchPage('jardim', { limit: 10, offset: 20 })
+  assert.equal(page.total, 23)
+  assert.equal(page.hits.length, 3)
+  const all = memory.searchPage('jardim', { limit: 100 }).hits.map(h => h.id)
+  assert.equal(all.length, 23)
+  assert.deepEqual(memory.searchPage('jardim', { limit: 10, offset: 10 }).hits.map(h => h.id), all.slice(10, 20))
+  assert.deepEqual(memory.searchPage('o que', {}), { hits: [], total: 0 })
+  // The brain's search is the same ranking, its first page.
+  assert.deepEqual(memory.search('jardim').map(h => h.id), all.slice(0, 10))
+  memory.close()
+})
+
 test('the very first conversation is found after ten thousand later events', () => {
   const now = clockAt(Date.parse('2025-03-01T08:00:00'))
   const memory = openMemory({ dir: fresh(), now })

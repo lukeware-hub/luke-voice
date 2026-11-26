@@ -83,8 +83,16 @@ test('a call is recorded whole: words, commands and their answers, the sessions\
   assert.deepEqual(kinds, ['user', 'ceci', 'task', 'tool_result', 'session_tool', 'task_result'])
   assert.equal(last.items.find(i => i.kind === 'session_tool').untrusted, true)
   assert.equal(last.items.find(i => i.kind === 'user').untrusted, false)
-  const hits = (await call('GET', '/memory/search?q=girassol', { key: WINDOW })).body.hits
-  assert.ok(hits.length >= 3)
+  const found = (await call('GET', '/memory/search?q=girassol', { key: WINDOW })).body
+  assert.ok(found.hits.length >= 3)
+  assert.equal(found.total, found.hits.length)
+  // The window asks for one page: the hits after the first one, and how many there are.
+  const rest = (await call('GET', '/memory/search?q=girassol&limit=10&offset=1', { key: WINDOW })).body
+  assert.deepEqual(rest.hits.map(h => h.id), found.hits.slice(1).map(h => h.id))
+  assert.equal(rest.total, found.total)
+  const listed = (await call('GET', '/memory/conversations?limit=10&offset=0', { key: WINDOW })).body
+  assert.equal(listed.total, listed.conversations.length)
+  assert.deepEqual((await call('GET', '/memory/conversations?limit=10&offset=10', { key: WINDOW })).body.conversations, [])
   // The mod reads the same memory with its own token.
   assert.equal((await call('GET', '/memory/stats', { auth: session.token })).body.events, 6)
   await call('POST', '/unsubscribe', { auth: session.token })

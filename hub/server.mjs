@@ -544,13 +544,16 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     'GET /memory/search': (_none, _body, url) => {
       if (!memory) return [503, { error: 'The memory is not available.' }]
       const p = url.searchParams
-      const hits = memory.search(p.get('q') ?? '', { from: edge(p.get('from'), 0), to: edge(p.get('to'), 1), kind: p.get('kind') || null, limit: num(p.get('limit')) ?? 10 })
-      return [200, { hits }]
+      const { hits, total } = memory.searchPage(p.get('q') ?? '', { from: edge(p.get('from'), 0), to: edge(p.get('to'), 1), kind: p.get('kind') || null, limit: num(p.get('limit')) ?? 10, offset: num(p.get('offset')) ?? 0 })
+      return [200, { hits, total }]
     },
+    // One page of conversations, newest first, and how many there are, for the window's page numbers.
     'GET /memory/conversations': (_none, _body, url) => {
       if (!memory) return [503, { error: 'The memory is not available.' }]
       const p = url.searchParams
-      return [200, { conversations: memory.conversations({ before: num(p.get('before')), limit: num(p.get('limit')) ?? 30, includeBackground: p.get('background') === '1' }) }]
+      const includeBackground = p.get('background') === '1'
+      const conversations = memory.conversations({ before: num(p.get('before')), limit: num(p.get('limit')) ?? 30, offset: num(p.get('offset')) ?? 0, includeBackground })
+      return [200, { conversations, total: memory.conversationCount({ includeBackground }) }]
     },
     'GET /memory/conversation': (_none, _body, url) => {
       if (!memory) return [503, { error: 'The memory is not available.' }]

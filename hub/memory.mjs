@@ -302,9 +302,14 @@ export function openMemory({ dir = memoryDir(), now = Date.now, log = () => {} }
   const hitRow = row => ({ id: row.id, conversation: row.conversation_id, at: row.at, when: row.at_text ?? stampOf(row.at), day: dayOf(row.at), kind: row.kind, session: row.session, text: row.text, untrusted: Boolean(row.untrusted) })
 
   // Full-text search, best first: BM25, with a little weight for recent events.
-  function search(query, { from = null, to = null, kind = null, limit = 10 } = {}) {
+  function search(query, options = {}) {
+    return searchPage(query, options).hits
+  }
+
+  // One page of a search and how many hits there are in all (at most 200, the most it ranks).
+  function searchPage(query, { from = null, to = null, kind = null, limit = 10, offset = 0 } = {}) {
     const match = ftsQuery(query)
-    if (!match) return []
+    if (!match) return { hits: [], total: 0 }
     const where = ['events_fts MATCH ?']
     const args = [match]
     if (from !== null) where.push('e.at >= ?'), args.push(from)
@@ -314,11 +319,13 @@ export function openMemory({ dir = memoryDir(), now = Date.now, log = () => {} }
       .prepare(`SELECT e.*, bm25(events_fts) AS score FROM events_fts JOIN events e ON e.id = events_fts.rowid WHERE ${where.join(' AND ')} ORDER BY score LIMIT 200`)
       .all(...args)
     const newest = now()
-    return rows
+    const start = Math.max(0, Number(offset) || 0)
+    const hits = rows
       .map(row => ({ row, rank: -row.score + 0.5 / (1 + (newest - row.at) / (30 * 86_400_000)) }))
       .sort((a, b) => b.rank - a.rank)
-      .slice(0, Math.max(1, Math.min(limit, 50)))
+      .slice(start, start + Math.max(1, Math.min(limit, 100)))
       .map(({ row }) => hitRow(row))
+    return { hits, total: rows.length }
   }
 
   const conversationRow = row =>
@@ -354,12 +361,19 @@ export function openMemory({ dir = memoryDir(), now = Date.now, log = () => {} }
   }
 
   // The conversations, newest first, a page at a time.
-  function conversations({ before = null, limit = 30, includeBackground = false } = {}) {
+  function conversations({ before = null, limit = 30, offset = 0, includeBackground = false } = {}) {
     const kinds = includeBackground ? "('call','background')" : "('call')"
+    const page = [Math.min(limit, 200), Math.max(0, Number(offset) || 0)]
     const rows = db
-      .prepare(`SELECT * FROM conversations WHERE kind IN ${kinds} AND EXISTS (SELECT 1 FROM events WHERE conversation_id = conversations.id) ${before ? 'AND started_at < ?' : ''} ORDER BY started_at DESC, id DESC LIMIT ?`)
-      .all(...(before ? [before, Math.min(limit, 200)] : [Math.min(limit, 200)]))
+      .prepare(`SELECT * FROM conversations WHERE kind IN ${kinds} AND EXISTS (SELECT 1 FROM events WHERE conversation_id = conversations.id) ${before ? 'AND started_at < ?' : ''} ORDER BY started_at DESC, id DESC LIMIT ? OFFSET ?`)
+      .all(...(before ? [before, ...page] : page))
     return rows.map(conversationRow)
+  }
+
+  // How many conversations `conversations` can page through, to number the pages.
+  function conversationCount({ includeBackground = false } = {}) {
+    const kinds = includeBackground ? "('call','background')" : "('call')"
+    return db.prepare(`SELECT COUNT(*) AS n FROM conversations WHERE kind IN ${kinds} AND EXISTS (SELECT 1 FROM events WHERE conversation_id = conversations.id)`).get().n
   }
 
   // The day and month summaries in a period, oldest first; days not summarized yet are listed with
@@ -583,8 +597,10 @@ export function openMemory({ dir = memoryDir(), now = Date.now, log = () => {} }
     append,
     replayPending,
     search,
+    searchPage,
     conversation,
     conversations,
+    conversationCount,
     timeline,
     digest,
     pendingSummaries,
@@ -617,8 +633,10 @@ function pendingOnly({ file, pendingFile, now, log }) {
     append,
     replayPending: () => 0,
     search: () => [],
+    searchPage: () => ({ hits: [], total: 0 }),
     conversation: none,
     conversations: () => [],
+    conversationCount: () => 0,
     timeline: () => ({ months: [], days: [] }),
     digest: () => ({ life: null, firstDay: null, recent: [], hits: [] }),
     pendingSummaries: () => [],
