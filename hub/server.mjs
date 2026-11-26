@@ -403,7 +403,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       for (const hit of d.hits) {
         const who = hit.kind === 'user' ? 'usuário' : hit.kind === 'ceci' ? 'ceci' : hit.kind
         const text = hit.text.replace(/\s+/g, ' ').slice(0, MEMORY_HIT_CHARS)
-        lines.push(`${hit.day} (#${hit.conversation}) ${who}: ${hit.untrusted ? quoteUntrusted(text) : text}`)
+        lines.push(`${hit.when ?? hit.day} (#${hit.conversation}) ${who}: ${hit.untrusted ? quoteUntrusted(text) : text}`)
       }
       // Whole lines only, so an untrusted quote is never cut open.
       let block = ''

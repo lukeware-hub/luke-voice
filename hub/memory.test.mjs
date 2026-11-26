@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 
-import { dayOf, ftsQuery, openMemory, rangeOf } from './memory.mjs'
+import { DatabaseSync } from 'node:sqlite'
+import { dayOf, ftsQuery, openMemory, rangeOf, stampOf } from './memory.mjs'
 
 const DAY = 86_400_000
 const fresh = () => mkdtempSync(join(tmpdir(), 'ceci-memory-'))
@@ -239,4 +240,43 @@ test('a delete the brain asks for names exactly one clear thing', async () => {
   assert.deepEqual(scopeFromArgs({ day: '2026-11' }), { day: '2026-11' })
   assert.deepEqual(scopeFromArgs({ search: 'senha' }), { search: 'senha' })
   for (const unclear of [{}, { conversation: 'ontem' }, { day: 'ontem' }, { search: '  ' }, { all: false }]) assert.equal(scopeFromArgs(unclear), null)
+})
+
+test('every line keeps its exact time, in searches, in conversations and in a time range', () => {
+  const dir = fresh()
+  const now = clockAt(Date.parse('2026-03-02T14:03:09'))
+  const memory = openMemory({ dir, now })
+  memory.startCall()
+  memory.append({ kind: 'user', text: 'Qual o prazo do deploy?' })
+  now.advance(7_000)
+  memory.append({ kind: 'ceci', text: 'O prazo do deploy é sexta.' })
+  const hits = memory.search('prazo deploy')
+  assert.equal(hits.length, 2)
+  assert.match(hits.find(h => h.kind === 'user').when, /^2026-03-02T14:03:09[+-]\d{2}:\d{2}$/)
+  assert.match(hits.find(h => h.kind === 'ceci').when, /^2026-03-02T14:03:16/)
+  const talk = memory.conversation('last')
+  assert.equal(talk.items[1].when, stampOf(Date.parse('2026-03-02T14:03:16')))
+  assert.equal(talk.startedAtText, stampOf(Date.parse('2026-03-02T14:03:09')))
+  // A minute range finds the line said in that minute.
+  const [from, to] = [rangeOf('2026-03-02T14:03')[0], rangeOf('2026-03-02T14:03')[1]]
+  assert.equal(memory.search('prazo', { from, to }).length, 2)
+  assert.equal(memory.search('prazo', { from: rangeOf('2026-03-02T14:04')[0] }).length, 0)
+  assert.deepEqual(rangeOf('2026-03-02 14:03:09'), [Date.parse('2026-03-02T14:03:09'), Date.parse('2026-03-02T14:03:09') + 1000])
+  memory.close()
+})
+
+test('a version 1 memory gets the exact time on its old lines when opened', () => {
+  const dir = fresh()
+  const at = Date.parse('2026-01-10T08:15:30')
+  const raw = new DatabaseSync(join(dir, 'memory.db'))
+  raw.exec(`CREATE TABLE conversations (id INTEGER PRIMARY KEY, started_at INTEGER NOT NULL, ended_at INTEGER, kind TEXT NOT NULL DEFAULT 'call', day TEXT NOT NULL, persona TEXT, voice TEXT, title TEXT);
+CREATE TABLE events (id INTEGER PRIMARY KEY, conversation_id INTEGER NOT NULL, at INTEGER NOT NULL, kind TEXT NOT NULL, session TEXT, text TEXT NOT NULL, meta TEXT, untrusted INTEGER NOT NULL DEFAULT 0);
+INSERT INTO conversations (started_at, day) VALUES (${at}, '2026-01-10');
+INSERT INTO events (conversation_id, at, kind, text) VALUES (1, ${at}, 'user', 'frase antiga');
+PRAGMA user_version = 1;`)
+  raw.close()
+  const memory = openMemory({ dir, now: clockAt(at + DAY) })
+  assert.equal(memory.conversation(1).items[0].when, stampOf(at))
+  assert.equal(memory.stats().events, 1)
+  memory.close()
 })
