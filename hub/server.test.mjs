@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createServer as createHttpServer, request } from 'node:http'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
@@ -148,6 +148,19 @@ test('the page loads no remote script; the ElevenLabs client is loaded on demand
     assert.equal(res.status, 200)
     assert.doesNotMatch(res.body, /\bfrom\s*['"]https?:|import\s*\(\s*['"]https?:/)
   }
+})
+
+test('every script the window imports is served, so one missing route cannot leave every button dead', async () => {
+  // A module the page imports that answers 404 stops app.js before any click handler is wired.
+  const windowDir = new URL('../window/', import.meta.url)
+  const sources = ['app.js', ...readdirSync(new URL('engines/', windowDir)).filter(f => f.endsWith('.js')).map(f => `engines/${f}`)]
+  const paths = new Set()
+  for (const file of sources) {
+    const code = readFileSync(new URL(file, windowDir), 'utf8')
+    for (const [, path] of code.matchAll(/(?:\bfrom\s*|import\s*\(\s*|new Worker\(\s*|addModule\(\s*)'(\/(?!vendor\/)[^']+\.m?js)'/g)) paths.add(path)
+  }
+  assert.ok(paths.has('/engines/microphone.js'))
+  for (const path of paths) assert.equal((await call('GET', path)).status, 200, `${path} is imported by the window but not served`)
 })
 
 test('events are kept as activity the agent can read', async () => {
