@@ -966,6 +966,32 @@ const UNINSTALL_RUN = [
   'LUKE_VOICE_NO_PROMPT=1 LUKE_VOICE_DELETE_MEMORY="$m" nohup "$@" bash "$d/uninstall.sh" >"$d/uninstall.log" 2>&1 </dev/null &',
 ].join('\n')
 
+const UPDATE_STEPS = [
+  { args: ['plugin', 'marketplace', 'update', 'luke-voice'], timeoutMs: 2 * 60_000, step: 'atualizar a lista de versões' },
+  { args: ['plugin', 'update', 'luke-voice@luke-voice'], timeoutMs: 5 * 60_000, step: 'atualizar o luke-voice' },
+]
+
+// /luke-voice update: the two `claude plugin` commands the README lists (refresh the marketplace,
+// then update the plugin), run here so nobody has to leave Claude Code. The new version is read at
+// the next start of Claude Code, so the answer says to restart it. The voice is not touched: a new
+// version that needs another download prepares it on the first call (or with /luke-voice setup).
+async function updateCommand($: EngineInterface) {
+  let last = ''
+  for (const { args, timeoutMs, step } of UPDATE_STEPS) {
+    let out: { exitCode: number; stdout: string; stderr: string }
+    try {
+      out = await $.process.run(['claude', ...args], { timeoutMs })
+    } catch (error) {
+      if (isNotFound(error)) return `Não achei o comando claude para ${step}. Cole isto no Terminal:\n\n  claude ${UPDATE_STEPS.map(s => s.args.join(' ')).join('\n  claude ')}`
+      return `Não consegui ${step}: o comando demorou demais ou foi interrompido. Veja a internet e rode /luke-voice update de novo.`
+    }
+    const text = (out.stdout.trim() || out.stderr.trim()).split('\n').pop() ?? ''
+    if (out.exitCode !== 0) return `Não consegui ${step}: ${short(text || `o comando saiu com erro ${out.exitCode}`, 200)}. Rode /luke-voice update de novo, ou cole no Terminal: claude ${args.join(' ')}`
+    last = text
+  }
+  return ['luke-voice atualizado.', last ? short(last, 200) : null, 'Feche o Claude Code e abra de novo para usar a versão nova.'].filter(Boolean).join('\n')
+}
+
 // /luke-voice uninstall: says what goes and asks for `confirmar`, since the voice (GBs) is deleted.
 // With it: ends the call, turns off (so this session does not start the hub again) and runs
 // install/uninstall.sh apart from Claude Code. On Windows, the line to paste.
@@ -1152,6 +1178,7 @@ async function helpText($: EngineInterface) {
     '  /luke-voice status   mostra o estado técnico',
     '  /luke-voice help     mostra esta ajuda',
     '  /luke-voice memoria    mostra a memória da Ceci; memoria buscar <texto>; memoria apagar <alvo>',
+    '  /luke-voice update     atualiza o luke-voice para a versão mais nova (depois, feche e abra o Claude Code)',
     '  /luke-voice uninstall  remove o luke-voice e a voz baixada (pede confirmação)',
     '',
     'Bom saber:',
@@ -1186,7 +1213,7 @@ export const register: Register = (on, options) => {
     // The hub's port follows LUKE_VOICE_PORT, like the hub (hub/paths.mjs).
     const port = Number(await $.env.get('LUKE_VOICE_PORT'))
     if (Number.isInteger(port) && port > 0 && port < 65536) HUB = `http://127.0.0.1:${port}`
-    await $.command.register({ name: NAME, description: 'Ceci, voice assistant: on/off, call, end, window, voz, memoria, setup, status, help, uninstall' })
+    await $.command.register({ name: NAME, description: 'Ceci, voice assistant: on/off, call, end, window, voz, memoria, setup, status, help, update, uninstall' })
     // Redraw the pane while a task runs, so its elapsed time moves; a long one gets a spoken update.
     $.clock.every(15_000, () => {
       void read($, running)
@@ -1226,6 +1253,9 @@ export const register: Register = (on, options) => {
         return { text: await statusText($) }
       case 'setup':
         return { text: await setupCommand($) }
+      case 'update':
+      case 'atualizar':
+        return { text: await updateCommand($) }
       case 'help':
       case 'ajuda':
         return { text: await helpText($) }

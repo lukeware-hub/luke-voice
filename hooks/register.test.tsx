@@ -11,6 +11,9 @@ type Call = { method: string; path: string; port: string; body: Record<string, u
 
 // What `claude -p` prints in the brain tests; the launcher answer is used for every other process.
 let brainStdout = ''
+// The exit code and stderr of every `claude` process; 0 and empty except in the update failure test.
+let claudeExit = 0
+let claudeStderr = ''
 // What $.model.complete answers in the brain tests.
 let brainComplete: Record<string, unknown> = { isAnswered: true, text: '{"say":"","tool":null}' }
 // What hub/setup.mjs prints in the /luke-voice setup tests.
@@ -84,7 +87,8 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
   on('process.run', (_, e) => {
     launches.push(e)
     if (launch.throws && e.argv[0] !== 'claude') return { deny: launch.throws }
-    return { value: { exitCode: 0, stdout: e.argv[0] === 'claude' ? brainStdout : String(e.argv[1]).endsWith('setup.mjs') ? setupStdout : launch.stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    const isClaude = e.argv[0] === 'claude'
+    return { value: { exitCode: isClaude ? claudeExit : 0, stdout: isClaude ? brainStdout : String(e.argv[1]).endsWith('setup.mjs') ? setupStdout : launch.stdout, stderr: isClaude ? claudeStderr : '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('ui.status', (_, e) => (statuses.push(e.text), { value: undefined }))
   on('ui.toast', () => ({ value: undefined }))
@@ -969,6 +973,38 @@ test('in help, the ElevenLabs voice without a key is called out', async ($, on) 
   const paid = (await $.command.run(run('help'))).text
   expect(paid).toContain('✓ Voz: ElevenLabs')
   expect(paid).toContain('✗ Chave da ElevenLabs: falta')
+})
+
+test('/luke-voice update refreshes the marketplace, then updates the plugin, and says to restart', async ($, on) => {
+  const { launches } = engine(on)
+  for (const arg of ['update', 'atualizar']) {
+    launches.length = 0
+    const text = (await $.command.run(run(arg))).text
+    expect(launches.map(l => (l as { argv: string[] }).argv)).toEqual([
+      ['claude', 'plugin', 'marketplace', 'update', 'luke-voice'],
+      ['claude', 'plugin', 'update', 'luke-voice@luke-voice'],
+    ])
+    expect(text).toContain('luke-voice atualizado')
+    expect(text).toContain('Feche o Claude Code e abra de novo')
+  }
+})
+
+test('/luke-voice update stops at the step that failed and says how to run it by hand', async ($, on) => {
+  const { launches } = engine(on)
+  claudeExit = 1
+  claudeStderr = 'network down'
+  let text: string
+  try {
+    text = (await $.command.run(run('update'))).text
+  } finally {
+    claudeExit = 0
+    claudeStderr = ''
+  }
+  expect(launches).toHaveLength(1)
+  expect(text).toContain('atualizar a lista de versões')
+  expect(text).toContain('network down')
+  expect(text).toContain('claude plugin marketplace update luke-voice')
+  expect(text).not.toContain('luke-voice atualizado')
 })
 
 test('/luke-voice uninstall alone only says what goes, and runs nothing', async ($, on) => {
