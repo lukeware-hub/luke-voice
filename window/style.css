@@ -1865,6 +1865,62 @@ body[data-hidden='true'] *::after {
   font-size: 13px;
 }
 
+.memory-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin: 12px 0 0;
+  padding: 0 4px;
+}
+
+.memory-pager[hidden] {
+  display: none;
+}
+
+.memory-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.memory-size select {
+  min-height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--fill);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+
+.memory-size select:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.memory-pages {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px 12px;
+}
+
+.memory-page-text {
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.memory-pages .link:disabled {
+  color: var(--faint);
+  opacity: 0.5;
+  cursor: default;
+}
+
 .memory-day {
   margin: 14px 0 0;
   padding: 0 4px;

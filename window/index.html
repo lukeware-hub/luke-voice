@@ -142,7 +142,21 @@
             </form>
             <p id="memoryStats" class="memory-stats"></p>
             <ol id="memoryList" class="log memory-list"></ol>
-            <button id="memoryMore" class="link memory-more" type="button" hidden>Carregar conversas mais antigas</button>
+            <nav id="memoryPager" class="memory-pager" aria-label="Páginas da memória" hidden>
+              <label class="memory-size">
+                <select id="memoryPageSize" aria-label="Itens por página">
+                  <option value="10" selected>10</option>
+                  <option value="50">50</option>
+                  <option value="100">100</option>
+                </select>
+                por página
+              </label>
+              <div class="memory-pages">
+                <button id="memoryPrev" class="link" type="button">‹ Anterior</button>
+                <span id="memoryPageText" class="memory-page-text" aria-live="polite"></span>
+                <button id="memoryNext" class="link" type="button">Próxima ›</button>
+              </div>
+            </nav>
             <div class="memory-danger">
               <button id="memoryWipe" class="danger-btn" type="button">Apagar toda a memória</button>
             </div>
