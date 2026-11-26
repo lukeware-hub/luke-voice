@@ -1334,3 +1334,29 @@ test("the window's log lines are kept in window.log, one per line, only with the
   assert.match(text, /\[luke-voice\] barge-in\? lowering Ceci\n/)
   assert.match(text, /two lines\n/)
 })
+
+test('a session ended from the window stays ended: its Claude session cannot subscribe again unless the user turns it on', async () => {
+  const s = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/gone', sessionId: 'gone-1' } })).body
+  assert.equal((await call('POST', '/session-end', { key: WINDOW, body: { name: s.name } })).body.ok, true)
+  // A reload, a restart or an older mod that retries on any 410: refused, and the row stays gone.
+  const again = await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/gone', sessionId: 'gone-1' } })
+  assert.equal(again.status, 410)
+  assert.equal(again.body.error, 'ended')
+  // Remembered on disk, so a restarted hub refuses it too.
+  const restarted = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {} })
+  await new Promise(resolve => restarted.listen(0, '127.0.0.1', resolve))
+  const res = await fetch(`http://127.0.0.1:${restarted.address().port}/subscribe`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${SERVICE}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ cwd: '/repos/gone', sessionId: 'gone-1' }),
+  })
+  assert.equal(res.status, 410)
+  restarted.closeAllConnections()
+  restarted.close()
+  // The user turning luke-voice on again in that session brings it back.
+  const back = await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/gone', sessionId: 'gone-1', byUser: true } })
+  assert.equal(back.status, 200)
+  const later = await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/gone', sessionId: 'gone-1' } })
+  assert.equal(later.status, 200)
+  await call('POST', '/unsubscribe', { auth: later.body.token })
+})

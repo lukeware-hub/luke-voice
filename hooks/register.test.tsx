@@ -34,6 +34,8 @@ let launchThrows: string | null = null
 let existing: RegExp | null = null
 // What the hub answers to /show. Reset by engine().
 let showBody: Record<string, unknown> | null = null
+// What the hub answers to /subscribe instead of a token, as status and body. Reset by engine().
+let subscribeAnswer: { status: number; body: unknown } | null = null
 
 // Stands for the engine and the hub: records each hub request and each submitted prompt.
 function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unknown }>> = [], after = { status: 410, body: {} as unknown }, envKey?: string, health?: Record<string, unknown>) {
@@ -65,6 +67,8 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
   launchThrows = null
   const show = showBody
   showBody = null
+  const subscribed = subscribeAnswer
+  subscribeAnswer = null
   on('fs.exists', (_, e) => ({ value: (marker !== null && /[\\/]first-call$/.test(String(e.path))) || (found !== null && found.test(String(e.path))) }))
   on('fs.write', (_, e) => (markerWrites.push({ path: String(e.path), text: String(e.text) }), { value: undefined }))
   on('ui.close', () => ({ value: undefined }))
@@ -94,7 +98,7 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
     calls.push({ method: e.init?.method ?? 'GET', path: url.pathname, port: url.port, body: typeof raw === 'string' ? JSON.parse(raw) : {} })
     let status = 200
     let body: unknown = { ok: true }
-    if (url.pathname === '/subscribe') body = { token: 'session-1', name: 'api', hasKey: true }
+    if (url.pathname === '/subscribe') ({ status, body } = subscribed ?? { status: 200, body: { token: 'session-1', name: 'api', hasKey: true } })
     if (url.pathname === '/health' && health) body = health
     if (url.pathname === '/setup') body = { started: true }
     if (url.pathname === '/show' && show) body = show
@@ -1131,7 +1135,7 @@ test('a voice task started before a reload of the mod still reports its result',
   const held = new Promise<void>(resolve => (release = resolve))
   const { calls, stored } = engine(on, [async () => (await held, { status: 410, body: {} })])
 
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: false })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await until(() => calls.some(c => c.path === '/subscribe'))
   await $.turn.complete({ answer: 'Todos passaram.', durationMs: 1, isAborted: false, turnId: 'x', agentId: 'agent-9', reason: 'answer' })
   await until(() => calls.some(c => c.path === '/events' && JSON.stringify(c.body).includes('task_done')))
@@ -1214,4 +1218,42 @@ test("Haiku's real summary shape (a title line, then the summary) is read as tit
   const out = parseSummary(item, real)
   expect(out.title).toBe('Testes do Girassol: 42 passaram')
   expect(out.text.startsWith('O usuário pediu')).toBe(true)
+})
+
+test('a session ended from the window that subscribes again (a reload, a restart) is refused and stays off', async ($, on) => {
+  subscribeAnswer = { status: 410, body: { error: 'ended' } }
+  storeGet = e => ((e as { key?: string }).key === 'isOn' ? true : undefined)
+  const { calls, stored } = engine(on)
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await until(() => calls.some(c => c.path === '/subscribe'))
+  for (let i = 0; i < 2000; i++) await Promise.resolve()
+
+  // Asked once, without the user's say-so, then no retry and no polling: it stays off here.
+  expect(calls.filter(c => c.path === '/subscribe').length).toBe(1)
+  expect(calls.find(c => c.path === '/subscribe')?.body.byUser).toBe(false)
+  expect(calls.some(c => c.path === '/inbox')).toBe(false)
+  expect(stored.filter(v => v === false).length).toBe(0)
+  const ui = await $.ui.mount({ ...FOOTER, surface: 'terminal' })
+  expect((await ui.find({ type: 'Button', key: 'luke-voice-toggle' }))?.props.label).toBe('✦ luke-voice: off')
+  await ui.unmount()
+})
+
+test('turning it on by hand tells the hub the user asked, so an ended session can come back', async ($, on) => {
+  const { calls } = engine(on)
+
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/subscribe'))
+
+  expect(calls.find(c => c.path === '/subscribe')?.body.byUser).toBe(true)
+})
+
+test('a claude -p run stays off even when luke-voice is stored on, so it never shows in the call window', async ($, on) => {
+  storeGet = e => ((e as { key?: string }).key === 'isOn' ? true : undefined)
+  const { calls } = engine(on)
+
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  for (let i = 0; i < 2000; i++) await Promise.resolve()
+
+  expect(calls.some(c => c.path === '/subscribe')).toBe(false)
 })

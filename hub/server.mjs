@@ -54,6 +54,8 @@ const RECENT_SAID_CHARS = 200
 const BRAIN_WAIT_MS = 40_000
 const NO_SESSION_SAY = 'Nenhuma sessão do Claude está ligada. Ligue o luke-voice no Claude Code e me chame de novo.'
 const STALE_SESSION_MS = 90_000
+// How many sessions ended from the window the hub remembers (~/.luke-voice/ended.json).
+const MAX_ENDED = 200
 // The window is opened with a one-time launch code, not the window key: the address is on the
 // browser's command line, which other users of the computer can read. The code lasts long enough
 // for the browser to start; one handed to the user to open by hand lasts longer.
@@ -348,7 +350,7 @@ export function createEngineRunner({ engine, setDownload, warmQuestions = () => 
   }
 }
 
-export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, engine = null, profile = () => null, voiceRef = null, onLocalVoice = () => {}, onSetup = () => ({ started: false }), engineState = () => 'off', macVoice = () => null, macVoiceGender = () => null, macVoiceSiri = () => null, macSay = sayWav, platform = process.platform, log = () => {}, onShutdown = () => process.exit(0), questionsDir = join(stateDir(), 'cache', 'questions'), staleMs = STALE_SESSION_MS, sweepMs = 10_000, sttWaitMs = STT_WAIT_MS, clock = Date.now, noticesFile = stateFile('notices.json'), reopenMs = REOPEN_FOR_NOTICE_MS, windowLog = stateFile('window.log'), memory = null, summarizeEveryMs = 120_000 }) {
+export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, engine = null, profile = () => null, voiceRef = null, onLocalVoice = () => {}, onSetup = () => ({ started: false }), engineState = () => 'off', macVoice = () => null, macVoiceGender = () => null, macVoiceSiri = () => null, macSay = sayWav, platform = process.platform, log = () => {}, onShutdown = () => process.exit(0), questionsDir = join(stateDir(), 'cache', 'questions'), staleMs = STALE_SESSION_MS, sweepMs = 10_000, sttWaitMs = STT_WAIT_MS, clock = Date.now, noticesFile = stateFile('notices.json'), reopenMs = REOPEN_FOR_NOTICE_MS, windowLog = stateFile('window.log'), memory = null, summarizeEveryMs = 120_000, endedFile = stateFile('ended.json') }) {
   const sessions = new Map() // token -> session
   const launches = new Map() // one-time launch code -> when it expires
   const replaced = new Set() // tokens a newer subscription of the same Claude session took over
@@ -378,6 +380,19 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     }
   }
   rememberKey(key)
+  // Claude sessions the user ended from the window, by their Claude session id, kept across
+  // restarts: a mod that subscribes again for one (a reload, a hub restart, an older luke-voice
+  // that treats any 410 as "subscribe again") is refused, so an ended session never comes back by
+  // itself. Only the user turning luke-voice on again in that session (`byUser`) lifts it.
+  const endedIds = new Set(readSeenKeys(endedFile))
+  const saveEnded = () => {
+    for (const id of [...endedIds].slice(0, -MAX_ENDED)) endedIds.delete(id)
+    try {
+      writeFileSync(endedFile, JSON.stringify([...endedIds]), { mode: 0o600 })
+    } catch {
+      // Kept in memory still; only a hub restart would forget it.
+    }
+  }
   let lastBusy = Date.now()
 
   // Ceci's memory. Recording never fails a request: memory.append() keeps what it cannot write.
@@ -725,6 +740,12 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       const session = byName(String(body.name ?? ''))
       if (!session) return [404, { ok: false, error: missing(String(body.name ?? '')) }]
       ended.add(session.token)
+      // Remembered by its Claude session too: a new subscription from it is refused (see /subscribe).
+      if (session.sessionId) {
+        endedIds.delete(session.sessionId)
+        endedIds.add(session.sessionId)
+        saveEnded()
+      }
       // Its waiting commands get no answer now: the window is not left hanging on them.
       for (const command of session.inbox) acks.get(command.id)?.({ ok: false, message: `The ${session.name} session was ended.` })
       session.inbox = []
@@ -1110,6 +1131,14 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       if (route === 'POST /subscribe') {
         if (!sameSecret(bearer, serviceToken)) return send(res, 401, { error: 'token' })
         const body = await readBody(req)
+        const sessionId = typeof body.sessionId === 'string' ? body.sessionId.slice(0, 200) : ''
+        // A session the user ended from the window stays ended: its mod hears so and turns off,
+        // until the user turns luke-voice on again in that session (the button or the command).
+        if (sessionId && endedIds.has(sessionId)) {
+          if (body.byUser !== true) return send(res, 410, { error: 'ended' })
+          endedIds.delete(sessionId)
+          saveEnded()
+        }
         const offered = typeof body.apiKey === 'string' ? body.apiKey.trim() : ''
         // A key never seen before was just saved in Claude Code: it wins, so a changed key works
         // without waiting for the hub to exit. A key seen before comes from a session started
@@ -1125,7 +1154,6 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
         // sends no voice (nor version): see canThink below.
         if (PROVIDERS.includes(body.provider)) chosen = body.provider
         const token = newSecret()
-        const sessionId = typeof body.sessionId === 'string' ? body.sessionId.slice(0, 200) : ''
         // A reloaded mod subscribes again from the same Claude session: it takes over the old row.
         const previous = sessionId ? [...sessions.values()].find(s => s.sessionId === sessionId) : undefined
         if (previous) {

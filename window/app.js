@@ -411,6 +411,8 @@ async function endSession(name) {
   clearTimeout(armTimer)
   const out = await hub('POST', '/session-end', { name }).catch(error => ({ ok: false, error: error.message }))
   addLog(out.ok ? 'stop' : 'failed', out.ok ? `Sessão ${name} encerrada` : `Não consegui encerrar a sessão ${name}`, { who: name })
+  // Gone from the list now, without waiting for the hub's next roster.
+  if (out.ok) roster = roster.filter(session => session.name !== name)
   renderRoster()
 }
 
