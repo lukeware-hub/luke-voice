@@ -257,6 +257,9 @@ export const withFull = (text: string, max: number): { text: string; full?: stri
 let generation = 0
 let token: string | null = null
 let subscribing: Promise<boolean> | null = null
+// Set when the user turns luke-voice on in this session (the button, the command): only then may
+// the hub take back a session the user ended from the call window. A restart or reload may not.
+let byUser = false
 let isBusy = false
 let turnId: string | null = null
 let queued: string[] = []
@@ -589,9 +592,13 @@ async function subscribeOnce($: EngineInterface, options: Record<string, unknown
       $,
       'POST',
       '/subscribe',
-      { cwd: await $.session.cwd(), sessionId: await $.session.id(), apiKey: await apiKey($, options), provider: chosenProvider(options), version: await pluginVersion($), canSummarize: true },
+      { cwd: await $.session.cwd(), sessionId: await $.session.id(), apiKey: await apiKey($, options), provider: chosenProvider(options), version: await pluginVersion($), canSummarize: true, byUser },
       out.serviceToken,
     )
+    if (res.status === 410 && res.json.error === 'ended') {
+      await endedFromWindow($)
+      return false
+    }
     if (!res.ok || typeof res.json.token !== 'string') {
       await setLink($, { state: 'down', reason: `o servidor local recusou a conexão (${res.status})` })
       return false
@@ -618,6 +625,17 @@ function subscribe($: EngineInterface, options: Record<string, unknown>): Promis
   return subscribing
 }
 
+// Ended by the user from the call window: luke-voice turns off in this session only (the stored
+// on/off, shared by every session, stays), until the user turns it on again here.
+async function endedFromWindow($: EngineInterface) {
+  token = null
+  byUser = false
+  await update($, isOn, () => false)
+  await turnOff($)
+  await addLine($, { kind: 'stop', text: 'Sessão encerrada pela janela da Ceci.' })
+  $.ui.toast('luke-voice: esta sessão foi encerrada pela janela da Ceci')
+}
+
 // Long-polls this session's inbox until the mod is turned off or reloaded.
 async function pollLoop($: EngineInterface, options: Record<string, unknown>, gen: number) {
   let retryMs = RETRY_MS
@@ -635,16 +653,8 @@ async function pollLoop($: EngineInterface, options: Record<string, unknown>, ge
       if (gen !== generation) return
       // A reload of this mod subscribed again for the same session: this older loop ends.
       if (res.status === 409) return
-      // Ended by the user from the call window: luke-voice turns off in this session only (the
-      // stored on/off, shared by every session, stays), until the user turns it on again.
-      if (res.status === 410 && res.json.error === 'ended') {
-        token = null
-        await update($, isOn, () => false)
-        await turnOff($)
-        await addLine($, { kind: 'stop', text: 'Sessão encerrada pela janela da Ceci.' })
-        $.ui.toast('luke-voice: esta sessão foi encerrada pela janela da Ceci')
-        return
-      }
+      // Ended by the user from the call window.
+      if (res.status === 410 && res.json.error === 'ended') return endedFromWindow($)
       if (res.status === 401 || res.status === 410) {
         token = null
         await $.clock.sleep(250)
@@ -812,6 +822,7 @@ async function toggle($: EngineInterface, options: Record<string, unknown>, to?:
   await update($, isOn, v => to ?? !v)
   const active = await read($, isOn)
   await $.store.set('isOn', active)
+  byUser = active
   if (active) {
     await turnOn($, options)
     if (startCall) void show($, options, true).then(text => $.ui.toast(text)).catch(() => undefined)
@@ -1184,7 +1195,9 @@ export const register: Register = (on, options) => {
     })
     const started = await next(e)
     if (await isFirstCall($, e.isInteractive)) await toggle($, opts, true)
-    else if (await read($, isOn)) await turnOn($, opts)
+    // A `claude -p` run (a script, an automation) never joins the call on its own: only a session
+    // with a person at the prompt does, so the call window lists only those.
+    else if (e.isInteractive !== false && (await read($, isOn))) await turnOn($, opts)
     return started
   })
 
