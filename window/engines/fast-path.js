@@ -50,7 +50,19 @@ const YES_PHRASES = [
   'com certeza', 'claro que sim', 'pode sim', 'isso mesmo', 'e isso', 'e isso ai',
 ]
 const YES_PHRASES_RE = new RegExp(`\\b(?:${YES_PHRASES.join('|')})\\b`, 'g')
-const NO = new Set(['nao', 'negativo', 'esquece', 'deixa', 'cancela', 'cancelar', 'nem'])
+const NO = new Set([
+  'nao', 'negativo', 'esquece', 'deixa', 'cancela', 'cancelar', 'nem',
+  // More ways to refuse, and "não" as the ears write a quick or soft one ("Naum", "Num").
+  'naum', 'num', 'nope', 'nah', 'nunca', 'jamais', 'negado', 'recuso', 'nada',
+])
+// Refusals of several words, said as one: each becomes "nao" before the words are counted, so
+// "claro que não" is a no and not a yes beside a no.
+const NO_PHRASES = ['claro que nao', 'logico que nao', 'obvio que nao', 'com certeza nao', 'certeza que nao', 'acho que nao', 'de jeito nenhum', 'de jeito algum', 'nem pensar', 'nem a pau', 'nem morto', 'nem morta', 'por enquanto nao', 'ainda nao']
+const NO_PHRASES_RE = new RegExp(`\\b(?:${NO_PHRASES.join('|')})\\b`, 'g')
+// A one-word answer the ears misheard, taken only when it is the whole answer to "posso?": a soft,
+// quick "sim" comes back as "Fim." or "Sin.", and a "não" as "Mão." or "Nau." (heard on the real engine).
+const LONE_YES = new Set(['fim', 'sin', 'si', 'cim', 'simm', 'siim'])
+const LONE_NO = new Set(['mao', 'nau', 'naao', 'naaao'])
 const FILLER = new Set([
   ...NAMES, 'por', 'favor', 'pode', 'sim', 'ver', 'ai', 'ja', 'agora', 'mesmo', 'com', 'certeza',
   'fazer', 'mandar', 'ir', 'pra', 'para', 'la', 'precisa', 'obrigado', 'obrigada', 'e', 'o', 'a', 'se', 'ya', 'isso', 'melhor', 'tudo', 'bem', 'bom', 'ser', 'que', 'bala',
@@ -59,17 +71,25 @@ const FILLER = new Set([
 ])
 const MAX_ANSWER_WORDS = 7
 
-function shortAnswer(text, strong, phrases = null) {
-  const heard = phrases ? plain(text).replace(phrases, 'sim') : plain(text)
-  const words = heard.split(/[^a-z]+/).filter(Boolean)
-  if (words.length === 0 || words.length > MAX_ANSWER_WORDS) return false
-  return words.some(w => strong.has(w)) && words.every(w => strong.has(w) || FILLER.has(w))
+const words = text => plain(text).split(/[^a-z]+/).filter(Boolean)
+
+// The one word of an answer, with at most the name beside it ("Fim.", "Ceci, mão"), or ''.
+function loneWord(text) {
+  const left = words(text).filter(w => !NAMES.includes(w))
+  return left.length === 1 ? left[0] : ''
+}
+
+function shortAnswer(text, strong, phrases = null, as = 'sim') {
+  const heard = phrases ? plain(text).replace(phrases, as) : plain(text)
+  const said = heard.split(/[^a-z]+/).filter(Boolean)
+  if (said.length === 0 || said.length > MAX_ANSWER_WORDS) return false
+  return said.some(w => strong.has(w)) && said.every(w => strong.has(w) || FILLER.has(w))
 }
 
 // "sim", "pode", "manda ver", "Sim, pode-se." (as Whisper writes it), "claro, pode fazer".
 // A question back ("tá aí?", "pode ser?", "o que?") is never a yes, even when made of yes words.
 const QUESTION = new RegExp(`\\?\\W*$|^\\W*(${NAME}\\W+)*(o que|que|como|onde|quando|por que|porque|qual|quem|cade|ta ai)\\b`)
-const isPlainYes = text => !QUESTION.test(plain(text)) && !isDeny(text) && shortAnswer(text, YES, YES_PHRASES_RE)
+const isPlainYes = text => !QUESTION.test(plain(text)) && !isDeny(text) && !isMixed(text) && (shortAnswer(text, YES, YES_PHRASES_RE) || LONE_YES.has(loneWord(text)))
 
 // How many of the words of `text` are words of `said`, from 0 to 1.
 function shareOf(text, said) {
@@ -95,5 +115,19 @@ export function isConfirm(text, said = '') {
   return false
 }
 
-// "não", "agora não", "deixa pra lá", "melhor não", "esquece".
-export const isDeny = text => shortAnswer(text, NO)
+// "não", "agora não", "deixa pra lá", "melhor não", "esquece", "de jeito nenhum", "claro que não".
+// A question back ("não?") is not a no, and neither is a yes beside a no ("sim, não": isMixed).
+export const isDeny = text => !/\?\W*$/.test(plain(text)) && !isMixed(text) && (shortAnswer(text, NO, NO_PHRASES_RE, 'nao') || LONE_NO.has(loneWord(text)))
+
+// Words that only ever mean yes. "pode", "isso", "tá" and "vai" also fill a no ("isso não", "pode
+// ser que não", "não tá bom"), so they do not make an answer mixed.
+const CLEAR_YES = new Set([...YES].filter(w => !['pode', 'pod', 'podi', 'isso', 'ta', 'vai', 'faz', 'faca', 'segue', 'manda', 'bora', 'vamos', 'vamo', 'certeza'].includes(w)))
+
+// A short answer with both a yes and a no in it ("sim, não", "não, ok", "ok... não"): two voices
+// over each other, or a word lost in the noise. Neither runs nor drops the action: Ceci asks again.
+export function isMixed(text) {
+  const said = words(plain(text).replace(NO_PHRASES_RE, 'nao'))
+  if (said.length === 0 || said.length > MAX_ANSWER_WORDS) return false
+  if (!said.every(w => YES.has(w) || NO.has(w) || FILLER.has(w))) return false
+  return said.some(w => NO.has(w)) && said.some(w => CLEAR_YES.has(w))
+}

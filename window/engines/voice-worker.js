@@ -6,6 +6,7 @@
 import { AutoTokenizer, StyleTextToSpeech2Model, Tensor, WhisperFeatureExtractor, env, pipeline } from '/vendor/transformers/transformers.min.js'
 import { getPhonemes, initialize, setVoice } from '/vendor/espeak/dist/espeak.mjs'
 import { phonemeIds } from '/engines/piper-ids.js'
+import { countFrame, hasSpeech } from '/engines/speech-check.js'
 
 const KOKORO = 'onnx-community/Kokoro-82M-v1.0-ONNX'
 const WHISPER = 'onnx-community/whisper-base'
@@ -19,8 +20,6 @@ const KOKORO_RATE = 24_000
 const MAX_KOKORO_RTF = 1
 // Smart Turn reads the last 8 s at 16 kHz.
 const TURN_SAMPLES = 128_000
-// At least ~200 ms that Silero hears as speech, or the utterance is noise.
-const MIN_SPEECH_FRAMES = 6
 const RTF_PROBE = 'Tudo certo, já estou pronta para ajudar você agora.'
 
 env.allowLocalModels = false
@@ -135,24 +134,25 @@ async function endOfTurn(audio) {
   return out.logits.data[0]
 }
 
-// How many 32 ms frames of the utterance Silero hears as speech, stopping once it reaches `limit`.
-async function speechFrames(audio, limit = Infinity) {
+// How many 32 ms frames of the utterance Silero hears as speech ({ frames, soft }: speech-check.js),
+// stopping once `isEnough` says so.
+async function speechFrames(audio, isEnough = () => false) {
   const { ort, silero } = turn
   const sr = new ort.Tensor('int64', BigInt64Array.from([16_000n]), [])
   let state = new ort.Tensor('float32', new Float32Array(2 * 128), [2, 1, 128])
   let context = new Float32Array(64)
-  let count = 0
-  for (let i = 0; i + 512 <= audio.length && count < limit; i += 512) {
+  let counts = { frames: 0, soft: 0 }
+  for (let i = 0; i + 512 <= audio.length && !isEnough(counts); i += 512) {
     const frame = audio.subarray(i, i + 512)
     const input = new Float32Array(576)
     input.set(context)
     input.set(frame, 64)
     const out = await silero.run({ input: new ort.Tensor('float32', input, [1, 576]), state, sr })
     state = out.stateN
-    if (out.output.data[0] > 0.5) count++
+    counts = countFrame(counts, out.output.data[0])
     context = frame.slice(448)
   }
-  return count
+  return counts
 }
 
 async function loadPiper() {
@@ -331,18 +331,21 @@ self.onmessage = async ({ data }) => {
     if (type === 'transcribe') {
       const started = performance.now()
       // Noise with no speech in it (a fan, typing) never reaches Whisper, which would invent words.
+      // `isAnswer`: a "posso?" waits, and a soft short "sim" passes a lower bar (speech-check.js).
       if (turn) {
-        const frames = await speechFrames(data.audio, MIN_SPEECH_FRAMES)
-        if (frames < MIN_SPEECH_FRAMES) return post('text', { id, text: '', noSpeech: true, ms: Math.round(performance.now() - started) })
+        const options = { isAnswer: Boolean(data.isAnswer) }
+        const counts = await speechFrames(data.audio, c => hasSpeech(c, options))
+        if (!hasSpeech(counts, options)) return post('text', { id, text: '', noSpeech: true, ms: Math.round(performance.now() - started) })
       }
       const text = await transcribe(data.audio, data.language)
       return post('text', { id, text, ms: Math.round(performance.now() - started) })
     }
-    // For the native engine: how many frames Silero hears as speech, before the audio leaves the page.
+    // For the native engine: whether Silero hears speech, before the audio leaves the page.
     if (type === 'check') {
       const started = performance.now()
-      const frames = turn ? await speechFrames(data.audio) : MIN_SPEECH_FRAMES
-      return post('check', { id, frames, isSpeech: frames >= MIN_SPEECH_FRAMES, ms: Math.round(performance.now() - started) })
+      const options = { isAnswer: Boolean(data.isAnswer) }
+      const counts = turn ? await speechFrames(data.audio, c => hasSpeech(c, options)) : null
+      return post('check', { id, ...counts, isSpeech: counts ? hasSpeech(counts, options) : true, ms: Math.round(performance.now() - started) })
     }
     if (type === 'endpoint') {
       const started = performance.now()

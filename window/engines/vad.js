@@ -42,6 +42,12 @@ const DEFAULTS = {
   // Shorter blips (a click, a knock) are dropped. ~190 ms: a quick "sim" or "não" has about that
   // much voiced sound; at 8 (~260 ms) it was often dropped. Silero still checks what passes.
   minSpeechFrames: 6,
+  // While Ceci waits for the answer to her "posso?" (isAnswer), a soft, quick answer ("sim", "não",
+  // "pode", "ok") must not be lost: the bar to start a turn drops to this share of minLevel
+  // (~-46 dBFS), and ~130 ms of voice is enough. Silero still checks the clip (speech-check.js), and
+  // nothing runs unless the ears write a clear yes; noise ends in "Pode repetir para mim?".
+  answerLevel: 0.6,
+  answerSpeechFrames: 4,
   // A noise that switches on above the bar never has a quiet frame, so the floor, learned from quiet
   // frames only, would never reach it: every turn would run to the 30 s cap. After ~3 s with every
   // frame above the bar, the floor creeps toward the quietest of those frames, slowly (a step-up is
@@ -80,6 +86,8 @@ export function createVad(options = {}) {
   // Frames in a row above the bar, and the quietest of them (the creep of the floor).
   let above = 0
   let aboveMin = Infinity
+  // The turn being heard started while a "posso?" waited (its lower bars hold to its end).
+  let isAnswerTurn = false
 
   // The utterance so far, or only its last `samples`, as one array.
   function audioOf(samples = Infinity) {
@@ -90,7 +98,8 @@ export function createVad(options = {}) {
   }
 
   function finish() {
-    const enough = voiced >= o.minSpeechFrames
+    const enough = voiced >= (isAnswerTurn ? Math.min(o.minSpeechFrames, o.answerSpeechFrames) : o.minSpeechFrames)
+    isAnswerTurn = false
     if (quiet > o.tailFrames) frames = frames.slice(0, frames.length - (quiet - o.tailFrames))
     const audio = audioOf()
     inSpeech = false
@@ -109,16 +118,20 @@ export function createVad(options = {}) {
     get floor() {
       return floor
     },
-    push(frame, { isSpeaking = false, echo = 0 } = {}) {
+    push(frame, { isSpeaking = false, echo = 0, isAnswer = false } = {}) {
       const level = rms(frame)
       const normalBar = Math.max(o.minLevel, floor * o.ratio)
+      // The bar for the user's own turn: lower while an answer to "posso?" is awaited, in a quiet
+      // room only (a noisy room keeps its own bar, floor times ratio).
+      const minLevel = isAnswer || (inSpeech && isAnswerTurn) ? o.minLevel * o.answerLevel : o.minLevel
+      const userBar = Math.max(minLevel, floor * o.ratio)
       // The higher bar only keeps Ceci's voice from starting a turn: once the user is talking, Ceci
       // starting a line must not make their words count as quiet and end the turn under them.
       // `echo` is how loud Ceci's own voice is expected in the mic right now (local.js learns it
       // from her output level): while she speaks it is never speech, in or out of a turn, so her
       // echo neither interrupts her nor keeps a turn going after the user stopped.
       const echoBar = isSpeaking ? echo : 0
-      const turnBar = inSpeech ? Math.max(o.minLevel * o.holdRatio, floor * o.ratio) : isSpeaking ? Math.max(o.bargeMinLevel, floor * o.ratio * o.bargeRatio) : normalBar
+      const turnBar = inSpeech ? Math.max(minLevel * o.holdRatio, floor * o.ratio) : isSpeaking ? Math.max(o.bargeMinLevel, floor * o.ratio * o.bargeRatio) : userBar
       const bar = Math.max(turnBar, echoBar)
       const isLoud = level >= bar
 
@@ -147,6 +160,7 @@ export function createVad(options = {}) {
         if (!isSpeaking && level < normalBar) floor = floor * 0.95 + level * 0.05
         if (loud >= (isSpeaking ? o.bargeFrames : o.startFrames)) {
           inSpeech = true
+          isAnswerTurn = isAnswer && !isSpeaking
           frames = [...preroll]
           voiced = loud
           quiet = 0
@@ -181,6 +195,7 @@ export function createVad(options = {}) {
     },
     reset() {
       inSpeech = false
+      isAnswerTurn = false
       frames = []
       preroll = []
       loud = quiet = voiced = 0

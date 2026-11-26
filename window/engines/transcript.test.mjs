@@ -20,6 +20,8 @@ test('a transcript that is entirely a known Whisper phantom phrase is not speech
     'Se inscreva no canal.',
     'Obrigado por assistir. Inscreva-se no canal!',
     'Obrigado por assistir. Obrigado por assistir.',
+    '(language: pt)',
+    'language Portuguese',
   ]) {
     assert.equal(isNotSpeech(heard), true, heard)
   }

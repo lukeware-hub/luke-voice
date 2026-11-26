@@ -8,6 +8,8 @@ const PHANTOMS = [
   'legendas? pela comunidade amara org',
   'inscreva se(?: no canal)?',
   'se inscreva(?: no canal)?',
+  // The native ears' own language tag, alone, on a clip with almost no speech ("(language: pt)").
+  'language (?:pt|portuguese)(?: br)?',
 ]
 const PHANTOM_ONLY = new RegExp(`^(?: ?(?:${PHANTOMS.join('|')}))+$`)
 

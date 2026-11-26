@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { PENDING_TTL_MS, decide, liveAction } from './confirm.js'
+import { MAX_REPEATS, PENDING_TTL_MS, REPEAT, askedAgain, decide, liveAction, unsureAnswer } from './confirm.js'
 
 const task = { name: 'luke_run_task', args: { task: 'roda os testes' } }
 const send = { name: 'luke_send_to_claude', args: { prompt: 'faz o commit' } }
@@ -75,4 +75,43 @@ test('deleting from the memory waits for a "sim", like the tools that act on the
   assert.equal(decide({ kind: 'notice', reply: { say: '', tool: del, pending: null }, now: 3 }).action, 'say')
   const search = { name: 'luke_memory_search', args: { query: 'girassol' } }
   assert.equal(decide({ kind: 'user', reply: { say: '', tool: search, pending: null }, now: 4 }).action, 'run')
+})
+
+test('a brain that could not make out the answer asks "Pode repetir?" and the "posso?" stays open', () => {
+  const asked = { tool: task, at: 1 }
+  const out = decide({ kind: 'user', reply: { say: REPEAT, tool: null, pending: null }, now: 5, answering: asked })
+  assert.equal(out.action, 'say')
+  assert.equal(out.say, REPEAT)
+  // The same action, its question fresh again: the repeated "sim" runs it.
+  assert.deepEqual(out.pending, { tool: task, at: 5 })
+  // With no "posso?" waiting, asking to repeat leaves nothing pending.
+  assert.equal(decide({ kind: 'user', reply: { say: REPEAT, tool: null, pending: null }, now: 5 }).pending, null)
+  // Any other reply with no tool still lets the "posso?" go, as before.
+  assert.equal(decide({ kind: 'user', reply: { say: 'Tudo bem, então.', tool: null, pending: null }, now: 5, answering: asked }).pending, null)
+})
+
+test('an answer to "posso?" lost in a noise, made up from noise, or a yes and a no at once makes Ceci ask again', () => {
+  const asked = { tool: task, at: 1 }
+  // A soft answer the speech check heard no words in, words the ears made up, a yes beside a no.
+  for (const heard of [{ noSpeech: true }, { text: '' }, { text: '...' }, { text: '(language: pt)' }, { text: 'Obrigado por assistir.' }, { text: 'sim, não' }, { text: 'não, ok' }]) {
+    assert.ok(unsureAnswer(asked, heard), JSON.stringify(heard))
+  }
+  // A clear yes, a clear no or a real request is not asked again: it goes as before.
+  for (const text of ['Sim.', 'pode', 'Não.', 'De jeito nenhum.', 'Sim, mas só na pasta site.', 'Roda os testes de login.']) {
+    assert.equal(unsureAnswer(asked, { text }), null, text)
+  }
+  // With no "posso?" waiting, a noise is only dropped, as before: she does not ask.
+  assert.equal(unsureAnswer(null, { noSpeech: true }), null)
+})
+
+test('asking again keeps the same action, fresh, and stops after a few times so a TV cannot keep her asking', () => {
+  let pending = { tool: task, at: 1 }
+  for (let i = 1; i <= MAX_REPEATS; i++) {
+    assert.ok(unsureAnswer(pending, { noSpeech: true }))
+    pending = askedAgain(pending, 1000 * i)
+    assert.equal(pending.tool, task)
+    assert.equal(pending.at, 1000 * i)
+    assert.equal(liveAction(pending, 1000 * i + 1), pending, 'still answerable by the repeated "sim"')
+  }
+  assert.equal(unsureAnswer(pending, { noSpeech: true }), null)
 })
