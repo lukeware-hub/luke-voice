@@ -260,11 +260,19 @@ export function respell(text) {
 // The native voice says "Bom dia!" as "bem dia" (3 of 4 seeds, by ear); "Bom dia!!" came out right on 10 of 10.
 const BOM_DIA = /(?<![\p{L}\d])(bom\s+dia)!(?!!)/giu
 
+// The native voice says a sentence-opening "Claro" as another word (the ASR heard "Se é o que
+// sim"); mid-sentence it is fine. By ear, on the production path: a lone "Claro." came out right as
+// "claro." and "Claro que sim" / "Claro, posso" as "Claaro que sim" / "Claaro, posso" ("Cla ro" was wrong).
+const CLARO_ALONE = /(^|[.!?…]\s+)Claro(?=[.!?…]+(?:\s|$))/gu
+const CLARO_QUE = /(^|[.!?…]\s+)Claro(?=,|\s+que(?![\p{L}\d]))/gu
+
 // English tech words in the spelling the native voice says best; anything else stays as written.
 export function respellNative(text) {
   return String(text ?? '')
     .replace(NATIVE_RE, word => NATIVE_RESPELL[word.toLowerCase().replace(/\s+/g, ' ')])
     .replace(BOM_DIA, '$1!!')
+    .replace(CLARO_ALONE, '$1claro')
+    .replace(CLARO_QUE, '$1Claaro')
 }
 
 // Where a sentence ends: a run of . ! ? … (and any closing quote or bracket) followed by a space or
