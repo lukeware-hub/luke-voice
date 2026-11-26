@@ -59,6 +59,16 @@ test('the native voice gets its own spelling for the tech words it says in Portu
   assert.deepEqual(speechChunks('O framework lê o state do store.', { isNative: true }), ['O Framework lê o State do store.'])
 })
 
+test('the native voice gets a sentence-opening "Claro" in the spelling it says right', () => {
+  assert.deepEqual(speechChunks('Claro.', { isNative: true }), ['claro.'])
+  assert.deepEqual(speechChunks('Entendi. Claro!', { isNative: true }), ['Entendi.', 'claro!'])
+  assert.deepEqual(speechChunks('Claro que sim, pode deixar comigo.', { isNative: true }), ['Claro que sim, pode deixar comigo.'.replace('Claro', 'Claaro')])
+  // Mid-sentence, with a comma, or as another word: untouched. The browser voices are untouched too.
+  assert.deepEqual(speechChunks('Claro, posso fazer isso.', { isNative: true }), ['Claaro, posso fazer isso.'])
+  for (const text of ['Ficou claro para você?', 'Isso é claro.', 'Está claro, posso fazer.', 'Claramente errado.', 'Mas Claro que sim.']) assert.equal(respellNative(text), text)
+  assert.deepEqual(speechChunks('Claro.'), ['Claro.'])
+})
+
 test('the native voice says "Bom dia!" with a double mark, so it does not come out as "bem dia"', () => {
   assert.deepEqual(speechChunks('Bom dia! Eu sou a Ceci.', { isNative: true }), ['Bom dia!!', 'Eu sou a Ceci.'])
   assert.equal(respellNative('Olá, bom dia!'), 'Olá, bom dia!!')
