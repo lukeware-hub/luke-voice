@@ -91,7 +91,7 @@ Para instalar sem perguntas, defina `LUKE_VOICE_NO_PROMPT=1` antes de rodar; acr
 
 **No Mac:** na primeira chamada, o Mac pergunta se o Chrome pode usar o microfone: clique em **Permitir**. Um Mac com chip Apple fica com a voz natural; um Mac com Intel fica com a voz leve.
 
-**Deu certo quando:** você ouve a Ceci te cumprimentar, por exemplo "Oi! Eu sou a Ceci. O que vamos fazer hoje?" (as palavras mudam a cada chamada). Se faltar alguma coisa, digite `/luke-voice help`: ele confere a sua instalação e diz o que arrumar.
+**Deu certo quando:** você ouve a Ceci te cumprimentar, por exemplo "Bom dia! Eu sou a Ceci. O que vamos fazer hoje?" ("bom dia", "boa tarde" ou "boa noite" pelo relógio, e as palavras mudam a cada chamada). Se faltar alguma coisa, digite `/luke-voice help`: ele confere a sua instalação e diz o que arrumar.
 
 ## Como usar
 
@@ -126,7 +126,7 @@ O cérebro (Ceci, Luke ou Nara) é o Claude Sonnet 5.5, chamado direto pelo `$.m
 Algumas coisas não precisam de chamada ao modelo:
 - "pare" ou "para" para o Claude, com ou sem o nome dela e quantas vezes você disser ("Para, Ceci, para!", "chega, Ceci").
 - Quando a Ceci pergunta "posso?", um "sim" simples roda a ação pendente na hora, e um "não" simples cancela.
-- Quando o cérebro demora mais de 600 ms, a Ceci diz um reconhecimento curto ("Certo.", "Deixa eu ver."). Eles são gerados uma vez por janela, só enquanto ninguém fala, então nunca atrasam a primeira resposta dela.
+- Quando o cérebro demora mais de 600 ms, a Ceci diz um reconhecimento curto: um "Entendi." rápido depois de uma frase curta, e uma frase de escuta como "Deixa eu entender o que você está falando." depois de uma longa, nunca a mesma duas vezes seguidas (`window/engines/acks.js`). Eles são gerados uma vez por janela, só enquanto ninguém fala, então nunca atrasam a primeira resposta dela.
 - No perfil gpu, um roteador local responde conversa rápida (cumprimentos, agradecimentos, despedidas, "quem é você", a idade dela, quem a criou) em cerca de 0,3 s, com frases escritas em `hub/router.mjs`, então ele nunca inventa nada. Todo o resto, e qualquer pedido, vai para o Claude Sonnet. Uma checagem de palavras por cima do modelo pequeno garante que um pedido nunca seja respondido localmente (0 de 49 pedidos de teste foram).
 
 ### Saber quando você terminou de falar

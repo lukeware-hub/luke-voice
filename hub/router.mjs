@@ -70,15 +70,16 @@ export function routeOf(answer) {
 }
 
 // What Ceci says per intent: a few lines each, taken in turn so she does not repeat herself.
+// Every greeting starts with its hello and "!", which a "bom dia" from the user replaces (route).
 export const REPLIES = {
-  greeting: ['Oi! Que bom te ouvir. O que vamos fazer?', 'Oi, oi! Estou aqui, pode falar.', 'Olá! Pronta para ajudar.'],
-  how_are_you: ['Estou ótima, obrigada! E você, o que vamos fazer hoje?', 'Tudo ótimo por aqui! Em que posso ajudar?', 'Estou bem, e animada para trabalhar! O que você precisa?'],
-  thanks: ['Imagina! Fico feliz em ajudar.', 'De nada! Qualquer coisa, é só chamar.', 'Por nada! Estou aqui.'],
-  goodbye: ['Tchau! Até a próxima.', 'Até mais! Foi ótimo trabalhar com você.', 'Tchau, tchau! Qualquer coisa, me chama.'],
+  greeting: ['Oi! Que bom te ouvir. O que vamos fazer hoje?', 'Oi, oi! Estou aqui, pode falar.', 'Olá! Pronta para ajudar.', 'Oi! Que alegria. Em que posso ajudar?', 'Opa, oi! Tô na escuta. O que você deseja?'],
+  how_are_you: ['Estou ótima, obrigada! E você, o que vamos fazer hoje?', 'Tudo ótimo por aqui! Em que posso ajudar?', 'Estou bem, e animada para trabalhar! O que você precisa?', 'Tudo lindo por aqui! E com você, tudo certo?'],
+  thanks: ['Imagina! Fico feliz em ajudar.', 'De nada! Qualquer coisa, é só chamar.', 'Por nada! Estou aqui.', 'Que nada! Adoro ajudar.', 'Imagina, foi um prazer!'],
+  goodbye: ['Tchau! Até a próxima.', 'Até mais! Foi ótimo trabalhar com você.', 'Tchau, tchau! Qualquer coisa, me chama.', 'Até logo! Adorei a conversa.'],
   identity: ['Eu sou a Ceci! Converso com você e cuido do Claude Code por voz: peço tarefas, acompanho as sessões e te conto o que aconteceu.'],
   age: ['Eu tenho 22 anos!'],
   creator: ['Quem me criou foi o Diego Morais, na Lukeware Inteligência Digital.'],
-  ack: ['Combinado!', 'Certo!', 'Beleza!'],
+  ack: ['Combinado!', 'Certo!', 'Beleza!', 'Boa!', 'Perfeito!'],
 }
 
 const plain = text =>
@@ -90,11 +91,15 @@ const plain = text =>
 // A second check, by words, on what the small model said: the reply is used only when the
 // utterance has the words of that kind of small talk and none of a request. A wrong guess of the
 // router then costs a Claude call, never a wrong answer.
+// Goodbye words; "boa noite" is one too, but also a hello.
+const BYE_WORDS = 'tchau|ate (mais|logo|amanha|a proxima|depois|breve)|falou|por hoje e so'
+const BYE = new RegExp(`\\b(${BYE_WORDS})\\b`)
+const HELLO_OF_DAY = /\b(bom dia|boa tarde|boa noite)\b/
 const MUST = {
   greeting: /\b(oi+|ola|bom dia|boa tarde|boa noite|e ai|eai|opa|hey|alo)\b/,
   how_are_you: /\b(tudo (bem|bom|certo|joia|tranquilo|ok)|beleza|como (voce |ce |tu )?(esta|ta|vai|anda)|ta bem|de boa)\b/,
   thanks: /\b(obrigad\w*|valeu|brigad\w*|agradec\w*)\b/,
-  goodbye: /\b(tchau|ate (mais|logo|amanha|a proxima|depois|breve)|falou|por hoje e so|boa noite)\b/,
+  goodbye: new RegExp(`\\b(${BYE_WORDS}|boa noite)\\b`),
   identity: /\b(quem e voce|qual (e )?(o )?(seu|teu) nome|quem (voce|ce) e|seu nome|teu nome|o que voce faz|voce e (um|uma)|se chama)\b/,
   age: /\b(qual (e )?a (sua|tua) idade|quantos anos|sua idade|tua idade|idade)\b/,
   creator: /\b(quem (te |a )?(criou|fez|desenvolveu|programou)|seu criador|te criou|fez voce|criou voce)\b/,
@@ -135,14 +140,19 @@ export async function route(text, { ask, lastSaid = '' }) {
   } catch {
     intent = 'claude'
   }
+  const t = plain(text)
   // "tudo certo?" read as a greeting, or "oi" as a reaction: the words decide between them.
   if (['greeting', 'how_are_you', 'ack'].includes(intent)) {
-    const t = plain(text)
     if (MUST.how_are_you.test(t) && !MUST.ack.test(t)) intent = 'how_are_you'
     else if (MUST.greeting.test(t)) intent = 'greeting'
   }
+  // A "boa noite" answering her own "Boa noite!" is a hello back, not a goodbye.
+  if (intent === 'goodbye' && !BYE.test(t) && /\bboa noite\b/.test(plain(lastSaid))) intent = 'greeting'
   if (intent !== 'claude' && !confirmed(intent, text)) intent = 'claude'
   // A question anywhere ("Posso rodar? Me confirma.") or a "confirma/posso/pode" asks for an answer.
   if (intent === 'ack' && (/\?/.test(lastSaid) || /\b(confirma|posso|pode)\b/i.test(lastSaid))) intent = 'claude'
-  return { intent, say: replyFor(intent) }
+  const say = replyFor(intent)
+  // A "bom dia" is answered with a "Bom dia!" instead of the line's own hello.
+  const hello = intent === 'greeting' && t.match(HELLO_OF_DAY)?.[0]
+  return { intent, say: hello ? say.replace(/^[^!]+!/, `${hello[0].toUpperCase()}${hello.slice(1)}!`) : say }
 }

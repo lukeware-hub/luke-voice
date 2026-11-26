@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { join } from 'node:path'
 import { test } from 'node:test'
 
 import { ensureVoice } from './agent.mjs'
@@ -35,6 +36,17 @@ test('the agent definition shipped in agent/ parses and builds a request body', 
   assert.ok(def.tools.some(tool => tool.name === 'luke_run_task'))
   assert.ok(prompt.length > 100)
   assert.match(hash, /^[0-9a-f]{16}$/)
+})
+
+test("the ElevenLabs agent hears the same terms as Ceci's own ears", async () => {
+  const { agentBody, readDefinition } = await import('./agent.mjs')
+  const { ASR_TERMS } = await import('./engine.mjs')
+  const { def, prompt } = await readDefinition(join(import.meta.dirname, '..'))
+  const body = agentBody(def, prompt, ['t1'], 'v1')
+  assert.deepEqual(body.conversation_config.asr.keywords, ASR_TERMS)
+  assert.ok(ASR_TERMS.includes('Claude Code') && ASR_TERMS.includes('worktree'))
+  // The definition on disk is left as it was.
+  assert.equal(def.conversation_config.asr, undefined)
 })
 
 test('credits reads the month quota, and a key that cannot read it gives null', async () => {
@@ -76,10 +88,10 @@ test('both voices are Ceci: same name, age and creator, told only when asked, an
   assert.match(await readFile(join(root, 'agent/brain-prompt.md'), 'utf8'), /nunca mais de duas frases curtas, contando a pergunta/)
   const def = JSON.parse(await readFile(join(root, 'agent/agent.json'), 'utf8'))
   assert.match(def.conversation_config.agent.first_message, /Eu sou a Ceci/)
-  // Both voices greet from one list (a different line each call); the agent's own first message is
-  // its first line, and the agent allows the window to send another one.
+  // Both voices greet from one list (a different line each call, by the time of day); the agent's
+  // own first message is "Oi!" and its first line, and the agent allows the window to send another one.
   const { GREETINGS } = await import('../window/engines/greetings.js')
-  assert.equal(def.conversation_config.agent.first_message, GREETINGS[0])
+  assert.equal(def.conversation_config.agent.first_message, `Oi! ${GREETINGS[0]}`)
   assert.equal(def.platform_settings.overrides.conversation_config_override.agent.first_message, true)
   const local = await readFile(join(root, 'window/engines/local.js'), 'utf8')
   const eleven = await readFile(join(root, 'window/engines/elevenlabs.js'), 'utf8')

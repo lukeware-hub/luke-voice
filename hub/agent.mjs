@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
+import { ASR_TERMS } from './engine.mjs'
 import { stateFile } from './paths.mjs'
 
 const API = 'https://api.elevenlabs.io/v1'
@@ -13,7 +14,7 @@ const REQUEST_TIMEOUT_MS = 20_000
 export async function readDefinition(root) {
   const def = JSON.parse(await readFile(join(root, 'agent', 'agent.json'), 'utf8'))
   const prompt = await readFile(join(root, 'agent', 'prompt.md'), 'utf8')
-  const hash = createHash('sha256').update(JSON.stringify(def)).update(prompt).digest('hex').slice(0, 16)
+  const hash = createHash('sha256').update(JSON.stringify(def)).update(prompt).update(ASR_TERMS.join(',')).digest('hex').slice(0, 16)
   return { def, prompt, hash }
 }
 
@@ -59,11 +60,13 @@ export async function ensureVoice(apiKey, voice, request = call) {
   return added.voice_id ?? voice.voice_id
 }
 
-function agentBody(def, prompt, toolIds, voiceId) {
+export function agentBody(def, prompt, toolIds, voiceId) {
   const { tools: _tools, library_voice: _voice, ...rest } = def
   const config = structuredClone(rest.conversation_config)
   config.agent.prompt = { ...config.agent.prompt, prompt, tool_ids: toolIds }
   if (voiceId) config.tts = { ...config.tts, voice_id: voiceId }
+  // The terms Ceci's own ears are told (engine.mjs), so ElevenLabs hears them right too.
+  config.asr = { ...config.asr, keywords: ASR_TERMS }
   return { ...rest, conversation_config: config }
 }
 

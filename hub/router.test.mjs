@@ -86,3 +86,24 @@ test('"tudo certo?" read as a greeting is answered as "how are you"', async () =
   assert.equal(confirmed('identity', 'o que você faz?'), true)
   assert.equal(confirmed('thanks', 'obrigado, agora faz o commit'), false)
 })
+
+test('a "boa noite" answering her own "Boa noite!" is a hello back, never a goodbye', async () => {
+  const lastSaid = 'Boa noite! Eu sou a Ceci. O que vamos fazer hoje?'
+  for (const intent of ['goodbye', 'greeting']) {
+    const back = await route('boa noite, Ceci', { ...fixed(intent), lastSaid })
+    assert.equal(back.intent, 'greeting', intent)
+    assert.match(back.say, /^Boa noite! /)
+    assert.doesNotMatch(back.say, /Tchau|Até/)
+  }
+  // At the end of a talk, "boa noite" and a real goodbye word still say goodbye.
+  assert.equal((await route('boa noite', { ...fixed('goodbye'), lastSaid: 'Pronto, terminei.' })).intent, 'goodbye')
+  assert.equal((await route('tchau, boa noite', { ...fixed('goodbye'), lastSaid })).intent, 'goodbye')
+})
+
+test('a "bom dia" or "boa tarde" is answered in kind', async () => {
+  for (let i = 0; i < REPLIES.greeting.length; i++) {
+    assert.match((await route('bom dia, ceci', fixed('greeting'))).say, /^Bom dia! \S/)
+    assert.match((await route('boa tarde', fixed('greeting'))).say, /^Boa tarde! \S/)
+  }
+  assert.ok(REPLIES.greeting.includes((await route('oi ceci', fixed('greeting'))).say))
+})

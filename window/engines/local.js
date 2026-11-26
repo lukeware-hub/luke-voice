@@ -3,6 +3,7 @@
 // and Kokoro speaks it. Only the brain leaves the machine (through the hub, to Claude).
 // It gives the window the same session the ElevenLabs engine does.
 import { decide, liveAction } from '/engines/confirm.js'
+import { ACKS, pickAck } from '/engines/acks.js'
 import { pickGreeting } from '/engines/greetings.js'
 import { isConfirm, isDeny, stopTarget } from '/engines/fast-path.js'
 import { phrases, speechChunks } from '/engines/speech-text.js'
@@ -28,8 +29,7 @@ const DONE_SAY = {
 }
 const DENIED = 'Tá bom, deixei pra lá.'
 // Said at once when the brain takes longer than ACK_AFTER_MS on a request, so the user knows
-// Ceci heard. Synthesized when the call starts, so they play with no wait.
-const ACKS = ['Certo.', 'Deixa eu ver.', 'Hum, tá bom.']
+// Ceci heard (acks.js). Synthesized when the call starts, so they play with no wait.
 const ACK_AFTER_MS = 600
 // With the end-of-turn model: a ~380 ms pause asks it whether the user is done, and it is asked
 // again every ~190 ms while the pause goes on; a "done" (0.6) ends the turn there, and ~1.1 s of
@@ -343,7 +343,7 @@ export async function startSession({
   const ackVoice = isNative ? 'native' : isMacVoice ? `mac:${config.macVoice}` : `browser:${voiceInfo?.tts ?? ''}`
   if (!ackCache.has(ackVoice)) ackCache.set(ackVoice, new Map())
   const ackAudio = ackCache.get(ackVoice)
-  let nextAck = 0
+  let lastAck = ''
   // Jobs in the turn queue (user turns and notices), and the acknowledgement being made now.
   let jobs = 0
   // User turns queued or running: until each is written down and answered, a notice waits (app.js).
@@ -690,11 +690,12 @@ export async function startSession({
     return true
   }
 
-  // "Certo." while the brain thinks. Not over Ceci's own voice, and never added to the conversation.
-  function sayAck() {
+  // "Entendi." while the brain thinks, picked by how long the user's turn was. Not over Ceci's own
+  // voice or the user's, and never added to the conversation.
+  function sayAck(heard) {
     // `saying`: a line (the greeting) is still being made; an ack now would cut it off.
-    if (isEnded || isStale() || mode === 'speaking' || saying !== 0 || ackAudio.size === 0) return
-    const text = ACKS[nextAck++ % ACKS.length]
+    if (isEnded || isStale() || mode === 'speaking' || saying !== 0 || vad.inSpeech || ackAudio.size === 0) return
+    const text = (lastAck = pickAck(heard, lastAck))
     const made = ackAudio.get(text)
     if (!made) return
     timing('ack', 0, `"${text}"`)
@@ -754,8 +755,8 @@ export async function startSession({
   // `asked` is the brain's answer when it was asked already (beside the router).
   // `answering` is the live "posso?" this user turn answers, if any (confirm.js).
   async function think(request, asked = null, answering = null) {
-    // On a request, "Certo." plays if the brain is slow, so the user knows Ceci heard.
-    const ack = request.kind === 'user' ? setTimeout(sayAck, ACK_AFTER_MS) : null
+    // On a request, "Entendi." plays if the brain is slow, so the user knows Ceci heard.
+    const ack = request.kind === 'user' ? setTimeout(sayAck, ACK_AFTER_MS, request.text) : null
     const reply = await (asked ?? askBrain(request))
     clearTimeout(ack)
     if (isEnded || isStale()) return
