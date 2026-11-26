@@ -526,8 +526,7 @@ code {
   }
 }
 
-.icon-btn,
-.win-btn {
+.icon-btn {
   display: grid;
   place-items: center;
   width: 34px;
@@ -542,43 +541,13 @@ code {
     transform 320ms var(--ease-ios);
 }
 
-.icon-btn:hover,
-.win-btn:hover {
+.icon-btn:hover {
   color: var(--text);
   background: var(--fill);
 }
 
-.icon-btn:active,
-.win-btn:active {
+.icon-btn:active {
   transform: scale(0.9);
-}
-
-.win {
-  display: flex;
-  gap: 0;
-  padding: 2px;
-  border-radius: 999px;
-  background: var(--fill-2);
-}
-
-.win-btn {
-  width: 30px;
-  height: 30px;
-}
-
-.win-btn .icon {
-  width: 14px;
-  height: 14px;
-}
-
-.win-btn.close:hover {
-  color: #ffffff;
-  background: var(--red-strong);
-}
-
-.win-btn[aria-pressed='true'] {
-  color: var(--accent-text);
-  background: var(--accent-soft);
 }
 
 /* Views */
@@ -1787,12 +1756,8 @@ body[data-compact='true'] .ghost {
   }
 }
 
-/* Touch screens (a phone browser): a page cannot resize or close its own window. */
+/* Touch screens (a phone browser). */
 @media (hover: none) and (pointer: coarse) {
-  .win {
-    display: none;
-  }
-
   .badge.quiet {
     opacity: 1;
     transform: none;

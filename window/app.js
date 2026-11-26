@@ -121,10 +121,6 @@ const ui = {
   bannerTitle: $('bannerTitle'),
   bannerText: $('bannerText'),
   facts: $('facts'),
-  winCompact: $('winCompact'),
-  winMax: $('winMax'),
-  winMaxIcon: $('winMaxIcon'),
-  winClose: $('winClose'),
 }
 
 // What each call state says, in the pill, the stage and the banner.
@@ -190,7 +186,6 @@ let connectedAt = 0
 // another) is ended as soon as its session comes back, instead of going live.
 let callGeneration = 0
 let entries = 0
-let restoreRect = null
 let compactRect = null
 const gate = createVoiceGate()
 const speech = createSpeechFilter()
@@ -1057,37 +1052,13 @@ function connectStream() {
   }
 }
 
-/* ---------- Window controls ---------- */
+/* ---------- Compact mode ---------- */
 
-// The Chrome app window keeps its own title bar; these controls do what a page can do.
-function isMaximized() {
-  return window.outerWidth >= screen.availWidth - 8 && window.outerHeight >= screen.availHeight - 8
-}
-
-function syncMaxIcon() {
-  const max = isMaximized()
-  ui.winMaxIcon.setAttribute('href', max ? '#i-corners-in' : '#i-corners-out')
-  ui.winMax.setAttribute('aria-label', max ? 'Restaurar tamanho' : 'Maximizar')
-}
-
-function toggleMaximize() {
-  if (isMaximized() && restoreRect) {
-    window.resizeTo(restoreRect.w, restoreRect.h)
-    window.moveTo(restoreRect.x, restoreRect.y)
-    restoreRect = null
-  } else {
-    restoreRect = { x: window.screenX, y: window.screenY, w: window.outerWidth, h: window.outerHeight }
-    window.moveTo(screen.availLeft ?? 0, screen.availTop ?? 0)
-    window.resizeTo(screen.availWidth, screen.availHeight)
-  }
-  setTimeout(syncMaxIcon, 150)
-}
-
+// The Chrome app window has its own minimize, maximize and close buttons, so the page draws none.
+// Nothing calls this now: the button that did is gone, and the compact styles wait for a new one.
 function toggleCompact() {
   const next = document.body.dataset.compact !== 'true'
   document.body.dataset.compact = String(next)
-  ui.winCompact.setAttribute('aria-pressed', String(next))
-  ui.winCompact.setAttribute('aria-label', next ? 'Sair do modo compacto' : 'Modo compacto')
   if (next) {
     showView('home')
     compactRect = { w: window.outerWidth, h: window.outerHeight }
@@ -1098,13 +1069,6 @@ function toggleCompact() {
   }
 }
 
-async function closeWindow() {
-  await endCall()
-  window.close()
-  // A tab the page did not open stays open: say how to close it.
-  setTimeout(() => setCaption('Chamada encerrada. Pode fechar esta janela pelo botão de fechar do sistema.'), 300)
-}
-
 /* ---------- Wiring ---------- */
 
 ui.call.addEventListener('click', () => void (conversation || callState === 'connecting' ? endCall() : startCall()))
@@ -1112,10 +1076,6 @@ ui.mute.addEventListener('click', () => setMuted(!isMuted))
 for (const control of document.querySelectorAll('[data-target]')) {
   control.addEventListener('click', () => showView(control.dataset.target))
 }
-ui.winCompact.addEventListener('click', toggleCompact)
-ui.winMax.addEventListener('click', toggleMaximize)
-ui.winClose.addEventListener('click', () => void closeWindow())
-window.addEventListener('resize', syncMaxIcon)
 window.addEventListener('beforeunload', () => void conversation?.endSession())
 
 // The orb follows the agent's voice: every frame while she speaks, and only four times a second
@@ -1146,7 +1106,6 @@ if (window.outerWidth < 640 && window.outerHeight > 0 && document.body.dataset.c
 
 setCall(KEY ? 'idle' : 'error', KEY ? undefined : STALE_WINDOW)
 renderRoster()
-syncMaxIcon()
 if (KEY) connectStream()
 setInterval(flushActivity, ACTIVITY_FLUSH_MS)
 setInterval(speakWhenQuiet, 500)
