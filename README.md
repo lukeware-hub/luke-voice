@@ -32,6 +32,15 @@ On the gpu profile, the hub downloads llama.cpp's official release build b12556 
 
 `LUKE_VOICE_PROFILE=gpu` or `light` forces a profile: an installer environment variable, or for the hub (it prepares that profile on its next start).
 
+## Requirements
+
+- **Claude Code**, installed and signed in with a Claude account (the only thing you install yourself). Current version of luke-voice: v0.17.0.
+- **Windows, macOS or Linux.** On a Mac with Apple silicon you get the natural voice; an Intel Mac gets the light voice.
+- **Node.js 20 or newer and Git** (Windows) are brought by the installer when missing, for your user only.
+- **Disk space:** about 3.3 GB for the natural voice, about 360 MB for the light voice (the installer checks first).
+- **A microphone and speakers.** Google Chrome is best for the call window; Chromium and Edge also work.
+- **Internet** during install, and for the short replies (Claude). The ElevenLabs voice also needs an ElevenLabs key (optional).
+
 ## Install in 3 steps
 
 Each step says how to know it worked. Do them in order.
@@ -233,22 +242,27 @@ From inside Claude Code (macOS or Linux): type `/luke-voice uninstall`. It says 
 
   Without curl: `wget -qO- https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/uninstall.sh | bash`.
 
-To remove only the mod and keep the voice: in Claude Code, type `/plugin`, choose **luke-voice** and **Uninstall**.
+To remove only the mod and keep the voice, see [Plugin commands](#plugin-commands-claude-code).
 
-<details>
-<summary>Manual install (for developers)</summary>
+## Plugin commands (Claude Code)
 
-```bash
-claude plugin marketplace add lukeware-hub/luke-voice
-claude plugin install luke-voice@luke-voice
-printf '{"voice_provider":"local"}' | claude plugin configure luke-voice@luke-voice --values-stdin
-# ElevenLabs instead:
-printf '{"voice_provider":"elevenlabs","api_key":"%s"}' "$ELEVENLABS_API_KEY" | claude plugin configure luke-voice@luke-voice --values-stdin
-```
+luke-voice is a Claude Code plugin named `luke-voice@luke-voice`. The installer runs these for you; run them yourself in a terminal to install, update or remove it by hand. Restart Claude Code after each one: `/reload-plugins` is not enough.
 
-Or export `ELEVENLABS_API_KEY` and `LUKE_VOICE_PROVIDER` before you start Claude Code. Then restart Claude Code and run `/luke-voice setup` to download the free voice.
+| Task | Command |
+| --- | --- |
+| Add the marketplace | `claude plugin marketplace add lukeware-hub/luke-voice` |
+| Install | `claude plugin install luke-voice@luke-voice` |
+| Check it is installed and enabled | `claude plugin list --json` |
+| Update (refresh the marketplace first) | `claude plugin marketplace update luke-voice` then `claude plugin update luke-voice@luke-voice` |
+| Turn off or on | `claude plugin disable luke-voice@luke-voice` or `claude plugin enable luke-voice@luke-voice` |
+| Remove the plugin only | `claude plugin uninstall luke-voice@luke-voice` |
+| Remove the marketplace too | `claude plugin marketplace remove luke-voice` |
+| Choose the free voice | `printf '{"voice_provider":"local"}' \| claude plugin configure luke-voice@luke-voice --values-stdin` |
+| Choose ElevenLabs | `printf '{"voice_provider":"elevenlabs","api_key":"%s"}' "$ELEVENLABS_API_KEY" \| claude plugin configure luke-voice@luke-voice --values-stdin` |
 
-</details>
+Inside Claude Code, `/plugin` opens the same menu (choose **luke-voice**, then update or **Uninstall**), and `/plugin configure luke-voice@luke-voice` saves the options. After a manual install or update, run `/luke-voice setup` to download the free voice. `claude plugin uninstall` keeps the downloaded voice; the uninstall lines above remove everything.
+
+You can also export `ELEVENLABS_API_KEY` and `LUKE_VOICE_PROVIDER` before you start Claude Code.
 
 ## How it works
 
