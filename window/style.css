@@ -1503,6 +1503,28 @@ button:disabled {
   transform: scale(0.96);
 }
 
+.select {
+  display: block;
+  width: 100%;
+  max-width: 420px;
+  min-height: 40px;
+  margin: 0 0 6px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--fill);
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+}
+
+.mic-hint {
+  margin: 0 0 28px;
+  padding: 0 16px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
 .facts {
   margin: 0;
   display: grid;

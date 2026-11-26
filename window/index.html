@@ -172,6 +172,11 @@
               <button type="button" role="radio" data-theme-option="light" aria-checked="false">Claro</button>
               <button type="button" role="radio" data-theme-option="dark" aria-checked="false">Escuro</button>
             </div>
+            <label class="group-label" for="micSelect">Microfone</label>
+            <select id="micSelect" class="select" aria-describedby="micHint">
+              <option value="">Padrão do sistema</option>
+            </select>
+            <p id="micHint" class="mic-hint">A escolha vale na próxima chamada e fica salva.</p>
             <div class="group-label">Estado</div>
             <dl id="facts" class="facts"></dl>
             <p class="note">A voz gratuita roda neste computador e é baixada na instalação: a voz natural com placa de vídeo de 6 GB ou mais, a voz leve sem ela. A voz ElevenLabs é opcional: troque com <code>/luke-voice voz</code>. A chave da ElevenLabs só é usada se você escolher essa voz; ela é configurada no Claude Code, com <code>/plugin configure luke-voice@luke-voice</code>, e nunca chega a esta janela.</p>

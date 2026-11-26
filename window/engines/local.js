@@ -14,6 +14,7 @@ import { risingPercent } from '/engines/progress.js'
 import { isEcho, isNotSpeech } from '/engines/transcript.js'
 import { FRAME, RATE, createVad, rms } from '/engines/vad.js'
 import { normalizeSpeech } from '/engines/gain.js'
+import { micConstraints } from '/engines/microphone.js'
 
 export const name = 'local'
 
@@ -228,6 +229,7 @@ export async function startSession({
   windowKey = '',
   native: forceNative = query.get('voice-native'),
   prepare = async () => {},
+  inputDeviceId = '',
   clientTools = {},
   brain = query.get('voice-echo') === '1' ? echoBrain : request => hub('POST', '/brain', request),
   // The instant layer of the hybrid brain (native engine only): small talk answered on this machine.
@@ -283,7 +285,7 @@ export async function startSession({
   const stream = await navigator.mediaDevices.getUserMedia({
     // No automatic gain: it raised whatever was left of Ceci's echo after the echo canceller,
     // and the raised echo interrupted her.
-    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: false },
+    audio: micConstraints(inputDeviceId, { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: false }),
   })
   let micContext = null
   let outContext = null
