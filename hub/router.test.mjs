@@ -53,6 +53,12 @@ test('a request is never answered locally, even when the model calls it small ta
     ['quantos anos tem o projeto?', 'age'],
     ['tudo certo com o build?', 'how_are_you'],
     ['hum', 'ack'],
+    // Where her name comes from is told by the brain, never by the fixed identity line.
+    ['por que você se chama Ceci?', 'identity'],
+    ['de onde vem o seu nome?', 'identity'],
+    ['como surgiu seu nome?', 'identity'],
+    ['seu nome tem algum significado?', 'identity'],
+    ['qual a origem do seu nome?', 'identity'],
   ]) {
     const { intent: got, say } = await route(text, fixed(intent))
     assert.equal(got, 'claude', text)
