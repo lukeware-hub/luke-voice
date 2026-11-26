@@ -122,6 +122,7 @@ Say **"pare"** (or "para tudo", "Ceci, para") to stop Claude at once.
 | `/luke-voice setup` | download and check Ceci's free voice (for people who update through the marketplace) |
 | `/luke-voice status` | technical status: hub, voice, profile, call, key, queue, setup progress |
 | `/luke-voice help` | everything you need to know, plus a check of what is missing |
+| `/luke-voice update` | update luke-voice to the newest version (refreshes the marketplace, then updates the plugin; close and reopen Claude Code afterwards) |
 | `/luke-voice uninstall` | remove luke-voice and the downloaded voice (asks for `/luke-voice uninstall confirmar` first) |
 
 It starts **off**, and remembers your choice. When Claude Code opens with it already on, it only reconnects: it never starts a call you did not ask for.

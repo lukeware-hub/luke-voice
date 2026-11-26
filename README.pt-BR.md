@@ -113,6 +113,7 @@ Diga **"pare"** (ou "para tudo", "Ceci, para") para parar o Claude na hora.
 | `/luke-voice setup` | baixa e confere a voz gratuita da Ceci (para quem atualiza pelo marketplace) |
 | `/luke-voice status` | estado técnico: hub, voz, perfil, chamada, chave, fila, progresso do setup |
 | `/luke-voice help` | tudo que você precisa saber, e o que está faltando |
+| `/luke-voice update` | atualiza o luke-voice para a versão mais nova (atualiza a lista de versões e depois o plugin; feche e abra o Claude Code em seguida) |
 | `/luke-voice uninstall` | remove o luke-voice e a voz baixada (pede `/luke-voice uninstall confirmar` antes) |
 
 Ele começa **desligado** e lembra a sua escolha. Quando o Claude Code abre com ele ligado, ele só reconecta: nunca começa uma chamada que você não pediu.
