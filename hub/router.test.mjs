@@ -59,6 +59,11 @@ test('a request is never answered locally, even when the model calls it small ta
     ['como surgiu seu nome?', 'identity'],
     ['seu nome tem algum significado?', 'identity'],
     ['qual a origem do seu nome?', 'identity'],
+    // So is the day she was created.
+    ['quando você foi criada?', 'creator'],
+    ['quem te criou e em que data?', 'creator'],
+    ['em que dia você nasceu?', 'age'],
+    ['quantos anos você tem e qual é o seu aniversário?', 'age'],
   ]) {
     const { intent: got, say } = await route(text, fixed(intent))
     assert.equal(got, 'claude', text)
