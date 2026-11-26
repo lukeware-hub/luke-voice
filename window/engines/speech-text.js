@@ -55,7 +55,7 @@ const RESPELL = {
 // brought the English word back at least twice more over the seven sentences and did not lose on
 // the new ones (34 words, 11 kept). A capital letter alone is enough for some. Words that no
 // spelling helped (main, README, branch, commit, push, lint) stay as written. Keys are lower case.
-// Rechecked in 0.17.2 on 60 words the same way: release, front-end, checkout, pipeline, workflow
+// Rechecked in 0.17.3 on 60 words the same way: release, front-end, checkout, pipeline, workflow
 // and payload added, endpoint and cache changed, token and rebase dropped (plain won).
 const NATIVE_RESPELL = {
   feature: 'Feature',
