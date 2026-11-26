@@ -37,8 +37,8 @@
  {
   "text": "O TOKEN fica no cache, e o Backend chama o endpoint.",
   "native": [
-   "O touken fica no Cache,",
-   "e o Back End chama o end-point."
+   "O TOKEN fica no quéche,",
+   "e o Back End chama o End Point."
   ],
   "browser": [
    "O tôquen fica no cache, e o béquend chama o endpoint."
@@ -57,7 +57,7 @@
   "text": "Rodei os hooks, fiz o rebase e atualizei o changelog.",
   "native": [
    "Rodei os ruks,",
-   "fiz o re base e atualizei o tchêindj log."
+   "fiz o rebase e atualizei o tchêindj log."
   ],
   "browser": [
    "Rodei os ruks, fiz o rebase e atualizei o changelog."
@@ -111,7 +111,7 @@
  {
   "text": "Hooks, token.",
   "native": [
-   "ruks, touken."
+   "ruks, token."
   ],
   "browser": [
    "ruks, tôquen."
@@ -450,7 +450,7 @@
  {
   "text": "Bom dia! Hoje temos três tarefas abertas, duas revisões pendentes e uma reunião à tarde.",
   "native": [
-   "Bom dia!",
+   "Bom dia!!",
    "Hoje temos três tarefas abertas, duas revisões pendentes e uma reunião à tarde."
   ],
   "browser": [

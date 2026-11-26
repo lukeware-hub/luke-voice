@@ -32,6 +32,15 @@ On the gpu profile, the hub downloads llama.cpp's official release build b12556 
 
 `LUKE_VOICE_PROFILE=gpu` or `light` forces a profile: an installer environment variable, or for the hub (it prepares that profile on its next start).
 
+## Requirements
+
+- **Claude Code**, installed and signed in with a Claude account (the only thing you install yourself). Current version of luke-voice: v0.17.0.
+- **Windows, macOS or Linux.** On a Mac with Apple silicon you get the natural voice; an Intel Mac gets the light voice.
+- **Node.js 20 or newer and Git** (Windows) are brought by the installer when missing, for your user only.
+- **Disk space:** about 3.3 GB for the natural voice, about 360 MB for the light voice (the installer checks first).
+- **A microphone and speakers.** Google Chrome is best for the call window; Chromium and Edge also work.
+- **Internet** during install, and for the short replies (Claude). The ElevenLabs voice also needs an ElevenLabs key (optional).
+
 ## Install in 3 steps
 
 Each step says how to know it worked. Do them in order.
@@ -155,7 +164,7 @@ Since 0.10.0 the voice is the 1.7B model, which the owner heard as clearly bette
 
 She sounded robotic at first, because her pitch barely moved. An automatic panel (pitch spread and synthetic-speech detectors, anchored on real pt-BR recordings = 10 and Kokoro = 3) rated her pitch spread 2.9 of 10. Sampling at temperature 0.9 instead of 0.75 gives her melody back (6.2 of 10; the panel's score went from 7.6 to 8.8), and the owner's rating went from 6 to 8.5.
 
-English tech words: the voice speaks Portuguese, so it reads some of them with Portuguese rules ("changelog" as "chão geloso", "cache" as "caixa"). `speech-text.js` gives it its own spelling for 11 of them. 34 words got several spellings each, said in three sentences and judged by the ears, then checked on four new sentences. A spelling is kept only when it brought the English word back at least twice more over the seven sentences. Over 5 seeds on 10 sentences, the ears heard 79 of 125 English terms right with the spellings, against 63 without. No spelling helped "main", "README", "branch", "commit", "push" or "lint", so they stay as written.
+English tech words: the voice speaks Portuguese, so it reads some of them with Portuguese rules ("changelog" as "chão geloso", "cache" as "caixa"). `speech-text.js` gives it its own spelling for 11 of them. 34 words got several spellings each, said in three sentences and judged by the ears, then checked on four new sentences. A spelling is kept only when it brought the English word back at least twice more over the seven sentences. Over 5 seeds on 10 sentences, the ears heard 79 of 125 English terms right with the spellings, against 63 without. No spelling helped "main", "README", "branch", "commit", "push" or "lint", so they stay as written. In 0.17.2, 60 words were checked again the same way: release, front-end, checkout, pipeline, workflow and payload got a spelling, and token and rebase went back to plain, where they did better. "Bom dia!" is sent as "Bom dia!!", because with one mark she said "bem dia" on 3 of 4 seeds and with two she said it right on 10 of 10.
 
 Numbers and text: `speech-text.js` cuts sentences only at a period followed by a space, never inside "5.5", "1.500", "app.js" or after "Sr.". It writes out what the voice misread, each change checked by her ears against the old text: money ("R$ 1.500,00" as "mil e quinhentos reais"), the feminine of hours ("21h" as "vinte e uma horas"), durations ("1h30" as "uma hora e 30 minutos"), dates ("22/11/2026" as "22 de novembro de 2026"), versions ("Opus 5.5" as "5 ponto 5"), "Prof." and "p.ex.", and "2 * 3" as "2 vezes 3". It drops emoji and reads "site.com.br" as "site ponto com ponto bê erre". Plain numbers stay as digits, which she reads well. Everyday sentences are cut and spelled exactly as before (a test checks 52 of them on both voices).
 
@@ -233,22 +242,27 @@ From inside Claude Code (macOS or Linux): type `/luke-voice uninstall`. It says 
 
   Without curl: `wget -qO- https://raw.githubusercontent.com/lukeware-hub/luke-voice/main/install/uninstall.sh | bash`.
 
-To remove only the mod and keep the voice: in Claude Code, type `/plugin`, choose **luke-voice** and **Uninstall**.
+To remove only the mod and keep the voice, see [Plugin commands](#plugin-commands-claude-code).
 
-<details>
-<summary>Manual install (for developers)</summary>
+## Plugin commands (Claude Code)
 
-```bash
-claude plugin marketplace add lukeware-hub/luke-voice
-claude plugin install luke-voice@luke-voice
-printf '{"voice_provider":"local"}' | claude plugin configure luke-voice@luke-voice --values-stdin
-# ElevenLabs instead:
-printf '{"voice_provider":"elevenlabs","api_key":"%s"}' "$ELEVENLABS_API_KEY" | claude plugin configure luke-voice@luke-voice --values-stdin
-```
+luke-voice is a Claude Code plugin named `luke-voice@luke-voice`. The installer runs these for you; run them yourself in a terminal to install, update or remove it by hand. Restart Claude Code after each one: `/reload-plugins` is not enough.
 
-Or export `ELEVENLABS_API_KEY` and `LUKE_VOICE_PROVIDER` before you start Claude Code. Then restart Claude Code and run `/luke-voice setup` to download the free voice.
+| Task | Command |
+| --- | --- |
+| Add the marketplace | `claude plugin marketplace add lukeware-hub/luke-voice` |
+| Install | `claude plugin install luke-voice@luke-voice` |
+| Check it is installed and enabled | `claude plugin list --json` |
+| Update (refresh the marketplace first) | `claude plugin marketplace update luke-voice` then `claude plugin update luke-voice@luke-voice` |
+| Turn off or on | `claude plugin disable luke-voice@luke-voice` or `claude plugin enable luke-voice@luke-voice` |
+| Remove the plugin only | `claude plugin uninstall luke-voice@luke-voice` |
+| Remove the marketplace too | `claude plugin marketplace remove luke-voice` |
+| Choose the free voice | `printf '{"voice_provider":"local"}' \| claude plugin configure luke-voice@luke-voice --values-stdin` |
+| Choose ElevenLabs | `printf '{"voice_provider":"elevenlabs","api_key":"%s"}' "$ELEVENLABS_API_KEY" \| claude plugin configure luke-voice@luke-voice --values-stdin` |
 
-</details>
+Inside Claude Code, `/plugin` opens the same menu (choose **luke-voice**, then update or **Uninstall**), and `/plugin configure luke-voice@luke-voice` saves the options. After a manual install or update, run `/luke-voice setup` to download the free voice. `claude plugin uninstall` keeps the downloaded voice; the uninstall lines above remove everything.
+
+You can also export `ELEVENLABS_API_KEY` and `LUKE_VOICE_PROVIDER` before you start Claude Code.
 
 ## How it works
 
