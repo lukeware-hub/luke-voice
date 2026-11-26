@@ -86,7 +86,14 @@ export const VOICE_SETTINGS = { temperature: 0.9, top_p: 0.9, seed: 7 }
 // The same prompt warms the engine up, so the first real transcription is not a cold one. The model
 // names and Lukeware took word errors from 30 to 27 of 129 on 20 recorded turns ("Raiko" became
 // "Haiku", "Apus" became "Opus"), with noise and silence still heard as nothing.
-export const ASR_GLOSSARY = 'Conversa em português do Brasil com a Ceci, uma assistente de programação. Termos comuns: API, commit, branch, main, deploy, build, bug, pull request, GitHub, Claude, Ceci, lint, TypeScript, token, login, checkout, README, Opus, Sonnet, Haiku, Anthropic, Lukeware, Diego, push, merge, PR, teste, repositório, subagente, npm, luke-voice.'
+// The ElevenLabs agent gets the same terms as keywords for its own speech recognition (agent.mjs).
+export const ASR_TERMS = [
+  'API', 'commit', 'branch', 'main', 'deploy', 'build', 'bug', 'pull request', 'GitHub', 'Claude', 'Ceci', 'lint', 'TypeScript', 'token', 'login', 'checkout', 'README',
+  'Opus', 'Sonnet', 'Haiku', 'Anthropic', 'Lukeware', 'Diego', 'push', 'merge', 'PR', 'teste', 'repositório', 'subagente', 'npm', 'luke-voice',
+  'Claude Code', 'Luke Voice', 'worktree', 'pipeline', 'Docker', 'Taskfile', 'release', 'tag', 'rebase', 'workflow', 'issue', 'frontend', 'backend',
+  'endpoint', 'prompt', 'hook', 'skill', 'plugin', 'script', 'JSON', 'log', 'cache', 'ElevenLabs', 'Whisper', 'Qwen', 'Gemini',
+]
+export const ASR_GLOSSARY = `Conversa em português do Brasil com a Ceci, uma assistente de programação. Termos comuns: ${ASR_TERMS.join(', ')}.`
 
 // Audio frames allowed for a text (12.5 per second; ~14 characters per second in pt-BR), so a
 // rare generation loop stops after a few seconds instead of babbling for 40. Digits and acronyms

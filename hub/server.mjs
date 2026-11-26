@@ -76,6 +76,7 @@ const STATIC = {
   '/engines/turn-join.js': ['engines/turn-join.js', 'text/javascript; charset=utf-8'],
   '/engines/confirm.js': ['engines/confirm.js', 'text/javascript; charset=utf-8'],
   '/engines/greetings.js': ['engines/greetings.js', 'text/javascript; charset=utf-8'],
+  '/engines/acks.js': ['engines/acks.js', 'text/javascript; charset=utf-8'],
   '/engines/phrase-audio.js': ['engines/phrase-audio.js', 'text/javascript; charset=utf-8'],
   '/engines/progress.js': ['engines/progress.js', 'text/javascript; charset=utf-8'],
   '/engines/context.js': ['engines/context.js', 'text/javascript; charset=utf-8'],
@@ -819,7 +820,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
         sessions: roster(),
         focused,
         persona: personaNow(),
-        today: `${dayOf(clock())}, ${WEEKDAYS[new Date(clock()).getDay()]}`,
+        today: `${dayOf(clock())}, ${WEEKDAYS[new Date(clock()).getDay()]}, ${new Date(clock()).toTimeString().slice(0, 5)}`,
         memory: memoryBlock(['user', 'tool_result'].includes(body.kind) || !body.kind ? clip(body.text, 500) : ''),
       }
       // A tool's answer read by the brain is kept too, as data from the computer.

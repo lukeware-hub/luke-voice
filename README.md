@@ -91,7 +91,7 @@ To install without questions, set `LUKE_VOICE_NO_PROMPT=1` before you run it; ad
 
 **On a Mac:** the first call asks whether Chrome may use the microphone: click **Allow**. A Mac with Apple silicon gets the natural voice; an Intel Mac gets the light voice.
 
-**Done when:** you hear Ceci greet you, for example "Oi! Eu sou a Ceci. O que vamos fazer hoje?" (the words change each call). If anything is missing, type `/luke-voice help`: it checks your setup and says what to fix.
+**Done when:** you hear Ceci greet you, for example "Bom dia! Eu sou a Ceci. O que vamos fazer hoje?" ("bom dia", "boa tarde" or "boa noite" by the clock, and the words change each call). If anything is missing, type `/luke-voice help`: it checks your setup and says what to fix.
 
 ## Use
 
@@ -126,7 +126,7 @@ The brain (Ceci, Luke or Nara) is Claude Sonnet 5.5, called directly through the
 Some things need no model call at all:
 - "pare" or "para" stops Claude, with or without her name and as many times as you say it ("Para, Ceci, para!", "chega, Ceci").
 - When Ceci asks "posso?", a plain "sim" runs the pending action at once, and a plain "não" cancels it.
-- When the brain takes more than 600 ms, Ceci says a short acknowledgement ("Certo.", "Deixa eu ver."). They are made once per window, only while nobody is talking, so they never delay her first answer.
+- When the brain takes more than 600 ms, Ceci says a short acknowledgement: a quick "Entendi." after a short sentence, and a listening line such as "Deixa eu entender o que você está falando." after a long one, never the same twice in a row (`window/engines/acks.js`). They are made once per window, only while nobody is talking, so they never delay her first answer.
 - On the gpu profile, a local router answers small talk (greetings, thanks, goodbyes, "who are you", her age, who created her) in about 0.3 s, with lines written in `hub/router.mjs`, so it never invents anything. Anything else, and any request, goes to Claude Sonnet. A word check on top of the small model makes sure a request is never answered locally (0 of 49 test requests were).
 
 ### Knowing when you finished talking
