@@ -236,6 +236,24 @@ De dentro do Claude Code (macOS ou Linux): digite `/luke-voice uninstall`. Ele d
 
 Para remover só o plugin e manter a voz: no Claude Code, digite `/plugin`, escolha **luke-voice** e **Uninstall**.
 
+## Comandos do plugin (Claude Code)
+
+O luke-voice é um plugin do Claude Code chamado `luke-voice@luke-voice`. O instalador roda estes comandos por você; rode-os num terminal para instalar, atualizar ou remover à mão. Feche e abra o Claude Code depois de cada um: `/reload-plugins` não basta.
+
+| Tarefa | Comando |
+| --- | --- |
+| Adicionar o marketplace | `claude plugin marketplace add lukeware-hub/luke-voice` |
+| Instalar | `claude plugin install luke-voice@luke-voice` |
+| Ver se está instalado e ligado | `claude plugin list --json` |
+| Atualizar (atualize o marketplace primeiro) | `claude plugin marketplace update luke-voice` e depois `claude plugin update luke-voice@luke-voice` |
+| Desligar ou ligar | `claude plugin disable luke-voice@luke-voice` ou `claude plugin enable luke-voice@luke-voice` |
+| Remover só o plugin | `claude plugin uninstall luke-voice@luke-voice` |
+| Remover também o marketplace | `claude plugin marketplace remove luke-voice` |
+| Escolher a voz gratuita | `printf '{"voice_provider":"local"}' \| claude plugin configure luke-voice@luke-voice --values-stdin` |
+| Escolher a ElevenLabs | `printf '{"voice_provider":"elevenlabs","api_key":"%s"}' "$ELEVENLABS_API_KEY" \| claude plugin configure luke-voice@luke-voice --values-stdin` |
+
+De dentro do Claude Code, o `/luke-voice update` faz a atualização por você. O `/plugin` abre o mesmo menu (escolha **luke-voice** e depois atualizar ou **Uninstall**), e o `/plugin configure luke-voice@luke-voice` salva as opções. Depois de instalar ou atualizar à mão, rode `/luke-voice setup` para baixar a voz gratuita. O `claude plugin uninstall` mantém a voz baixada; as linhas de desinstalação acima removem tudo.
+
 ## Como funciona
 
 A janela da chamada fala com o hub (`hub/server.mjs`, em 127.0.0.1:4848). Na voz gratuita há dois caminhos:
