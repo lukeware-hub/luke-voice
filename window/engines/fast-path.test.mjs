@@ -128,6 +128,22 @@ test('short yeses as the ears write them are yes: "Pod.", "Okei", "Isso...", "Si
   }
 })
 
+test('any word or phrase that means yes is a yes, alone or combined with others', () => {
+  const alone = ['sim', 'pode', 'ok', 'isso', 'claro', 'manda ver', 'tá bom', 'beleza', 'blz', 'legal', 'ótimo', 'lógico', 'óbvio', 'tranquilo', 'concordo', 'aceito', 'autorizado', 'aprovado', 'confirma', 'vamos', 'yeah', 'yep', 'sure', 'Ahã.', 'tudo bem', 'sem problema', 'de acordo', 'tá certo', 'está bem', 'sim senhor', 'pode crer', 'vamos nessa', 'manda brasa', 'vai fundo', 'isso mesmo', 'é isso aí']
+  const combined = ['sim pode', 'sim ok', 'pode ok', 'ok pode', 'ok sim', 'sim, claro', 'claro, manda ver', 'isso, sim', 'tá bom, ok', 'Sim, pode, ok.', 'sim claro pode ok', 'ok, tudo bem', 'sim, sem problema', 'tá bom, de acordo', 'sim, por gentileza', 'Ceci, ok', 'ok, ótimo, pode ir']
+  for (const said of [...alone, ...combined]) {
+    assert.equal(isConfirm(said), true, said)
+    assert.equal(isDeny(said), false, said)
+  }
+})
+
+test('the extra yes words and phrases never turn a no, a doubt, a question or a request into a yes', () => {
+  // "problema" and "acordo" are not yes words on their own; a no beside a yes stays a no or goes to the brain.
+  for (const said of ['problema', 'de acordo com o quê', 'sem problema nenhum, mas só amanhã', 'não, tudo bem', 'não, ok', 'ok, não', 'sim, não', 'tudo bem?', 'Ceci, tudo bem?', 'sure?', 'legal?', 'ok, mas muda a pasta', 'Vamos rodar os testes de login', 'sem problema, e depois manda para o Claude']) {
+    assert.equal(isConfirm(said), false, said)
+  }
+})
+
 test("Ceci's own voice written down before the user's yes does not hide it", () => {
   const said = 'Vou rodar os testes do luke-voice e te conto o resultado. Posso?'
   // Her tail, partly misheard, then the user's "sim" (heard so on the real engine).
