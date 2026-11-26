@@ -55,19 +55,25 @@ const RESPELL = {
 // brought the English word back at least twice more over the seven sentences and did not lose on
 // the new ones (34 words, 11 kept). A capital letter alone is enough for some. Words that no
 // spelling helped (main, README, branch, commit, push, lint) stay as written. Keys are lower case.
+// Rechecked in 0.17.2 on 60 words the same way: release, front-end, checkout, pipeline, workflow
+// and payload added, endpoint and cache changed, token and rebase dropped (plain won).
 const NATIVE_RESPELL = {
   feature: 'Feature',
   review: 'Riviú',
   backend: 'Back End',
-  endpoint: 'end-point',
-  token: 'touken',
-  cache: 'Cache',
+  frontend: 'front-end',
+  endpoint: 'End Point',
+  cache: 'quéche',
   changelog: 'tchêindj log',
   framework: 'Framework',
   hook: 'ruk',
   hooks: 'ruks',
   state: 'State',
-  rebase: 're base',
+  release: 'Rilíss',
+  checkout: 'check out',
+  pipeline: 'paip láin',
+  workflow: 'work flow',
+  payload: 'Payload',
 }
 const NATIVE_RE = new RegExp(
   `(?<![\\p{L}\\d-])(${Object.keys(NATIVE_RESPELL).sort((a, b) => b.length - a.length).map(k => k.replace(' ', '\\s+')).join('|')})(?![\\p{L}\\d-])`,
@@ -251,9 +257,14 @@ export function respell(text) {
   return String(text ?? '').replace(/\p{L}[\p{L}\d]*/gu, word => RESPELL[word.toLowerCase()] ?? word)
 }
 
+// The native voice says "Bom dia!" as "bem dia" (3 of 4 seeds, by ear); "Bom dia!!" came out right on 10 of 10.
+const BOM_DIA = /(?<![\p{L}\d])(bom\s+dia)!(?!!)/giu
+
 // English tech words in the spelling the native voice says best; anything else stays as written.
 export function respellNative(text) {
-  return String(text ?? '').replace(NATIVE_RE, word => NATIVE_RESPELL[word.toLowerCase().replace(/\s+/g, ' ')])
+  return String(text ?? '')
+    .replace(NATIVE_RE, word => NATIVE_RESPELL[word.toLowerCase().replace(/\s+/g, ' ')])
+    .replace(BOM_DIA, '$1!!')
 }
 
 // Where a sentence ends: a run of . ! ? … (and any closing quote or bracket) followed by a space or

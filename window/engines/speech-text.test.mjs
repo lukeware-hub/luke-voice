@@ -52,17 +52,25 @@ test('the native voice keeps most English tech words as they are; the browser vo
 })
 
 test('the native voice gets its own spelling for the tech words it says in Portuguese, in any case', () => {
-  assert.equal(respellNative('O TOKEN fica no cache, e o Backend chama o endpoint.'), 'O touken fica no Cache, e o Back End chama o end-point.')
+  assert.equal(respellNative('O TOKEN fica no cache, e o Backend chama o endpoint.'), 'O TOKEN fica no quéche, e o Back End chama o End Point.')
   assert.equal(respellNative('Abri o pull request da feature e pedi um review.'), 'Abri o pull request da Feature e pedi um Riviú.')
-  assert.equal(respellNative('Rodei os hooks, fiz o rebase e atualizei o changelog.'), 'Rodei os ruks, fiz o re base e atualizei o tchêindj log.')
+  assert.equal(respellNative('Rodei os hooks, fiz o rebase e atualizei o changelog.'), 'Rodei os ruks, fiz o rebase e atualizei o tchêindj log.')
+  assert.equal(respellNative('A release passou no pipeline, no workflow e no checkout do frontend.'), 'A Rilíss passou no paip láin, no work flow e no check out do front-end.')
   assert.deepEqual(speechChunks('O framework lê o state do store.', { isNative: true }), ['O Framework lê o State do store.'])
+})
+
+test('the native voice says "Bom dia!" with a double mark, so it does not come out as "bem dia"', () => {
+  assert.deepEqual(speechChunks('Bom dia! Eu sou a Ceci.', { isNative: true }), ['Bom dia!!', 'Eu sou a Ceci.'])
+  assert.equal(respellNative('Olá, bom dia!'), 'Olá, bom dia!!')
+  for (const text of ['Bom dia!!', 'Bom dia, Diego.', 'Tenha um bom dia.']) assert.equal(respellNative(text), text)
+  assert.deepEqual(speechChunks('Bom dia! Eu sou a Ceci.'), ['Bom dia!', 'Eu sou a Ceci.'])
 })
 
 test('the native spelling touches whole words only, and leaves the rest of the sentence alone', () => {
   for (const text of ['Os tokens e o cached ficam no back-end.', 'O reviewer e o hookah.', 'A casa é azul, e o estado é bom.', 'O caché do cachecol.']) {
     assert.equal(respellNative(text), text)
   }
-  assert.equal(respellNative('Hooks, token.'), 'ruks, touken.')
+  assert.equal(respellNative('Hooks, cache.'), 'ruks, quéche.')
   assert.equal(respellNative('O hook e o reviewer.'), 'O ruk e o reviewer.')
 })
 
