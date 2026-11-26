@@ -79,6 +79,11 @@ test('both voices are Ceci: same name, age and creator, told only when asked, an
     assert.match(text, /Seu nome Ceci é uma homenagem à filha do Diego Morais, que se chama Cecília Nepomuceno Morais\./, file)
     assert.match(text, /Só conte isso quando o usuário perguntar especificamente por que você se chama Ceci ou de onde vem o seu nome, nunca ao se apresentar\./, file)
     assert.match(text, /"Meu criador Diego criou meu nome Ceci em homenagem à filha dele, que se chama Cecília Nepomuceno Morais\."/, file)
+    // She was created on 21 November 2026, the birthday of Diego's wife: told with that exact date,
+    // only when asked when she was created. The wife's name is not in the prompt.
+    assert.match(text, /Você foi criada no dia 21 de novembro de 2026\. Esse dia é o aniversário da esposa do Diego Morais, o dia mais especial para ele, e por coincidência foi o dia em que ele te criou\./, file)
+    assert.match(text, /Só conte isso quando o usuário perguntar especificamente quando você foi criada ou qual é a data da sua criação, nunca ao se apresentar nem ao falar de quem te criou\./, file)
+    assert.match(text, /"Fui criada no dia 21 de novembro de 2026\. Esse dia é o aniversário da esposa do meu criador Diego, o dia mais especial para ele, e por coincidência foi justamente o dia em que ele me criou\."/, file)
     // From the recorded conversation of 0.10.4: she spoke of herself by name, offered searches
     // she could not run, explained misheard words as if real, and opened every line the same way.
     assert.match(text, /sempre na primeira pessoa .* Nunca fale de si pelo nome/, file)

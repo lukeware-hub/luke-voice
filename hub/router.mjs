@@ -106,8 +106,9 @@ const MUST = {
   ack: /^\W*((ta|esta) bom|entendi|legal|que bom|certo|beleza|ok|show|perfeito|otimo|massa|joia|bacana|uhum|ah|sim|ah ta|ta)(\W+(ta|bom|entendi|legal|que|certo|beleza|ok|show|perfeito|otimo|entao|ah|sim))*\W*$/,
 }
 // Words of a request, a question about the work, or Claude: never small talk. Where her name comes
-// from ("como surgiu seu nome?") is told by the brain only, so its words are here too.
-const WORK = /\b(origem|significad\w*|homenagem|surgiu|escolh\w*|claude|sess\w*|test\w*|commit\w*|build|deploy\w*|arquiv\w*|projet\w*|tarefa\w*|codigo\w*|erro\w*|bug\w*|rod\w*|faz|faca|fazer|abr\w*|mand\w*|para|pare|parar|cancel\w*|cri[ae]\w*|mud\w*|lista\w*|termin\w*|hora\w*|quando|quanto\w*|qual|onde|porque|por que|agora|status|resultado|aconteceu|novidade\w*|ficou|deu)\b/
+// from ("como surgiu seu nome?") and the day she was created ("em que data te criaram?") are told by
+// the brain only, so their words are here too.
+const WORK = /\b(data|nasc\w*|aniversari\w*|origem|significad\w*|homenagem|surgiu|escolh\w*|claude|sess\w*|test\w*|commit\w*|build|deploy\w*|arquiv\w*|projet\w*|tarefa\w*|codigo\w*|erro\w*|bug\w*|rod\w*|faz|faca|fazer|abr\w*|mand\w*|para|pare|parar|cancel\w*|cri[ae]\w*|mud\w*|lista\w*|termin\w*|hora\w*|quando|quanto\w*|qual|onde|porque|por que|agora|status|resultado|aconteceu|novidade\w*|ficou|deu)\b/
 
 export function confirmed(intent, text) {
   const t = plain(text)
