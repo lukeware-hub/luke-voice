@@ -2,7 +2,7 @@
 // voice detector, Whisper writes down what the user said, the brain decides what to do and say,
 // and Kokoro speaks it. Only the brain leaves the machine (through the hub, to Claude).
 // It gives the window the same session the ElevenLabs engine does.
-import { decide, liveAction } from '/engines/confirm.js'
+import { REPEAT, askedAgain, decide, liveAction, unsureAnswer } from '/engines/confirm.js'
 import { ACKS, pickAck } from '/engines/acks.js'
 import { pickGreeting } from '/engines/greetings.js'
 import { isConfirm, isDeny, stopTarget } from '/engines/fast-path.js'
@@ -383,8 +383,9 @@ export async function startSession({
   }
 
   // Speech to text on the native engine, after Silero (in the worker) confirms there is speech.
-  async function nativeTranscribe(audio) {
-    const check = await ask('check', { audio })
+  // `isAnswer`: a "posso?" waits, and a soft short "sim" passes a lower bar (speech-check.js).
+  async function nativeTranscribe(audio, isAnswer) {
+    const check = await ask('check', { audio, isAnswer })
     if (!check.isSpeech) return { text: '', noSpeech: true, ms: check.ms }
     let out
     try {
@@ -405,10 +406,12 @@ export async function startSession({
   const synth = text => (isNative ? nativeSynth(text) : isMacVoice ? macSynth(text) : ask('speak', { text }))
   // A soft voice is raised to a steady level first (gain.js), for Silero and the ears alike: on
   // recorded turns at a very low level it halved the word errors, and left normal turns as they were.
+  // While a "posso?" waits for its answer, the speech check lets a soft short "sim" through.
   const transcribe = audio => {
     const { audio: level, gain } = normalizeSpeech(audio)
     if (gain > 1) console.info(`[luke-voice] quiet speech raised ${gain.toFixed(1)}x for the ears`)
-    return isNative ? nativeTranscribe(level) : ask('transcribe', { audio: level }, [level.buffer])
+    const isAnswer = Boolean(liveAction(pendingAction, Date.now()))
+    return isNative ? nativeTranscribe(level, isAnswer) : ask('transcribe', { audio: level, isAnswer }, [level.buffer])
   }
 
   const setMode = next => {
@@ -730,6 +733,20 @@ export async function startSession({
     return runTool(next.tool, next.say)
   }
 
+  // The answer to "posso?" could not be heard for sure (confirm.js, unsureAnswer): Ceci says "Pode
+  // repetir para mim, por favor?" and the "posso?" stays open, so the repeated "sim" still runs it.
+  // Null when the answer was clear enough, there is no "posso?", or she already asked enough.
+  function askAgain(heard) {
+    const action = liveAction(pendingAction, Date.now())
+    const why = unsureAnswer(action, heard)
+    if (!why || isEnded || isStale()) return null
+    timing('ask again', 0, why)
+    // What was heard does not enter the history, and does not let the "posso?" go.
+    turns.drop()
+    pendingAction = askedAgain(action, Date.now())
+    return say(REPEAT)
+  }
+
   async function stopNow() {
     const result = String(await clientTools.luke_stop_claude?.({}))
     return say(TOOL_OK.test(result) ? STOPPED : NOT_STOPPED)
@@ -798,12 +815,20 @@ export async function startSession({
     const { text, ms, noSpeech } = heard ?? (await transcribe(audio))
     if (noSpeech) {
       timing('dropped', ms, `${seconds} s of sound with no speech in it`)
+      // A sound with no speech is never joined with what the user says next: a soft "sim" dropped
+      // here, then said again, must be heard alone, not as noise in front of the second one.
+      if (turnNow !== null) joiner.noSpeech(turnNow)
       if (cut && !isEnded) await speak(cut)
       // A part carried for joining comes back when what followed was no speech.
-      return onTurnEnd(joiner.dropped())
+      const back = joiner.dropped()
+      if (cut || back) return onTurnEnd(back)
+      // A sound right after "posso?" that the speech check could not hear as words: the answer
+      // may have been lost in it, so Ceci asks for it again instead of staying silent.
+      return askAgain({ noSpeech: true })
     }
     timing('transcribe', ms, `for ${seconds} s of speech`)
-    if (!text || isEnded || isStale() || isNotSpeech(text)) return
+    if (isEnded || isStale()) return
+    if (!text || isNotSpeech(text)) return askAgain({ text })
     // The window's voice gate and quiet mode hear the user now, before the brain is asked: a notice
     // that arrives while the brain thinks must not pass for the user's word.
     onMessage({ source: 'user', message: text })
@@ -814,6 +839,10 @@ export async function startSession({
     turns.hold(text, () => {
       pendingAction = null
     })
+    // An answer that cannot be told for sure, like a yes and a no at once ("sim, não", "não, ok":
+    // two voices, or a word lost in the noise), neither runs nor drops the action: Ceci asks again.
+    const asked = action ? askAgain({ text }) : null
+    if (asked) return asked
     if (action && isDeny(text)) {
       timing('fast path', 0, 'no to "posso?"')
       return say(DENIED)
@@ -888,7 +917,9 @@ export async function startSession({
       const share = Math.min(level / outPeak, echoShare * 1.5 + 0.01)
       echoShare = Math.min(ECHO_MAX, Math.max(0.02, echoShare + (share - echoShare) * 0.02))
     }
-    const event = vad.push(frame, { isSpeaking, echo: echoShare * outPeak * ECHO_MARGIN })
+    // While a "posso?" waits, a soft short answer starts a turn more easily (vad.js).
+    const isAnswer = !isSpeaking && Boolean(liveAction(pendingAction, Date.now()))
+    const event = vad.push(frame, { isSpeaking, echo: echoShare * outPeak * ECHO_MARGIN, isAnswer })
     // ?voice-debug=1: the mic level and the learned room level twice a second, to tune the detector.
     if (isDebug && ++frameCount % 16 === 0) console.info(`[luke-voice] mic ${level.toFixed(4)} room ${vad.floor.toFixed(4)} echo ${(echoShare * outPeak).toFixed(4)} ${mode}`)
     if (!event) return

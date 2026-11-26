@@ -86,6 +86,48 @@ test('a part handed to a worker (transferred) is still joined whole', () => {
   assert.equal(joined.audio[0], 1)
 })
 
+test('a soft "sim" judged no speech is not joined in front of the "sim" said again right after', () => {
+  const now = clock()
+  const j = createTurnJoiner({ now })
+  const first = j.ended(audio(10, 1))
+  j.noSpeech(first.turn)
+  now.advance(900)
+  assert.equal(j.resumed(), false, 'nothing to join: the first part was noise')
+  const second = j.ended(audio(5, 2))
+  assert.equal(second.isJoined, false)
+  assert.equal(second.audio.length, 5, 'the second "sim" is heard alone')
+  assert.equal(j.isCurrent(second.turn), true)
+})
+
+test('a part found to be no speech after the user started again is let go, not joined', () => {
+  const now = clock()
+  const j = createTurnJoiner({ now })
+  const first = j.ended(audio(10, 1))
+  now.advance(500)
+  // The user speaks again before the speech check on the first part is back.
+  assert.equal(j.resumed(), true)
+  j.noSpeech(first.turn)
+  assert.equal(j.dropped(), null, 'the noise does not come back as a turn of its own')
+  const second = j.ended(audio(5, 2))
+  assert.equal(second.isJoined, false)
+  assert.equal(second.audio.length, 5)
+})
+
+test('no speech on an older turn leaves a real part carried for joining', () => {
+  const now = clock()
+  const j = createTurnJoiner({ now })
+  const noise = j.ended(audio(3, 9))
+  j.noSpeech(noise.turn)
+  const first = j.ended(audio(10, 1))
+  now.advance(500)
+  assert.equal(j.resumed(), true)
+  j.noSpeech(noise.turn)
+  const second = j.ended(audio(5, 2))
+  assert.equal(second.isJoined, true, 'the request is still joined with its second part')
+  assert.equal(second.audio[0], 1)
+  assert.notEqual(first.turn, second.turn)
+})
+
 test('a held user turn reaches the history once, when committed, and a joined one never does', async () => {
   const { createTurnLog } = await import('./turn-join.js')
   const log = createTurnLog()

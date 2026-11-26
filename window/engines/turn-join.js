@@ -7,7 +7,9 @@
 // answering or a tool starting calls commit(turn): from then on the turn stands. When the user
 // starts talking again, resumed() drops the uncommitted last turn and carries its audio into the
 // next one. If that next sound turns out to be no speech, dropped() gives the carried audio back,
-// so a cough does not swallow the user's request.
+// so a cough does not swallow the user's request. A turn that itself turned out to be no speech
+// (noSpeech()) is never carried: a soft "sim" the speech check dropped, said again a moment later,
+// is heard alone instead of joined behind a part already judged noise.
 
 export const JOIN_WINDOW_MS = 2500
 const GAP_SAMPLES = 4800 // 0.3 s of silence between the joined parts, at 16 kHz
@@ -23,6 +25,7 @@ export function createTurnJoiner({ now = () => Date.now(), windowMs = JOIN_WINDO
   let turn = 0
   let last = null // { audio, endedAt, turn, isCommitted }
   let carry = null
+  let carryTurn = 0 // the turn the carried part came from
 
   return {
     get turn() {
@@ -52,9 +55,16 @@ export function createTurnJoiner({ now = () => Date.now(), windowMs = JOIN_WINDO
     resumed() {
       if (!last || last.isCommitted || now() - last.endedAt > windowMs) return false
       carry = last.audio
+      carryTurn = last.turn
       last = null
       turn++
       return true
+    },
+    // Turn n had no speech in it: it is not joined with what comes next, even if the user already
+    // started talking again (then it was carried, and is let go).
+    noSpeech(n) {
+      if (last && last.turn === n) last = null
+      if (carry && carryTurn === n) carry = null
     },
     isCurrent(n) {
       return n === turn

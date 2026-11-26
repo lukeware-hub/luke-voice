@@ -85,6 +85,7 @@ const STATIC = {
   '/engines/microphone.js': ['engines/microphone.js', 'text/javascript; charset=utf-8'],
   '/engines/piper-ids.js': ['engines/piper-ids.js', 'text/javascript; charset=utf-8'],
   '/engines/transcript.js': ['engines/transcript.js', 'text/javascript; charset=utf-8'],
+  '/engines/speech-check.js': ['engines/speech-check.js', 'text/javascript; charset=utf-8'],
   '/engines/mic-worklet.js': ['engines/mic-worklet.js', 'text/javascript; charset=utf-8'],
   '/engines/voice-worker.js': ['engines/voice-worker.js', 'text/javascript; charset=utf-8'],
   '/style.css': ['style.css', 'text/css; charset=utf-8'],

@@ -2,6 +2,9 @@
 // "posso?" (the fast path in local.js), never straight from the brain: not on a notice, and not on
 // a user turn either, even if the model forgot to ask first.
 
+import { isMixed } from './fast-path.js'
+import { isNotSpeech } from './transcript.js'
+
 // Tools that act on the computer or delete from the memory: only these can wait for a "sim" (PENDABLE_TOOLS in hooks/register.tsx).
 const PENDABLE = ['luke_run_task', 'luke_send_to_claude', 'luke_memory_delete']
 // Said instead of the brain's words when it called an acting tool at once: it did not run yet.
@@ -12,6 +15,13 @@ const ASK = {
 }
 // A "posso?" waits this long for its "sim".
 export const PENDING_TTL_MS = 90_000
+// Said when an answer could not be heard for sure: too soft, mixed with another voice, a noise or
+// the room. The "posso?" it answered stays open, so the repeated "sim" still runs it.
+export const REPEAT = 'Pode repetir para mim, por favor?'
+// How many times Ceci asks it for one "posso?": a TV or a fan that keeps setting off turns must not
+// keep her asking. After that, the turn goes as it did before.
+export const MAX_REPEATS = 2
+const isRepeatAsk = say => /\bpode(?:ria)? repetir\b/i.test(String(say ?? ''))
 
 // -> { action: 'say' | 'pend' | 'run', say, tool?, pending }. `pending` is the new "posso?"
 // ({ tool, at }) or null; it replaces the last one, so a notice lets an unanswered one go.
@@ -27,9 +37,27 @@ export function decide({ kind, reply, now, answering = null }) {
   // brain does not see its arguments), with no second question.
   if (tool && answering?.tool?.name === tool.name) return { action: 'run', say, tool: answering.tool, pending: null }
   const wanted = tool ?? (PENDABLE.includes(reply?.pending?.name) ? reply.pending : null)
+  // The brain could not make out the answer to "posso?" and asks to hear it again: the same
+  // action keeps waiting (the brain does not see its arguments, so it cannot ask again itself).
+  if (!wanted && answering && isRepeatAsk(say)) return { action: 'say', say, pending: { ...answering, at: now } }
   if (!wanted) return { action: 'say', say, pending: null }
   return { action: 'pend', say: tool || !say ? ASK[wanted.name] : say, pending: { tool: wanted, at: now } }
 }
 
 // The "posso?" a "sim" can still answer, or null once it is too old.
 export const liveAction = (pending, now) => (pending && now - pending.at < PENDING_TTL_MS ? pending : null)
+
+// Why the answer to the live "posso?" `action` could not be heard for sure, or null: a sound the
+// speech check heard no words in (a soft answer lost in a noise), words the ears made up from
+// noise, or a yes and a no at once (two voices over each other). Then Ceci says REPEAT and the
+// "posso?" stays open (askedAgain). Null with no "posso?" waiting, or once she asked enough.
+export function unsureAnswer(action, { noSpeech = false, text = '' } = {}) {
+  if (!action || (action.repeats ?? 0) >= MAX_REPEATS) return null
+  if (noSpeech) return 'a sound with no clear words after "posso?"'
+  if (!text || isNotSpeech(text)) return `no words in "${text}" after "posso?"`
+  if (isMixed(text)) return `yes and no at once: "${text.slice(0, 80)}"`
+  return null
+}
+
+// The same "posso?", fresh again, after Ceci asked to hear its answer once more.
+export const askedAgain = (action, now) => ({ ...action, at: now, repeats: (action.repeats ?? 0) + 1 })

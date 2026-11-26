@@ -290,3 +290,23 @@ test('the turn model is asked again as the pause goes on, so a later "done" ends
   assert.equal(ids.length, 2)
   assert.notEqual(ids[0], ids[1])
 })
+
+test('while a "posso?" waits, a soft, quick answer is a turn; the same sound otherwise is dropped', () => {
+  // A soft "sim": ~130 ms at 0.006, under the usual bar (0.008) and shorter than the usual minimum.
+  const soft = () => [...Array(40).fill(0).map(silence), ...Array(4).fill(0).map(() => tone(0.006)), ...Array(45).fill(0).map(silence)]
+  const answer = feed(createVad(), soft(), { isAnswer: true })
+  assert.deepEqual(answer.map(e => e.type), ['start', 'end'])
+  assert.deepEqual(feed(createVad(), soft()), [], 'with no question waiting, it is under the bar')
+  // A louder blip of the same length with no question waiting is still dropped as a click.
+  const click = [...Array(40).fill(0).map(silence), ...Array(4).fill(0).map(() => tone(0.05)), ...Array(45).fill(0).map(silence)]
+  assert.deepEqual(feed(createVad(), click).map(e => e.type), ['start', 'drop'])
+})
+
+test('the lower bar for an answer does not let steady room noise in, nor lower the bar to interrupt Ceci', () => {
+  const vad = createVad()
+  // The room hums at 0.006: learned as the floor, so the answer bar rises with it.
+  feed(vad, Array(400).fill(0).map(() => noise(0.006)))
+  assert.deepEqual(feed(vad, Array(200).fill(0).map(() => noise(0.006)), { isAnswer: true }), [])
+  // Ceci's barge bar is the same with or without a question waiting.
+  assert.deepEqual(feed(createVad(), Array(60).fill(0).map(() => tone(0.03)), { isSpeaking: true, isAnswer: true }), [])
+})

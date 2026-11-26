@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { isConfirm, isDeny, isStopClaude, isStopOnly, stopTarget } from './fast-path.js'
+import { isConfirm, isDeny, isMixed, isStopClaude, isStopOnly, stopTarget } from './fast-path.js'
 
 test('a short stop request is caught, with or without accents, fillers or the name', () => {
   for (const said of ['Pare.', 'para!', 'Ceci, para tudo.', 'Luke, para tudo.', 'Nara, para tudo.', 'Para, Narah, para!', 'Nará, pare', 'PARA AGORA', 'cancela isso', 'chega', 'Pará.', 'para o Claude, por favor', 'Ceci, para.', 'Cecí, pare agora', 'Cecy, chega']) {
@@ -158,4 +158,42 @@ test("Ceci's own voice written down before the user's yes does not hide it", () 
   }
   // A no is never turned into a yes by her echo.
   assert.equal(isConfirm('Posso? Não.', said), false)
+})
+
+test('every way to say no is a no, alone or as a phrase, and never a yes', () => {
+  for (const said of ['Não.', 'Naum', 'Num.', 'nope', 'Nunca.', 'Jamais!', 'Negativo.', 'Nada.', 'De jeito nenhum.', 'Nem pensar!', 'Claro que não.', 'Lógico que não', 'Acho que não.', 'Ainda não.', 'Agora não, Ceci.', 'Não, obrigado.', 'Deixa pra lá.', 'Esquece.', 'Cancela.']) {
+    assert.equal(isDeny(said), true, said)
+    assert.equal(isConfirm(said), false, said)
+  }
+  // A question back is not a no.
+  for (const said of ['Não?', 'Nunca?']) assert.equal(isDeny(said), false, said)
+})
+
+test('a soft or quick answer the ears misheard counts only when it is the whole answer', () => {
+  // A soft "sim" written as "Fim." or "Sin.", a "não" as "Mão." (heard on the real engine).
+  for (const said of ['Fim.', 'Sin.', 'Si.', 'Ceci, fim']) {
+    assert.equal(isConfirm(said), true, said)
+    assert.equal(isDeny(said), false, said)
+  }
+  for (const said of ['Mão.', 'Nau.']) {
+    assert.equal(isDeny(said), true, said)
+    assert.equal(isConfirm(said), false, said)
+  }
+  // Inside a sentence they are just words: the brain decides.
+  for (const said of ['fim da tarefa', 'Fim?', 'mão na massa', 'si mesmo']) {
+    assert.equal(isConfirm(said), false, said)
+    assert.equal(isDeny(said), false, said)
+  }
+})
+
+test('a yes and a no in one short answer is mixed: neither a yes nor a no', () => {
+  for (const said of ['sim, não', 'Não, sim.', 'não, ok', 'Ok... não.', 'Claro. Não.', 'beleza, não', 'sim não sim']) {
+    assert.equal(isMixed(said), true, said)
+    assert.equal(isConfirm(said), false, said)
+    assert.equal(isDeny(said), false, said)
+  }
+  // A no made with yes-like words is still a plain no; a yes with a change goes to the brain.
+  for (const said of ['Isso não.', 'Pode ser que não.', 'Claro que não.', 'não, tudo bem', 'Não tá bom.', 'Sim, mas não agora', 'sim', 'não', '']) {
+    assert.equal(isMixed(said), false, said)
+  }
 })
