@@ -104,6 +104,11 @@ test('a tampered file on disk is downloaded again, and an unknown path is not se
     assert.equal(await ensureModel('../../hub.json', { dir }), null)
   }))
 
+test('an Object property name (__proto__, constructor) is not a model', async () => {
+  const request = async () => assert.fail('nothing is downloaded')
+  for (const path of ['__proto__', 'constructor', 'toString', 'hasOwnProperty']) assert.equal(await ensureModel(path, { dir: fresh(), request }), null, path)
+})
+
 const sleepMs = ms => new Promise(resolve => setTimeout(resolve, ms))
 // A process that is alive while the test runs, to own a lock.
 const liveProcess = () => spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' })

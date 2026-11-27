@@ -144,6 +144,22 @@ test("the macOS and Linux uninstaller deletes luke-voice's plugin cache folder, 
   assert.doesNotMatch(text, /rm -rf "[^"]*plugins\/cache"/)
 })
 
+test("the Windows uninstaller deletes luke-voice's plugin cache folder, and only it", () => {
+  const text = read(UNCMD)
+  assert.match(text, /Join-Path \$claudeDir 'plugins\\cache\\luke-voice'/)
+  assert.match(text, /Remove-Item -LiteralPath \$pluginCache -Recurse -Force/)
+  assert.doesNotMatch(text, /'plugins\\cache'\)?\s*$/m)
+})
+
+test("the Windows uninstaller leaves the user's own Node.js scripts running, and a sibling folder on the PATH", () => {
+  const text = read(UNCMD)
+  // luke-voice's own Node.js on the PATH also runs the user's scripts: only the hub's command line counts.
+  assert.match(text, /-notlike "\$full\\node\\\*"/)
+  // C:\Users\me\.luke-voice-old is not inside C:\Users\me\.luke-voice.
+  assert.match(text, /\$form -eq \$root -or \$form\.StartsWith\("\$root\\"/)
+  assert.doesNotMatch(text, /\$form\.StartsWith\(\$root,/)
+})
+
 test('the uninstallers close Claude Code first and say when a removal failed', () => {
   for (const file of [UNSH, UNCMD]) {
     const text = read(file)

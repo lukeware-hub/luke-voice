@@ -104,6 +104,12 @@ test('show opens the window once with a one-time launch code, never the window k
   assert.equal((await call('POST', '/launch', { body: { nonce }, origin: same })).status, 403, 'a code works once')
   assert.equal((await call('POST', '/launch', { body: { nonce: 'made-up' }, origin: same })).status, 403)
   assert.equal((await call('POST', '/launch', { body: {}, origin: same })).status, 403)
+  // The window connects its stream (the launch is over), then closes.
+  await new Promise((resolve, reject) => {
+    const req = request({ host: '127.0.0.1', port, path: `/stream?k=${WINDOW}`, headers: { host: `127.0.0.1:${port}` } }, res => res.once('data', () => (req.destroy(), resolve())))
+    req.on('error', error => (error.code === 'ECONNRESET' ? null : reject(error)))
+    req.end()
+  })
   await call('POST', '/unsubscribe', { auth: s.token })
 })
 
@@ -1373,4 +1379,179 @@ test('a session ended from the window stays ended: its Claude session cannot sub
   const later = await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/gone', sessionId: 'gone-1' } })
   assert.equal(later.status, 200)
   await call('POST', '/unsubscribe', { auth: later.body.token })
+})
+
+// A hub of its own for one test: its port, a call() bound to it, a window stream, and a close().
+async function ownHub(options) {
+  const own = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {}, ...options })
+  await new Promise(resolve => own.listen(0, '127.0.0.1', resolve))
+  const p = own.address().port
+  const ask = async (...args) => {
+    const saved = port
+    port = p
+    try {
+      return await call(...args)
+    } finally {
+      port = saved
+    }
+  }
+  const stream = () =>
+    new Promise((resolve, reject) => {
+      const req = request({ host: '127.0.0.1', port: p, path: `/stream?k=${WINDOW}`, headers: { host: `127.0.0.1:${p}` } }, res => {
+        res.once('data', () => resolve(req))
+      })
+      req.on('error', error => (error.code === 'ECONNRESET' ? null : reject(error)))
+      req.end()
+    })
+  const close = () => {
+    own.closeAllConnections()
+    own.close()
+  }
+  return { hub: own, port: p, call: ask, stream, close }
+}
+
+const until = async (check, ms = 2000) => {
+  for (let waited = 0; waited < ms && !(await check()); waited += 20) await new Promise(resolve => setTimeout(resolve, 20))
+  return check()
+}
+
+test('a command that timed out waiting for its ack leaves the inbox, so it never runs late', async () => {
+  const own = await ownHub({ ackWaitMs: 150 })
+  try {
+    const s = (await own.call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/slow' } })).body
+    const answer = await own.call('POST', '/command', { key: WINDOW, body: { type: 'send', session: s.name, prompt: 'late prompt' } })
+    assert.equal(answer.body.ok, false)
+    assert.match(answer.body.message, /did not answer in time/)
+    // The mod polls after the timeout: the stale prompt (or stop, or think) is not handed to it.
+    assert.deepEqual((await own.call('GET', '/inbox?wait=0', { auth: s.token })).body.commands, [])
+    assert.equal(own.hub.pendingAcks(), 0)
+  } finally {
+    own.close()
+  }
+})
+
+test('a session ended from the window leaves no ack behind for its waiting commands', async () => {
+  const own = await ownHub({})
+  try {
+    const s = (await own.call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/stuck' } })).body
+    const waiting = own.call('POST', '/command', { key: WINDOW, body: { type: 'stop', session: s.name } })
+    assert.ok(await until(() => own.hub.pendingAcks() === 1))
+    await own.call('POST', '/session-end', { key: WINDOW, body: { name: s.name } })
+    assert.equal((await waiting).body.ok, false)
+    assert.equal(own.hub.pendingAcks(), 0)
+  } finally {
+    own.close()
+  }
+})
+
+test('replaced and ended session tokens are remembered only up to a limit, oldest first out', async () => {
+  const own = await ownHub({ maxGone: 2 })
+  try {
+    const tokens = []
+    for (let i = 0; i < 4; i++) tokens.push((await own.call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/loop', sessionId: 'loop-1' } })).body.token)
+    // Three were replaced; only the newest two are still told "replaced".
+    assert.equal((await own.call('GET', '/inbox?wait=0', { auth: tokens[0] })).status, 401)
+    assert.equal((await own.call('GET', '/inbox?wait=0', { auth: tokens[1] })).status, 409)
+    assert.equal((await own.call('GET', '/inbox?wait=0', { auth: tokens[2] })).status, 409)
+    assert.equal((await own.call('GET', '/inbox?wait=0', { auth: tokens[3] })).status, 200)
+  } finally {
+    own.close()
+  }
+})
+
+test('a window still starting is not opened twice: /show and a finished task wait for it to connect', async () => {
+  let now = 5_000_000
+  const opened6 = []
+  const own = await ownHub({ open: url => opened6.push(url), clock: () => now, reopenMs: 0 })
+  try {
+    const s = (await own.call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/chrome' } })).body
+    await own.call('POST', '/show', { auth: s.token, body: { call: true } })
+    await own.call('POST', '/show', { auth: s.token, body: {} })
+    await own.call('POST', '/events', { auth: s.token, body: { events: [{ kind: 'task_done', text: 'Task: x' }] } })
+    assert.equal(opened6.length, 1, 'Chrome is still starting: a second window would open')
+    // The window connects: the launch is over. Once it closes, /show opens one again.
+    const req = await own.stream()
+    req.destroy()
+    assert.ok(await until(async () => (await own.call('GET', '/health')).body.isWindowOpen === false))
+    await own.call('POST', '/show', { auth: s.token, body: {} })
+    assert.equal(opened6.length, 2)
+    // A launch that never connects (Chrome failed) does not hold forever.
+    now += 30_000
+    await own.call('POST', '/show', { auth: s.token, body: {} })
+    assert.equal(opened6.length, 3)
+  } finally {
+    own.close()
+  }
+})
+
+test('every way a live call ends closes it in the memory and schedules its summary and graph run', async () => {
+  let ends = 0
+  const memory = { isAvailable: false, append() {}, startCall() {}, endCall: () => ends++ }
+  const asks = []
+  const graph = { schedule: ms => asks.push(ms), stop() {} }
+  const own = await ownHub({ memory, graph, onShutdown: () => {} })
+  try {
+    // The window closes (or crashes) mid-call: its stream goes away.
+    const req = await own.stream()
+    await own.call('POST', '/call', { key: WINDOW, body: { state: 'live' } })
+    req.destroy()
+    assert.ok(await until(() => own.hub.callState() === 'idle'))
+    assert.equal(ends, 1)
+    assert.deepEqual(asks, [65_000])
+    // The hub is shut down mid-call.
+    await own.call('POST', '/call', { key: WINDOW, body: { state: 'live' } })
+    assert.equal((await own.call('POST', '/shutdown', { auth: SERVICE })).status, 200)
+    assert.equal(ends, 2)
+    // The hub exits idle mid-call.
+    await own.call('POST', '/call', { key: WINDOW, body: { state: 'live' } })
+    own.hub.endCall()
+    assert.equal(ends, 3)
+    assert.equal(own.hub.callState(), 'idle')
+    // A call that was not live ends nothing.
+    own.hub.endCall()
+    assert.equal(ends, 3)
+  } finally {
+    own.close()
+  }
+})
+
+test('a body that is not a JSON object is a 400, and odd fields never throw', async () => {
+  const raw = (path, text, headers) =>
+    new Promise((resolve, reject) => {
+      const req = request({ host: '127.0.0.1', port, method: 'POST', path, headers: { host: `127.0.0.1:${port}`, 'content-type': 'application/json', ...headers } }, res => {
+        res.resume()
+        resolve(res.statusCode)
+      })
+      req.on('error', reject)
+      req.end(text)
+    })
+  assert.equal(await raw('/subscribe', '{"cwd": ', { authorization: `Bearer ${SERVICE}` }), 400)
+  assert.equal(await raw('/subscribe', 'null', { authorization: `Bearer ${SERVICE}` }), 400)
+  assert.equal(await raw('/focus', '[1]', { 'x-luke-key': WINDOW }), 400)
+  // A cwd that is not text gets a plain name.
+  const s = await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: 42 } })
+  assert.equal(s.status, 200)
+  assert.equal(s.body.name, 'session')
+  // A null event among good ones is skipped.
+  assert.equal((await call('POST', '/events', { auth: s.body.token, body: { events: [null, 7, { kind: 'info', text: 'still kept' }] } })).status, 200)
+  assert.match((await call('GET', `/activity?session=${s.body.name}`, { key: WINDOW })).body.text, /info: still kept/)
+  await call('POST', '/unsubscribe', { auth: s.body.token })
+})
+
+test('hub.json that cannot be read for a moment (EBUSY, EPERM) is read again, never overwritten', () => {
+  const file = join(mkdtempSync(join(tmpdir(), 'luke-voice-secrets-')), 'hub.json')
+  const kept = { serviceToken: 'kept-service', windowKey: 'kept-window' }
+  writeFileSync(file, JSON.stringify(kept))
+  let tries = 0
+  const busy = path => {
+    if (++tries < 3) throw Object.assign(new Error('busy'), { code: 'EBUSY' })
+    return readFileSync(path, 'utf8')
+  }
+  assert.deepEqual(loadSecrets(file, { read: busy, retryMs: 1 }), kept)
+  assert.equal(tries, 3)
+  const denied = () => {
+    throw Object.assign(new Error('denied'), { code: 'EPERM' })
+  }
+  assert.throws(() => loadSecrets(file, { read: denied, retryMs: 1 }), /denied/)
+  assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), kept, 'the tokens every mod holds are kept')
 })

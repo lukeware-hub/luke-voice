@@ -8,7 +8,7 @@ import { pickGreeting } from '/engines/greetings.js'
 import { isConfirm, isDeny, stopTarget } from '/engines/fast-path.js'
 import { phrases, speechChunks } from '/engines/speech-text.js'
 import { isReadyToStart, pauseAfter, sentenceLeft, trimEdges } from '/engines/phrase-audio.js'
-import { trimContext } from '/engines/context.js'
+import { contextEntry, trimContext } from '/engines/context.js'
 import { createCutReply, createTurnJoiner, createTurnLog } from '/engines/turn-join.js'
 import { risingPercent } from '/engines/progress.js'
 import { isEcho, isNotSpeech } from '/engines/transcript.js'
@@ -33,12 +33,12 @@ const DENIED = 'Tá bom, deixei pra lá.'
 // Ceci heard (acks.js). Synthesized when the call starts, so they play with no wait.
 const ACK_AFTER_MS = 600
 // With the end-of-turn model: a ~380 ms pause asks it whether the user is done, and it is asked
-// again every ~190 ms while the pause goes on; a "done" (0.6) ends the turn there, and ~1.1 s of
-// silence ends it anyway. Without the model, ~1.3 s (vad.js). A breath mid-sentence that still
+// again every ~190 ms while the pause goes on; a "done" (0.6) ends the turn there, and ~0.6 s of
+// silence ends it anyway. Without the model, ~0.8 s (vad.js). A breath mid-sentence that still
 // ends the turn is not lost: speech that resumes before Ceci answers is joined (turn-join.js).
 const TURN_CANDIDATE_FRAMES = 12
 const TURN_CANDIDATE_EVERY = 6
-const TURN_END_FRAMES = 35
+const TURN_END_FRAMES = 20
 const TURN_DONE = 0.6
 // While the user may be talking over her, Ceci goes on at this volume instead of stopping: her
 // own echo set off most interruptions, and a false one used to cut her off mid-sentence. She
@@ -75,14 +75,18 @@ function voiceWorker() {
     if (data.type === 'error') waiting.reject(new Error(data.message))
     else waiting.resolve(data)
   }
-  worker.onerror = event => {
-    const error = new Error(event.message || 'The voice worker stopped.')
-    for (const waiting of pending.values()) waiting.reject(error)
-    pending.clear()
-    worker = null
-    workerLoad = null
-  }
+  worker.onerror = event => stopWorker(new Error(event.message || 'The voice worker stopped.'))
   return worker
+}
+
+// Ends the worker (one that failed may still be running) and fails what still waits on it, so no
+// caller waits forever for an answer it will never send.
+function stopWorker(error) {
+  worker?.terminate()
+  worker = null
+  workerLoad = null
+  for (const waiting of pending.values()) waiting.reject(error)
+  pending.clear()
 }
 
 function ask(type, data = {}, transfer = []) {
@@ -108,13 +112,17 @@ const overrides = Object.fromEntries(
 // models. A worker loaded one way is replaced when the next call needs the other.
 let workerKind = null
 const loadVoice = kind => {
-  if (workerLoad && workerKind !== kind) {
-    worker?.terminate()
-    worker = null
-    workerLoad = null
-  }
+  if (workerLoad && workerKind !== kind) stopWorker(new Error('The voice worker was replaced.'))
   workerKind = kind
-  return (workerLoad ??= ask('load', kind === 'native' ? { ...overrides, native: true } : overrides).catch(error => ((workerLoad = null), Promise.reject(error))))
+  if (!workerLoad) {
+    // A failed load is forgotten, unless a newer one already replaced it (a replaced worker fails its own).
+    const load = ask('load', kind === 'native' ? { ...overrides, native: true } : overrides).catch(error => {
+      if (workerLoad === load) workerLoad = null
+      return Promise.reject(error)
+    })
+    workerLoad = load
+  }
+  return workerLoad
 }
 
 // The window key, for the hub's /tts and /stt; the window hands it to startSession.
@@ -358,6 +366,10 @@ export async function startSession({
   // The speech telling news on Ceci's own (a notice), so a barge-in over it can have it told again.
   let noticeSpeech = 0
   let isNoticeLine = false
+  // The window's news batch that notice tells (handed back to onNoticeCut), and the one the line
+  // about to be said tells.
+  let noticeBatch = null
+  let noticeLineBatch = null
   // What Ceci said lately, to tell her echo from the user's words.
   let recentSaid = []
   // Her output level, held a moment (the echo arrives a little after), and how much of it the mic hears.
@@ -568,7 +580,10 @@ export async function startSession({
   // Speaks chunk by chunk: the next chunk is synthesized while the current one plays.
   async function speak(text) {
     // The speech this line becomes (speak and speakNative bump `speech` once), when it tells news.
-    if (isNoticeLine) noticeSpeech = speech + 1
+    if (isNoticeLine) {
+      noticeSpeech = speech + 1
+      noticeBatch = noticeLineBatch
+    }
     isNoticeLine = false
     sayingText = text
     recentSaid = [...recentSaid, text].slice(-3)
@@ -664,13 +679,21 @@ export async function startSession({
     play(made.audio, made.sampleRate, ++speech, true)
   }
 
+  // News the window put in the context for a notice still queued: kept until a notice reads it, so
+  // activity flushed meanwhile cannot push it out first.
+  const unreadNews = new Set()
   function remember(text) {
-    trimContext(context, text)
+    const entry = contextEntry(text)
+    if (entry.startsWith('[news]')) unreadNews.add(entry)
+    trimContext(context, entry, kept => unreadNews.has(kept))
+    for (const news of unreadNews) if (!context.includes(news)) unreadNews.delete(news)
   }
 
   // One turn with the brain: what to do (a tool) and what to say.
   async function askBrain(request) {
     const started = performance.now()
+    // A notice reads the news in the context now: from here on it ages out like any other entry.
+    if (request.kind === 'notice') unreadNews.clear()
     try {
       const reply = await brain({ ...request, context: [...context], turns: turns.history() })
       timing('brain', Math.round(performance.now() - started))
@@ -713,7 +736,8 @@ export async function startSession({
   // One turn with the brain: what to say, what to run now, and what to run on a "sim".
   // `asked` is the brain's answer when it was asked already (beside the router).
   // `answering` is the live "posso?" this user turn answers, if any (confirm.js).
-  async function think(request, asked = null, answering = null) {
+  // `batch`: for a notice, the window's news batch it tells (see onNoticeCut).
+  async function think(request, asked = null, answering = null, batch = null) {
     // On a request, "Entendi." plays if the brain is slow, so the user knows Ceci heard.
     const ack = request.kind === 'user' ? setTimeout(sayAck, ACK_AFTER_MS, request.text) : null
     const reply = await (asked ?? askBrain(request))
@@ -726,6 +750,7 @@ export async function startSession({
     if (next.action !== 'run') {
       // speak() reads this as it starts, in the same tick; a line with no words leaves it unread.
       isNoticeLine = request.kind === 'notice'
+      noticeLineBatch = batch
       const said = say(next.say)
       isNoticeLine = false
       return said
@@ -797,7 +822,7 @@ export async function startSession({
         if (ducked) {
           const wasNotice = ducked === noticeSpeech
           cancelSpeech()
-          if (wasNotice) onNoticeCut()
+          if (wasNotice) onNoticeCut(noticeBatch)
         }
         onTurnEnd(joiner.ended(audio), heard)
       })
@@ -828,7 +853,12 @@ export async function startSession({
     }
     timing('transcribe', ms, `for ${seconds} s of speech`)
     if (isEnded || isStale()) return
-    if (!text || isNotSpeech(text)) return askAgain({ text })
+    if (!text || isNotSpeech(text)) {
+      // No words, or words the ears made up from noise: as with a sound with no speech, the reply
+      // it cut off is said again, before any "Pode repetir?" (that reply may be the "posso?" itself).
+      if (cut) return speak(cut)
+      return askAgain({ text })
+    }
     // The window's voice gate and quiet mode hear the user now, before the brain is asked: a notice
     // that arrives while the brain thinks must not pass for the user's word.
     onMessage({ source: 'user', message: text })
@@ -851,7 +881,8 @@ export async function startSession({
     // stopped only when the user names it ("para o Claude", "cancela a tarefa", "para tudo").
     const stop = stopTarget(text)
     if (stop === 'ceci') {
-      turns.commit()
+      // The turn stands: it is not joined with what the user says next.
+      commitTurn()
       return timing('fast path', 0, 'stop: Ceci only')
     }
     if (stop === 'claude') return stopNow()
@@ -935,9 +966,13 @@ export async function startSession({
     // talked over her, instead of the reply then playing over them.
     if (event.type === 'start' && saying !== 0 && saying === speech) {
       console.info('[luke-voice] the user spoke before Ceci\'s reply played')
+      const wasNotice = saying === noticeSpeech
       cancelSpeech()
+      // News goes back to the window, which tells it again once the user is done (a cough or words
+      // alike), as on a barge-in. Not also as a cut reply, or a cough would have it told twice.
+      if (wasNotice) onNoticeCut(noticeBatch)
       // Its turn already stands: if this was a cough, the reply is said again (onUtterance, below).
-      cutReply.cut(sayingText)
+      else cutReply.cut(sayingText)
     }
     // The user goes on talking before Ceci answered: the last turn waits to be joined.
     if ((event.type === 'start' || event.type === 'barge') && joiner.resumed()) {
@@ -979,7 +1014,8 @@ export async function startSession({
   const session = {
     sendContextualUpdate: text => remember(String(text ?? '')),
     // The window's fixed notice: the brain turns the news in the context into a short spoken update.
-    sendUserMessage: text => queue(() => think({ kind: 'notice', text: String(text ?? '') })),
+    // `batch` names the news it tells, handed back to onNoticeCut if the user cuts it.
+    sendUserMessage: (text, batch = null) => queue(() => think({ kind: 'notice', text: String(text ?? '') }, null, null, batch)),
     setMicMuted: next => {
       isMuted = Boolean(next)
       if (isMuted) {

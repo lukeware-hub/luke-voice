@@ -183,6 +183,49 @@ test('while off, nothing about the session is sent', async ($, on) => {
   expect(calls).toEqual([])
 })
 
+test("Claude's answer from while it was off is never sent, not even once it is turned on", async ($, on) => {
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  const { calls } = engine(on)
+  // Off, with no link left from an earlier test.
+  await $.command.run(run('off'))
+
+  await $.turn.complete({ answer: 'Resposta dada com o luke-voice desligado.', durationMs: 1, isAborted: false, turnId: 'm', reason: 'answer' })
+  await until(() => false)
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/subscribe'))
+  await until(() => false)
+  await $.command.run(run('off'))
+
+  expect(calls.some(c => JSON.stringify(c.body).includes('Resposta dada com o luke-voice desligado.'))).toBe(false)
+})
+
+test('turned off while it was still connecting, it leaves the hub and opens no call', async ($, on) => {
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => (release = resolve))
+  let isReading = false
+  // The plugin version is read just before subscribing: held there, the startup is still going.
+  on('fs.read', async () => {
+    isReading = true
+    await held
+    return { value: '{"version":"0.18.8"}' }
+  })
+  const { calls } = engine(on)
+  await $.command.run(run('off'))
+
+  await $.command.run(run('on'))
+  await until(() => isReading)
+  await $.command.run(run('off'))
+  release()
+  await until(() => calls.some(c => c.path === '/subscribe'))
+  await until(() => false)
+
+  const paths = calls.map(c => c.path)
+  // Subscribed after all, so it left again at once; nothing else came after.
+  expect(paths.lastIndexOf('/unsubscribe')).toBeGreaterThan(paths.indexOf('/subscribe'))
+  expect(paths.includes('/show')).toBe(false)
+  expect(paths.includes('/inbox')).toBe(false)
+})
+
 test('turning it on is stored, subscribes, and turning it off leaves the hub', async ($, on) => {
   const { calls, stored } = engine(on)
 

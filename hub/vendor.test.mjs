@@ -26,6 +26,11 @@ test('every vendored file is pinned to an exact version on jsDelivr with a sha38
   }
 })
 
+test("an Object property name (__proto__, constructor) is not a vendored file", async () => {
+  const request = async () => assert.fail('nothing is downloaded')
+  for (const path of ['__proto__', 'constructor', 'toString', 'hasOwnProperty']) assert.equal(await vendorFile(path, { dir: fresh(), request }), null, path)
+})
+
 test('a vendored file is downloaded once, verified, and then read from disk', () =>
   withEntry(Buffer.from('export const V = 1'), async () => {
     const dir = fresh()

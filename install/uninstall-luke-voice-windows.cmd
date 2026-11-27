@@ -83,12 +83,13 @@ function Get-ClaudeCode {
     })
 }
 # What runs from luke-voice: the hub (node ...\luke-voice\...\hub\server.mjs) and its guard, and
-# anything started from the folder: the voice engine (llama-server), luke-voice's own Node.js, the
-# call window's Chrome profile.
+# anything started from the folder: the voice engine (llama-server), the call window's Chrome
+# profile. luke-voice's own Node.js counts only while it runs the hub: once on the PATH it also runs
+# the user's own scripts, which are left alone.
 function Get-Ceci {
   @(Get-CimInstance Win32_Process | Where-Object {
       ($_.Name -eq 'node.exe' -and "$($_.CommandLine)" -match 'luke-voice.*hub[\\/](server|guard)\.mjs') -or
-      ("$($_.ExecutablePath)" -like "$full\*") -or
+      ("$($_.ExecutablePath)" -like "$full\*" -and "$($_.ExecutablePath)" -notlike "$full\node\*") -or
       ("$($_.CommandLine)" -like "*$full\chrome*")
     })
 }
@@ -163,6 +164,14 @@ if ($Claude) {
     $r = Invoke-Claude @('plugin', 'marketplace', 'remove', 'luke-voice')
     if ($r.code -ne 0) { Fail 'não consegui remover a origem do luke-voice do Claude Code.' "$(Why $r) Rode o desinstalador de novo." }
   }
+  # `claude plugin uninstall` leaves the plugin's downloaded copy behind: only luke-voice's own
+  # folder in Claude Code's plugin cache is deleted.
+  $claudeDir = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $HOME '.claude' }
+  $pluginCache = Join-Path $claudeDir 'plugins\cache\luke-voice'
+  if (Test-Path -LiteralPath $pluginCache) {
+    Remove-Item -LiteralPath $pluginCache -Recurse -Force -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $pluginCache) { Fail "não consegui apagar $pluginCache." 'Feche o Claude Code e rode o desinstalador de novo.' }
+  }
   Ok 'Removido do Claude Code.'
 } else {
   Ok 'O Claude Code não está neste computador: nada a remover nele.'
@@ -175,7 +184,8 @@ $roots = @($LvHome.TrimEnd('\'), $full) | Select-Object -Unique
 function Is-Ours($entry) {
   $forms = @($entry.TrimEnd('\'))
   try { $forms += [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($entry)).TrimEnd('\') } catch { }
-  foreach ($form in $forms) { foreach ($root in $roots) { if ($form.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) { return $true } } }
+  # The folder itself or a folder inside it: a sibling such as .luke-voice-old is not ours.
+  foreach ($form in $forms) { foreach ($root in $roots) { if ($form -eq $root -or $form.StartsWith("$root\", [StringComparison]::OrdinalIgnoreCase)) { return $true } } }
   return $false
 }
 $key = Get-Item 'HKCU:\Environment'

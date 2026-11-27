@@ -175,6 +175,10 @@ function longClock(h, m, s) {
 const clock = (h, m) => (m === '00' ? hours(h) : `${hourCount(h)} e ${m}`)
 
 const MONTHS = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro']
+const DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+// Words that make "N/M" a count, not a date: "12/12 passaram", "10/12 testes ok", "11/12 dos casos".
+const COUNT_AFTER =
+  /^\s*(?:passaram|passou|passando|falharam|falhou|falhando|rodaram|rodou|ok|d[oa]s|testes?|tests?|casos?|itens?|arquivos?|tarefas?|etapas?|passos?|checks?|verdes?|prontos?|prontas?|feit[oa]s?|conclu[ií]d[oa]s?|complet[oa]s?|aprovad[oa]s?)(?![\p{L}\d])/iu
 
 // Money in reais, as a Brazilian says it: "R$ 1.500,00" is "mil e quinhentos reais", "R$ 2,50" is
 // "dois reais e cinquenta centavos".
@@ -225,10 +229,12 @@ export function spokenForms(text) {
       .replace(/(?<![\p{L}\d])R\$\s?(\d{1,3}(?:\.\d{3})+|\d+)(?:,(\d{1,2}))?(?![\d,.]\d|\d)/gu, (_, whole, cents) => reais(whole, cents))
       // Dates: 22/11, 22/11/2026, 01/12/26. A bare "1/2" stays a fraction: a short date needs both
       // parts in two digits, or a day past 12.
-      .replace(/(?<![\p{L}\d/.,])(\d{1,2})\/(\d{1,2})(?:\/(\d{4}|\d{2}))?(?![\p{L}\d/])/gu, (match, d, m, y) => {
+      // A day the month does not have (30/02) is no date, nor a count ("12/12 passaram", "10/12 testes").
+      .replace(/(?<![\p{L}\d/.,])(\d{1,2})\/(\d{1,2})(?:\/(\d{4}|\d{2}))?(?![\p{L}\d/])/gu, (match, d, m, y, at, whole) => {
         const [day, month] = [Number(d), Number(m)]
-        if (day < 1 || day > 31 || month < 1 || month > 12) return match
+        if (day < 1 || month < 1 || month > 12 || day > DAYS_IN_MONTH[month - 1]) return match
         if (!y && !(d.length === 2 && m.length === 2) && day <= 12) return match
+        if (!y && COUNT_AFTER.test(whole.slice(at + match.length))) return match
         const year = y ? ` de ${y.length === 2 ? `20${y}` : y}` : ''
         return `${day === 1 ? 'primeiro' : day} de ${MONTHS[month - 1]}${year}`
       })

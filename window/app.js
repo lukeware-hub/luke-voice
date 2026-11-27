@@ -94,6 +94,7 @@ const SPEAK_AFTER_SILENCE_MS = 1500
 const ACTIVITY_FLUSH_MS = 3000
 const MIC_TIMEOUT_MS = 10_000
 const EARLY_DROP_MS = 4000
+const STREAM_RETRY_MS = 3000
 const MAX_ENTRIES = 60
 const RECENT = 3
 const COMPACT_SIZE = [380, 560]
@@ -176,10 +177,11 @@ let pendingActivity = []
 // What Ceci says on her own once the user is quiet: { text, id }, id set for a finished task's
 // result, which the hub keeps until it is acked here (hub/notices.mjs).
 let pendingSpeech = []
-// Results already taken in (the hub sends unacked ones again on every connect), and the last
-// ones handed to the voice, put back if the user talks over them.
+// Results already taken in (the hub sends unacked ones again on every connect), and the batches
+// handed to the voice by number, so the one the user talks over is the one put back.
 const heardNotices = new Set()
-let lastSpoken = []
+const spokenBatches = new Map()
+let nextBatch = 0
 let silentSince = Date.now()
 let connectedAt = 0
 // Bumped by every Chamar and Encerrar: a call still connecting when the user ends it (or starts
@@ -198,7 +200,19 @@ for (const level of ['info', 'warn', 'error']) {
   const original = console[level].bind(console)
   console[level] = (...args) => {
     original(...args)
-    const text = args.map(arg => (typeof arg === 'string' ? arg : arg instanceof Error ? arg.message : JSON.stringify(arg))).join(' ')
+    // A value JSON cannot write (a cycle, a BigInt) is logged as String() would: logging never throws.
+    const show = arg => {
+      try {
+        return JSON.stringify(arg)
+      } catch {
+        try {
+          return String(arg)
+        } catch {
+          return '[unprintable]'
+        }
+      }
+    }
+    const text = args.map(arg => (typeof arg === 'string' ? arg : arg instanceof Error ? arg.message : show(arg))).join(' ')
     if (text.startsWith('[luke-voice]') && logLines.length < 500) logLines.push(`${new Date().toISOString()} ${level} ${text}`)
   }
 }
@@ -614,22 +628,31 @@ function showPager(total) {
 }
 
 // One page of the memory (the conversations, or a search's hits): only that page is fetched.
-// A page left empty by a delete steps back to the one before.
+// A page left empty by a delete steps back to the last one there is (only back, so it ends).
+// Only the newest load draws: an older one still on its way (a fast typist, two clicks) is dropped.
+let memoryLoad = 0
 async function loadMemory({ page = memoryPage } = {}) {
+  const load = ++memoryLoad
+  const isOld = () => load !== memoryLoad
   memoryPage = Math.max(1, page)
   const query = memoryUi.query.value.trim()
   const paging = `limit=${memoryPageSize}&offset=${(memoryPage - 1) * memoryPageSize}`
-  memoryUi.stats.textContent = await memoryStatsLine()
+  const stats = await memoryStatsLine()
+  if (isOld()) return
+  memoryUi.stats.textContent = stats
+  const lastPage = total => Math.max(1, Math.ceil(total / memoryPageSize))
   if (query) {
     const out = await hub('GET', `/memory/search?q=${encodeURIComponent(query)}&${paging}`).catch(error => ({ error: error.message, hits: [] }))
-    if (!out.hits?.length && memoryPage > 1 && out.total) return loadMemory({ page: Math.ceil(out.total / memoryPageSize) })
+    if (isOld()) return
+    if (!out.hits?.length && out.total && lastPage(out.total) < memoryPage) return loadMemory({ page: lastPage(out.total) })
     memoryUi.list.replaceChildren(...(out.hits?.length ? out.hits.map(hitEntry) : [el('li', 'empty', out.error ?? `Nada sobre "${query}".`)]))
     showPager(out.total ?? 0)
     return
   }
   const out = await hub('GET', `/memory/conversations?${paging}`).catch(error => ({ error: error.message, conversations: [] }))
+  if (isOld()) return
   const rows = out.conversations ?? []
-  if (!rows.length && memoryPage > 1 && out.total) return loadMemory({ page: Math.ceil(out.total / memoryPageSize) })
+  if (!rows.length && out.total && lastPage(out.total) < memoryPage) return loadMemory({ page: lastPage(out.total) })
   memoryUi.list.replaceChildren()
   // Grouped by day: a heading before each day's first conversation on this page.
   let lastDay = null
@@ -759,13 +782,17 @@ function speakWhenQuiet() {
   }
   flushActivity()
   const items = pendingSpeech.splice(0)
-  lastSpoken = items
+  const batch = ++nextBatch
+  spokenBatches.set(batch, items)
+  // Only recent batches can still be cut while they are said.
+  for (const old of spokenBatches.keys()) if (spokenBatches.size > 5) spokenBatches.delete(old)
   const text = items.map(item => item.text).join('\n')
   // The news goes in as context, never as the user's words; the user message is fixed text.
   conversation.sendContextualUpdate(`[news]\n${quoteUntrusted(text)}`)
   gate.noticeSent()
   // In silent mode the agent only says it got a notification; the result waits as context.
-  conversation.sendUserMessage(quiet.on ? QUIET_NOTICE : NOTICE)
+  // The local voice hands `batch` back to onNoticeCut if the user talks over it.
+  conversation.sendUserMessage(quiet.on ? QUIET_NOTICE : NOTICE, batch)
   // Handed to the voice: the hub no longer keeps these results for a window that connects later.
   for (const item of items) ackNotice(item.id)
 }
@@ -774,11 +801,12 @@ function ackNotice(id) {
   if (id) void hub('POST', '/notice-ack', { id }).catch(() => {})
 }
 
-// The user talked over Ceci while she told the news (local voice): it is told again once they
-// are done.
-function onNoticeCut() {
-  pendingSpeech.unshift(...lastSpoken)
-  lastSpoken = []
+// The user talked over Ceci while she told the news (local voice): that batch is told again once
+// they are done.
+function onNoticeCut(batch) {
+  const items = spokenBatches.get(batch) ?? []
+  spokenBatches.delete(batch)
+  pendingSpeech.unshift(...items)
 }
 
 // A finished task with no call running: Ceci starts one and tells it, without being asked.
@@ -796,7 +824,7 @@ function onActivity(session, events) {
     // A result the hub sent again (an unacked one, on reconnect) that this window already took in.
     if (id && heardNotices.has(id)) continue
     if (id) heardNotices.add(id)
-    const spoken = speech.shouldSpeak(session, kind, text)
+    const spoken = speech.shouldSpeak(session, kind, text, id)
     if (kind === 'task_done') {
       if (spoken) {
         pendingSpeech.push({ text: `task done: ${text}`, id })
@@ -949,8 +977,8 @@ async function startCall() {
       prepare: microphone,
       inputDeviceId: savedMicrophone() || undefined,
       clientTools,
-      onNoticeCut: () => {
-        if (isCurrent()) onNoticeCut()
+      onNoticeCut: batch => {
+        if (isCurrent()) onNoticeCut(batch)
       },
       onStatus: (text, { isWarning = false } = {}) => {
         if (!isCurrent()) return
@@ -976,6 +1004,9 @@ async function startCall() {
         if (!isCurrent()) return
         const wasEnded = conversation === null
         conversation = null
+        // Dropped by the voice (ElevenLabs), not by Encerrar: the same cleanup as endCall.
+        clearCall()
+        void flushMemory()
         // A call the agent drops in its first seconds never really started: say so, with the reason.
         if (!wasEnded && Date.now() - connectedAt < EARLY_DROP_MS) {
           const reason = details?.message || details?.reason || ''
@@ -1026,15 +1057,20 @@ async function startCall() {
   }
 }
 
-async function endCall() {
-  callGeneration++
-  const current = conversation
-  conversation = null
+// What a call leaves behind when it ends, by the user or dropped by the voice.
+function clearCall() {
   pendingActivity = []
   // Finished tasks' results stay: they are told in the next call (the hub keeps them too).
   pendingSpeech = pendingSpeech.filter(item => item.id)
   speech.clear()
   quiet.clear()
+}
+
+async function endCall() {
+  callGeneration++
+  const current = conversation
+  conversation = null
+  clearCall()
   await current?.endSession().catch(() => {})
   // The last words reach the memory before the call is closed there.
   await flushMemory()
@@ -1076,6 +1112,17 @@ function connectStream() {
       setCaption(STATES.offline.caption)
       setOrb('idle')
     }
+    // The browser retries a dropped stream by itself, but not a refused one (a 403: the hub
+    // restarted and no longer takes this window's key). Ask the hub why: a stale key says so,
+    // anything else connects again in a moment.
+    if (stream.readyState !== EventSource.CLOSED) return
+    hub('GET', '/engine').then(
+      () => setTimeout(connectStream, STREAM_RETRY_MS),
+      error => {
+        if (error.message === STALE_WINDOW) setCall('error', STALE_WINDOW)
+        else setTimeout(connectStream, STREAM_RETRY_MS)
+      },
+    )
   }
 }
 

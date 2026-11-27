@@ -122,8 +122,11 @@ test('a delete from the window removes what it names, and says how much', async 
   const before = (await call('GET', '/memory/stats', { key: WINDOW })).body.events
   const preview = (await call('POST', '/memory/preview', { key: WINDOW, body: { scope: { search: 'girassol' } } })).body
   assert.ok(preview.events >= 3)
+  graphAsks.length = 0
   const done = (await call('POST', '/memory/delete', { key: WINDOW, body: { scope: { search: 'girassol' } } })).body
   assert.equal(done.deleted, preview.events)
+  // The knowledge graph is asked to drop the deleted words too, right away.
+  assert.deepEqual(graphAsks, [0])
   assert.deepEqual((await call('GET', '/memory/search?q=girassol', { key: WINDOW })).body.hits, [])
   assert.equal((await call('GET', '/memory/stats', { key: WINDOW })).body.events, before - preview.events)
 })

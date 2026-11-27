@@ -100,9 +100,12 @@ export function wavSamples(buffer) {
     const id = buffer.toString('ascii', o, o + 4)
     const size = buffer.readUInt32LE(o + 4)
     if (id === 'fmt ') {
+      if (o + 16 > buffer.length) break
       const rate = buffer.readUInt32LE(o + 12)
       o += 8 + size
       while (o + 8 <= buffer.length && buffer.toString('ascii', o, o + 4) !== 'data') o += 8 + buffer.readUInt32LE(o + 4)
+      // No data chunk (a take cut off after its header): no samples, a failed take.
+      if (o + 8 > buffer.length) return { samples: new Float32Array(0), rate }
       const start = o + 8
       const end = Math.min(buffer.length, start + (buffer.readUInt32LE(o + 4) || buffer.length))
       const samples = new Float32Array(Math.floor((end - start) / 2))
@@ -172,11 +175,13 @@ export function createQuestionTakes({ say, dir, voiceKey, log = () => {}, now = 
       return null
     }
   }
-  // Records a take; it becomes the served one when its rise is better.
+  // Records a take; it becomes the served one when its rise is better. False for a take with no
+  // sound in it (a WAV cut off after its header): never kept, never served.
   function remember(text, seed, wav) {
     const { key, entry } = entryOf(text)
-    if (entry.takes.some(t => t.seed === seed)) return
+    if (entry.takes.some(t => t.seed === seed)) return true
     const { samples, rate } = wavSamples(wav)
+    if (samples.length === 0) return false
     const rise = endRise(samples, rate)
     entry.takes.push({ seed, rise })
     const best = isNaturalRise(entry.best?.rise) ? entry.best : bestTake([...(entry.best ? [entry.best] : []), { seed, rise }])
@@ -189,6 +194,7 @@ export function createQuestionTakes({ say, dir, voiceKey, log = () => {}, now = 
     } catch (error) {
       log(`question takes: ${error.message}`)
     }
+    return true
   }
   function prune() {
     const files = readdirSync(dir).filter(f => f.endsWith('.json'))
@@ -213,9 +219,8 @@ export function createQuestionTakes({ say, dir, voiceKey, log = () => {}, now = 
       for (const seed of untried(entry)) {
         if (!fits() || signal?.aborted) break
         const wav = await say(text, seed, signal)
-        if (!wav) break
+        if (!wav || !remember(text, seed, wav)) break
         succeeded()
-        remember(text, seed, wav)
         if (isNaturalRise(entry.best?.rise)) break
       }
     }
@@ -230,7 +235,9 @@ export function createQuestionTakes({ say, dir, voiceKey, log = () => {}, now = 
   }
   function schedule() {
     clearTimeout(timer)
-    if (!queue.length || background) return
+    // While a live line plays nothing is timed: its end schedules again (a timer here would spin
+    // at 0 ms once the idle wait since the line began has passed).
+    if (!queue.length || background || liveCount) return
     const wait = Math.max(0, lastLive + idleMs - now(), retryAt - now())
     timer = setTimeout(step, wait)
     timer.unref?.()
@@ -250,8 +257,9 @@ export function createQuestionTakes({ say, dir, voiceKey, log = () => {}, now = 
     try {
       wav = await say(text, seed, stop.signal)
       if (wav && !stop.signal.aborted) {
-        succeeded()
-        remember(text, seed, wav)
+        // A take with no sound counts as a failed one: retried later, not at once forever.
+        if (remember(text, seed, wav)) succeeded()
+        else wav = null
       }
     } catch {
       // Stopped for a live line: the take is made again later.

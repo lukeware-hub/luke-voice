@@ -342,8 +342,9 @@ export async function ensureFile(entry, file, { request = fetch, onProgress, pol
 
 // The local path of a verified model file, downloading it if needed. Null for an unknown path.
 export async function ensureModel(path, { dir = modelsDir(), ...options } = {}) {
+  // Own entries only: "__proto__" or "constructor" from a URL are not models.
+  if (!Object.hasOwn(MODELS, path)) return null
   const entry = MODELS[path]
-  if (!entry) return null
   return ensureFile(entry, join(dir, ...path.split('/')), options)
 }
 

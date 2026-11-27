@@ -67,15 +67,20 @@ export function createQuietMode() {
   }
 }
 
-const KINDS = new Set(['prompt', 'tool', 'failure', 'done', 'attention', 'info', 'task_done'])
+const KINDS = new Set(['prompt', 'tool', 'failure', 'done', 'attention', 'info', 'task_done', 'task_progress'])
 
 export const safeKind = kind => (KINDS.has(kind) ? kind : 'info')
 
 // Wraps text in the untrusted markers. Brackets become parentheses so the text cannot fake our
 // own tags ([task done], [sessions], [activity]), and the markers cannot be closed from inside.
 export function quoteUntrusted(text) {
-  const clean = String(text ?? '')
-    .replace(/<<<\/?untrusted>>>/gi, '')
+  // Stripped until none is left: removing one marker must not join its neighbours into a new one.
+  let stripped = String(text ?? '')
+  for (let before = null; before !== stripped; ) {
+    before = stripped
+    stripped = stripped.replace(/<<<\/?untrusted>>>/gi, '')
+  }
+  const clean = stripped
     .replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, ' ')
     .replace(/\[/g, '(')
     .replace(/\]/g, ')')
@@ -113,11 +118,13 @@ export function createSpeechFilter() {
     expectReply(session) {
       if (session) awaiting.add(session)
     },
-    shouldSpeak(session, kind, text) {
+    // `id`: the hub's notice id for a finished task. The same notice is said once; the same task run
+    // again (a new notice with the same text) is said again.
+    shouldSpeak(session, kind, text, id = null) {
       if (kind === 'task_done') {
-        // The same result reported twice is said once.
-        if (said.has(text)) return false
-        said.add(text)
+        const key = id ?? text
+        if (said.has(key)) return false
+        said.add(key)
         if (said.size > 50) said.delete(said.values().next().value)
         return true
       }
@@ -131,6 +138,7 @@ export function createSpeechFilter() {
     },
     clear() {
       awaiting.clear()
+      said.clear()
     },
   }
 }

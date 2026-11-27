@@ -29,6 +29,9 @@ const MAX_REAL_TIME = 0.9
 // Lean profile (the ears on the CPU): hearing the test line must stay a short pause in a call. On a
 // 16-thread desktop CPU a sentence takes ~0.6 s; a CPU over 2 s would make every turn drag.
 const MAX_EARS_MS = 2000
+// One request of the install test past this fails the test, instead of holding setup (and the
+// installer) forever on a hung server. A working engine answers in a few seconds.
+const SMOKE_WAIT_MS = 60_000
 
 // How long a WAV lasts, in ms: its bytes after the header at the header's byte rate (Qwen3-TTS
 // writes 24 kHz 16-bit mono, assumed when there is no header).
@@ -105,7 +108,7 @@ export function progressPrinter(out = process.stdout) {
 
 // The gpu profile's test: the three servers start, Ceci says a line, her ears write it back, and
 // the router answers a greeting. Returns { ok, ms, heard, problems }.
-export async function smokeTest(profile, { engine = createEngine(), voice = VOICE } = {}) {
+export async function smokeTest(profile, { engine = createEngine(), voice = VOICE, timeoutMs = SMOKE_WAIT_MS } = {}) {
   const problems = []
   const started = Date.now()
   try {
@@ -120,7 +123,7 @@ export async function smokeTest(profile, { engine = createEngine(), voice = VOIC
     if (tts) {
       const body = { input: TEST_LINE, lang: 'pt', response_format: 'wav', n_predict: maxFrames(TEST_LINE), ...VOICE_SETTINGS, ...(refB64 ? { speaker_ref_b64: refB64, speaker_ref_text: refText } : {}) }
       const asked = Date.now()
-      const res = await fetch(`${tts}/v1/audio/speech`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      const res = await fetch(`${tts}/v1/audio/speech`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs) })
       const wav = Buffer.from(await res.arrayBuffer())
       const madeMs = Date.now() - asked
       if (!res.ok || wav.length < 24_000) problems.push('a voz não gerou áudio')
@@ -133,7 +136,7 @@ export async function smokeTest(profile, { engine = createEngine(), voice = VOIC
         form.append('language', 'pt')
         form.append('prompt', ASR_GLOSSARY)
         const listened = Date.now()
-        const answer = await fetch(`${asr}/v1/audio/transcriptions`, { method: 'POST', body: form })
+        const answer = await fetch(`${asr}/v1/audio/transcriptions`, { method: 'POST', body: form, signal: AbortSignal.timeout(timeoutMs) })
         heard = answer.ok ? String((await answer.json()).text ?? '').replace(/^[\s\S]*<asr_text>/, '').trim() : ''
         const earsMs = Date.now() - listened
         if (!/ceci|pronta/i.test(heard)) problems.push(`os ouvidos ouviram "${heard}"`)
@@ -142,7 +145,7 @@ export async function smokeTest(profile, { engine = createEngine(), voice = VOIC
     }
     const router = engine.url('router')
     if (router) {
-      const ask = chat => fetch(`${router}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(chat) }).then(r => r.json())
+      const ask = chat => fetch(`${router}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(chat), signal: AbortSignal.timeout(timeoutMs) }).then(r => r.json())
       const { intent } = await route('oi, tudo bem?', { ask })
       if (intent === 'claude') problems.push('o roteador não respondeu a um cumprimento')
     }

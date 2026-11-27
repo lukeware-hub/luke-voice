@@ -259,45 +259,72 @@ export function openMemory({ dir = memoryDir(), now = Date.now, log = () => {} }
   }
 
   // Events written while the database could not be opened or written, moved in now, in order.
+  // A replay cut short (the hub died, or the database refused a write) leaves its file as
+  // pending.jsonl.replaying: it goes in first, and a newer pending.jsonl never overwrites it.
   function replayPending() {
-    if (!existsSync(pendingFile)) return 0
     const moving = `${pendingFile}.replaying`
-    renameSync(pendingFile, moving)
     let count = 0
-    // Talk close in time is one call again, as it was when it was said.
-    let call = null
-    let callAt = -Infinity
+    // Talk close in time is one call again, as it was when it was said, even across the two files.
+    const talk = { call: null, at: -Infinity }
+    if (existsSync(moving)) count += replayFile(moving, talk)
+    if (existsSync(pendingFile)) {
+      renameSync(pendingFile, moving)
+      count += replayFile(moving, talk)
+    }
+    if (count) log(`memory: moved ${count} pending events in`)
+    return count
+  }
+
+  // Moves one file's events in, all or none. On a failed write (a full disk, a locked database)
+  // nothing is kept in the database and the file stays where it is, for the next open.
+  function replayFile(moving, last) {
+    let count = 0
+    let { call, at: callAt } = last
     db.exec('BEGIN')
     try {
       for (const line of readFileSync(moving, 'utf8').split('\n')) {
         if (!line.trim()) continue
+        let event
         try {
-          const event = JSON.parse(line)
-          const talk = event.kind === 'user' || event.kind === 'ceci' || event.kind === 'notice'
-          const day = dayOf(event.at)
-          if (talk && (call === null || event.at - callAt > CALL_GAP_MS)) {
-            call = Number(q.insertConversation.run(event.at, 'call', day, null, null).lastInsertRowid)
-            q.endConversation.run(event.at, call)
-          }
-          if (talk) callAt = event.at
-          const id = talk ? call : (q.background.get(day)?.id ?? Number(q.insertConversation.run(event.at, 'background', day, null, null).lastInsertRowid))
-          q.insertEvent.run(id, event.at, event.kind, event.session ?? null, String(event.text), event.meta ? JSON.stringify(event.meta) : null, event.untrusted ? 1 : 0, stampOf(event.at))
-          count++
+          event = JSON.parse(line)
         } catch {
           // A torn last line (the process died mid-write) is skipped.
+          continue
         }
+        // Not an event at all: skipped too, so it cannot hold back the rest forever.
+        if (!event || typeof event !== 'object' || !Number.isFinite(event.at)) continue
+        const kind = KINDS.includes(event.kind) ? event.kind : 'session_info'
+        const talk = kind === 'user' || kind === 'ceci' || kind === 'notice'
+        const day = dayOf(event.at)
+        if (talk && (call === null || event.at - callAt > CALL_GAP_MS)) {
+          call = Number(q.insertConversation.run(event.at, 'call', day, null, null).lastInsertRowid)
+          q.endConversation.run(event.at, call)
+        }
+        if (talk) callAt = event.at
+        const id = talk ? call : (q.background.get(day)?.id ?? Number(q.insertConversation.run(event.at, 'background', day, null, null).lastInsertRowid))
+        q.insertEvent.run(id, event.at, kind, event.session ?? null, String(event.text ?? ''), event.meta ? JSON.stringify(event.meta) : null, event.untrusted ? 1 : 0, stampOf(event.at))
+        count++
       }
       db.exec('COMMIT')
+      last.call = call
+      last.at = callAt
     } catch (error) {
-      db.exec('ROLLBACK')
-      renameSync(moving, pendingFile)
+      try {
+        db.exec('ROLLBACK')
+      } catch {
+        // Already rolled back by SQLite itself.
+      }
       throw error
     }
     unlinkSync(moving)
-    if (count) log(`memory: moved ${count} pending events in`)
     return count
   }
-  replayPending()
+  try {
+    replayPending()
+  } catch (error) {
+    // Kept on disk, whole, and moved in on the next open; the memory works meanwhile.
+    log(`memory: could not move the pending events in (${error?.message ?? error}); kept in ${pendingFile}.replaying`)
+  }
 
   const hitRow = row => ({ id: row.id, conversation: row.conversation_id, at: row.at, when: row.at_text ?? stampOf(row.at), day: dayOf(row.at), kind: row.kind, session: row.session, text: row.text, untrusted: Boolean(row.untrusted) })
 
@@ -531,6 +558,17 @@ export function openMemory({ dir = memoryDir(), now = Date.now, log = () => {} }
     return ['0 = 1', []]
   }
 
+  // Which of scopeWhere's scopes a delete used, in the same order, without its words or dates.
+  function scopeKind(scope = {}) {
+    if (scope.all === true) return 'all'
+    if (scope.conversation !== undefined) return 'conversation'
+    if (scope.event !== undefined) return 'event'
+    if (scope.day !== undefined) return 'day'
+    if (scope.from !== undefined || scope.to !== undefined) return 'range'
+    if (scope.search !== undefined) return 'search'
+    return 'none'
+  }
+
   // What a delete would remove, to tell the user before asking.
   function preview(scope) {
     const [where, args] = scopeWhere(scope)
@@ -555,10 +593,13 @@ export function openMemory({ dir = memoryDir(), now = Date.now, log = () => {} }
         db.prepare("DELETE FROM summaries WHERE level = 'month' AND period = ?").run(day.slice(0, 7))
       }
       if (count) db.prepare("DELETE FROM summaries WHERE level = 'life'").run()
-      // Conversations with nothing left go too (titles are made from their words).
+      // Titles are made from a conversation's words: one that lost some gets a new title with its
+      // new summary. Conversations with nothing left go too.
+      for (const t of touched) db.prepare('UPDATE conversations SET title = NULL WHERE id = ?').run(t.id)
       db.prepare('DELETE FROM conversations WHERE NOT EXISTS (SELECT 1 FROM events WHERE conversation_id = conversations.id) AND id <> ?').run(current ?? -1)
       if (scope.all === true) db.prepare('DELETE FROM summaries').run()
-      db.prepare('INSERT INTO deletions (at, how, scope, count) VALUES (?, ?, ?, ?)').run(now(), String(how).slice(0, 20), JSON.stringify(scope).slice(0, 300), count)
+      // Only the kind of delete is kept: the words searched for are what the user wanted gone.
+      db.prepare('INSERT INTO deletions (at, how, scope, count) VALUES (?, ?, ?, ?)').run(now(), String(how).slice(0, 20), JSON.stringify({ kind: scopeKind(scope) }), count)
       db.exec('COMMIT')
     } catch (error) {
       db.exec('ROLLBACK')

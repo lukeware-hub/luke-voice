@@ -1,7 +1,7 @@
 // Keeps the user's ElevenLabs voice agent in step with agent/agent.json and agent/prompt.md.
 // Plain REST, no SDK, so an install needs no packages.
-import { createHash } from 'node:crypto'
-import { readFile, writeFile } from 'node:fs/promises'
+import { createHash, randomBytes } from 'node:crypto'
+import { readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { ASR_TERMS } from './engine.mjs'
@@ -85,13 +85,33 @@ async function exists(apiKey, id) {
   }
 }
 
-// Returns the agent id, syncing the agent first when the definition changed or the agent is gone.
-export async function ensureAgent(apiKey, root, { log = () => {} } = {}) {
-  if (process.env.LUKE_VOICE_AGENT_ID) return process.env.LUKE_VOICE_AGENT_ID
+// Syncs in progress, by key and root: two /token requests at once (a double click, two windows)
+// share one, instead of each creating the agent and its tools. A failed one is forgotten, so the
+// next request tries again.
+const syncing = new Map()
 
+// Returns the agent id, syncing the agent first when the definition changed or the agent is gone.
+export function ensureAgent(apiKey, root, options = {}) {
+  if (process.env.LUKE_VOICE_AGENT_ID) return Promise.resolve(process.env.LUKE_VOICE_AGENT_ID)
+  const at = `${apiKey}\n${root}`
+  if (!syncing.has(at)) syncing.set(at, syncAgent(apiKey, root, options).finally(() => syncing.delete(at)))
+  return syncing.get(at)
+}
+
+async function syncAgent(apiKey, root, { log = () => {} } = {}) {
   const { def, prompt, hash } = await readDefinition(root)
   const file = stateFile('agent.json')
-  const saved = await readFile(file, 'utf8').then(JSON.parse, () => null)
+  // A missing, truncated or broken file only means the agent is looked up again.
+  const saved = await readFile(file, 'utf8').then(
+    text => {
+      try {
+        return JSON.parse(text)
+      } catch {
+        return null
+      }
+    },
+    () => null,
+  )
 
   if (saved?.id && saved.hash === hash && (await exists(apiKey, saved.id))) return saved.id
 
@@ -108,7 +128,15 @@ export async function ensureAgent(apiKey, root, { log = () => {} } = {}) {
     log(`created agent ${id}`)
   }
 
-  await writeFile(file, JSON.stringify({ id, hash }, null, 2), { mode: 0o600 })
+  // Written whole or not at all (a temp file, then rename): a hub killed mid-write leaves no
+  // truncated file behind.
+  const temp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
+  try {
+    await writeFile(temp, JSON.stringify({ id, hash }, null, 2), { mode: 0o600 })
+    await rename(temp, file)
+  } finally {
+    await rm(temp, { force: true })
+  }
   return id
 }
 

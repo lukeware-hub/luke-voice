@@ -240,6 +240,73 @@ test('events that could not be written wait in pending.jsonl and are moved in, a
   memory.close()
 })
 
+test('a pending event the database refuses (a full disk, a locked file) is kept for the next open, not dropped', () => {
+  const dir = fresh()
+  const at = Date.parse('2026-09-02T10:00:00')
+  openMemory({ dir, now: () => at }).close()
+  // Stands for a write the disk refuses.
+  const raw = new DatabaseSync(join(dir, 'memory.db'))
+  raw.exec("CREATE TRIGGER refuse BEFORE INSERT ON events WHEN new.text = 'recusada' BEGIN SELECT RAISE(ABORT, 'database or disk is full'); END;")
+  raw.close()
+  const lines = [{ kind: 'user', text: 'antes', at }, { kind: 'user', text: 'recusada', at: at + 1000 }]
+  writeFileSync(join(dir, 'pending.jsonl'), `${lines.map(l => JSON.stringify(l)).join('\n')}\n`)
+  let memory = openMemory({ dir, now: () => at + DAY })
+  // All or none: nothing moved in, and the file is still on disk.
+  assert.equal(memory.stats().events, 0)
+  assert.equal(existsSync(join(dir, 'pending.jsonl.replaying')), true)
+  memory.close()
+  const fixed = new DatabaseSync(join(dir, 'memory.db'))
+  fixed.exec('DROP TRIGGER refuse')
+  fixed.close()
+  memory = openMemory({ dir, now: () => at + DAY })
+  assert.equal(memory.stats().events, 2)
+  assert.equal(existsSync(join(dir, 'pending.jsonl.replaying')), false)
+  memory.close()
+})
+
+test('a replay cut short is moved in first, and newer pending events after it, never over it', () => {
+  const dir = fresh()
+  const at = Date.parse('2026-09-03T10:00:00')
+  writeFileSync(join(dir, 'pending.jsonl.replaying'), `${JSON.stringify({ kind: 'user', text: 'primeira, da replay que parou', at })}\n`)
+  writeFileSync(join(dir, 'pending.jsonl'), `${JSON.stringify({ kind: 'user', text: 'segunda, depois', at: at + 1000 })}\n`)
+  let memory = openMemory({ dir, now: () => at + DAY })
+  assert.equal(memory.conversation('first').items.map(i => i.text).join(' / '), 'primeira, da replay que parou / segunda, depois')
+  assert.equal(existsSync(join(dir, 'pending.jsonl.replaying')), false)
+  assert.equal(existsSync(join(dir, 'pending.jsonl')), false)
+  memory.close()
+  // Only the one cut short, with no pending.jsonl beside it: moved in too.
+  writeFileSync(join(dir, 'pending.jsonl.replaying'), `${JSON.stringify({ kind: 'user', text: 'sozinha', at: at + 2000 })}\n`)
+  memory = openMemory({ dir, now: () => at + DAY })
+  assert.equal(memory.stats().events, 3)
+  assert.equal(existsSync(join(dir, 'pending.jsonl.replaying')), false)
+  memory.close()
+})
+
+test('a delete keeps no trace of the words it removed: not in the deletions log, not in a title', () => {
+  const dir = fresh()
+  const now = clockAt(Date.parse('2026-07-10T10:00:00'))
+  const memory = openMemory({ dir, now })
+  memory.startCall()
+  memory.append({ kind: 'user', text: 'Fala do ProjetoSigilosoQ.' })
+  memory.append({ kind: 'user', text: 'E de outra coisa.' })
+  memory.endCall()
+  now.advance(DAY)
+  for (const item of memory.pendingSummaries({ max: 10 })) memory.saveSummary({ ...item, text: 'resumo', title: item.level === 'conversation' ? 'Sobre o ProjetoSigilosoQ' : null })
+  assert.equal(memory.conversations()[0].title, 'Sobre o ProjetoSigilosoQ')
+  assert.deepEqual(memory.deleteMemory({ search: 'ProjetoSigilosoQ' }), { deleted: 1 })
+  // The conversation stays with what is left; its title, made from the deleted words, waits for a new summary.
+  assert.equal(memory.conversations()[0].title, null)
+  assert.deepEqual(memory.pendingSummaries({ max: 10 }).map(i => i.level), ['conversation'])
+  memory.close()
+  const raw = new DatabaseSync(join(dir, 'memory.db'))
+  assert.deepEqual(raw.prepare('SELECT how, scope, count FROM deletions').all().map(r => ({ ...r })), [{ how: 'command', scope: '{"kind":"search"}', count: 1 }])
+  raw.close()
+  for (const name of ['memory.db', 'memory.db-wal']) {
+    const path = join(dir, name)
+    if (existsSync(path)) assert.equal(readFileSync(path).includes('ProjetoSigilosoQ'), false, name)
+  }
+})
+
 test('dates are the user\'s own calendar days and months', () => {
   assert.equal(dayOf(Date.parse('2026-12-31T23:30:00')), '2026-12-31')
   const [from, to] = rangeOf('2026-02')

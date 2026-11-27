@@ -12,7 +12,7 @@
 //   run.lock                  held while a run is going
 // Graphify's own incremental manifest then re-extracts only the transcripts that changed.
 import { spawn } from 'node:child_process'
-import { appendFileSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync, closeSync } from 'node:fs'
+import { appendFileSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync, closeSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -158,21 +158,71 @@ const isAlive = pid => {
   }
 }
 
+// A lock that cannot be read yet may be one being written by a lock of an older version (made empty,
+// then written): held while it is this young.
+const LOCK_WRITE_MS = 60_000
+
+const readText = file => {
+  try {
+    return readFileSync(file, 'utf8')
+  } catch {
+    return null
+  }
+}
+
+// Whether the lock file's text is a run that is still going.
+function isHeld(file, text, now) {
+  let held = null
+  try {
+    held = JSON.parse(text)
+  } catch {
+    // Not JSON (yet): by its age.
+  }
+  if (!held || typeof held !== 'object') {
+    try {
+      return now - statSync(file).mtimeMs < LOCK_WRITE_MS
+    } catch {
+      return false
+    }
+  }
+  return now - Number(held.at) < LOCK_STALE_MS && isAlive(Number(held.pid))
+}
+
 export function takeLock(dir, { now = Date.now(), pid = process.pid } = {}) {
   mkdirSync(dir, { recursive: true, mode: 0o700 })
   const file = join(dir, 'run.lock')
-  if (existsSync(file)) {
-    const held = readJson(file, null)
-    const fresh = held && now - Number(held.at) < LOCK_STALE_MS && isAlive(Number(held.pid))
-    if (fresh) return false
-    unlinkSync(file)
+  const text = readText(file)
+  if (text !== null) {
+    if (isHeld(file, text, now)) return false
+    // Stale: removed only while it is still the same lock (another run may have just taken it).
+    if (readText(file) !== text) return false
+    try {
+      unlinkSync(file)
+    } catch {
+      // Another run removed it first.
+    }
   }
+  // Written whole under its own name, then linked in place: the link fails when another run made
+  // the lock first, and no run ever reads a lock half-written.
+  const tmp = `${file}.${pid}-${Math.random().toString(36).slice(2)}.tmp`
   try {
-    // wx: fails if another run created it in between.
-    writeFileSync(file, JSON.stringify({ pid, at: now }), { flag: 'wx', mode: 0o600 })
+    writeFileSync(tmp, JSON.stringify({ pid, at: now }), { mode: 0o600 })
+    try {
+      linkSync(tmp, file)
+    } catch (error) {
+      if (error?.code === 'EEXIST') return false
+      // A file system without hard links: wx still fails if another run created it in between.
+      writeFileSync(file, JSON.stringify({ pid, at: now }), { flag: 'wx', mode: 0o600 })
+    }
     return true
   } catch {
     return false
+  } finally {
+    try {
+      unlinkSync(tmp)
+    } catch {
+      // Never written.
+    }
   }
 }
 
@@ -185,8 +235,9 @@ export function dropLock(dir) {
 }
 
 export function isLocked(dir, now = Date.now()) {
-  const held = readJson(join(dir, 'run.lock'), null)
-  return Boolean(held && now - Number(held.at) < LOCK_STALE_MS && isAlive(Number(held.pid)))
+  const file = join(dir, 'run.lock')
+  const text = readText(file)
+  return text !== null && isHeld(file, text, now)
 }
 
 // ---- Graphify ----
@@ -290,7 +341,11 @@ export function createGraphUpdater({ dir = graphDir(), gapMs = GRAPH_GAP_MS, isC
   function fire() {
     timer = null
     if (isCallLive()) return log('graph: a call is live; the next call end asks again')
-    if (isLocked(dir, now())) return log('graph: a run is already going')
+    // The run going may have started before what was asked for (a delete): asked again after it.
+    if (isLocked(dir, now())) {
+      log('graph: a run is already going; asking again after the gap')
+      return schedule(gapMs)
+    }
     const wait = Number(readState(dir).lastRunAt ?? 0) + gapMs - now()
     if (wait > 0) return schedule(wait)
     try {

@@ -299,12 +299,25 @@ async function reportProgress($: EngineInterface) {
 const TASKS_KEY = 'voiceTasks'
 type StoredTasks = Record<string, Array<[string, string]>>
 
-async function saveTasks($: EngineInterface) {
+// The store is shared by every session and has no atomic update: each save reads it right before
+// writing and changes only this session's entry, and this module's saves run one at a time, so
+// none of them writes back an older copy over another. A session that ends takes its entry out.
+let savingTasks: Promise<void> = Promise.resolve()
+
+function saveTasks($: EngineInterface, { isEnding = false } = {}): Promise<void> {
+  savingTasks = savingTasks.then(() => writeTasks($, isEnding))
+  return savingTasks
+}
+
+async function writeTasks($: EngineInterface, isEnding: boolean) {
   try {
     const id = await $.session.id()
+    const mine = isEnding ? [] : [...tasks].slice(-20)
     const saved = await $.store.get(TASKS_KEY)
     const all: StoredTasks = saved && typeof saved === 'object' && !Array.isArray(saved) ? { ...(saved as StoredTasks) } : {}
-    if (tasks.size) all[id] = [...tasks].slice(-20)
+    // Nothing to change: no write, so no other session's newer entry is put at risk.
+    if (mine.length === 0 && !(id in all)) return
+    if (mine.length) all[id] = mine
     else delete all[id]
     await $.store.set(TASKS_KEY, all)
   } catch {
@@ -565,6 +578,10 @@ async function apiKey($: EngineInterface, options: Record<string, unknown>) {
 
 // Starts the hub when it is down and subscribes this session to it.
 async function subscribeOnce($: EngineInterface, options: Record<string, unknown>): Promise<boolean> {
+  // Turned off (or off and on again) while this ran: what it got is not wanted any more, and the
+  // link, the token and the window are left as the turning off set them.
+  const gen = generation
+  const isStale = () => gen !== generation
   try {
     await loadStoredVoice($)
     // The key goes to the launcher on stdin, so a hub it starts has it from the first call.
@@ -575,9 +592,11 @@ async function subscribeOnce($: EngineInterface, options: Record<string, unknown
         stdin: JSON.stringify({ apiKey: await apiKey($, options), provider: chosenProvider(options) }),
       })
     } catch (error) {
+      if (isStale()) return false
       await setLink($, { state: 'down', reason: isNotFound(error) ? NO_NODE : `o servidor local não iniciou (${messageOf(error)})` })
       return false
     }
+    if (isStale()) return false
     let out: { ok?: boolean; serviceToken?: string; error?: string } = {}
     try {
       out = JSON.parse(launched.stdout.trim().split('\n').pop() || '{}')
@@ -595,6 +614,11 @@ async function subscribeOnce($: EngineInterface, options: Record<string, unknown
       { cwd: await $.session.cwd(), sessionId: await $.session.id(), apiKey: await apiKey($, options), provider: chosenProvider(options), version: await pluginVersion($), canSummarize: true, byUser },
       out.serviceToken,
     )
+    if (isStale()) {
+      // Subscribed after all: left at once, so the call window never lists this session.
+      if (res.ok && typeof res.json.token === 'string') await hubFetch($, 'POST', '/unsubscribe', {}, res.json.token).catch(() => undefined)
+      return false
+    }
     if (res.status === 410 && res.json.error === 'ended') {
       await endedFromWindow($)
       return false
@@ -612,6 +636,7 @@ async function subscribeOnce($: EngineInterface, options: Record<string, unknown
     await markFirstCallDone($)
     return true
   } catch (error) {
+    if (isStale()) return false
     await setLink($, { state: 'down', reason: `sem conexão com o servidor local (${messageOf(error)})` })
     return false
   }
@@ -648,9 +673,17 @@ async function pollLoop($: EngineInterface, options: Record<string, unknown>, ge
       await backOff()
       continue
     }
+    // Turned off while subscribing: no inbox is read for a session that is off.
+    if (gen !== generation) return
     try {
-      const res = await hubFetch($, 'GET', `/inbox?wait=${POLL_WAIT_MS}`)
-      if (gen !== generation) return
+      const polled = token
+      const res = await hubFetch($, 'GET', `/inbox?wait=${POLL_WAIT_MS}`, undefined, polled)
+      if (gen !== generation) {
+        // Commands the hub already handed over are answered, not left to time out in the call.
+        const pulled = res.ok ? ((res.json.commands ?? []) as Command[]) : []
+        for (const command of pulled) await ack($, command.id, false, 'luke-voice is off in that session.', token ?? polled)
+        return
+      }
       // A reload of this mod subscribed again for the same session: this older loop ends.
       if (res.status === 409) return
       // Ended by the user from the call window.
@@ -672,8 +705,8 @@ async function pollLoop($: EngineInterface, options: Record<string, unknown>, ge
   }
 }
 
-async function ack($: EngineInterface, id: string, ok: boolean, message: string) {
-  await hubFetch($, 'POST', '/ack', { id, ok, message }).catch(() => undefined)
+async function ack($: EngineInterface, id: string, ok: boolean, message: string, auth = token) {
+  await hubFetch($, 'POST', '/ack', { id, ok, message }, auth).catch(() => undefined)
 }
 
 // "pare" with no main turn running: voice tasks run as background subagents, which aborting the
@@ -729,8 +762,14 @@ async function onCommand($: EngineInterface, command: Command) {
         tasks.set(spawned.agentId, command.task)
         taskEfforts.set(spawned.agentId, tier.effort)
         void saveTasks($)
+        await startRunning($, spawned.agentId, command.task)
+      } else if (pendingTasks.has(prompt)) {
+        // Shown by its prompt until its turn.start names it. That turn.start may come before the
+        // spawn answers (it then already shows the task by its id), or while the row is being
+        // added: a row no task waits for any more would never end, so it goes again.
+        await startRunning($, prompt, command.task)
+        if (!pendingTasks.has(prompt)) await stopRunning($, prompt)
       }
-      await startRunning($, spawned.agentId ?? prompt, command.task)
       report($)
       await addLine($, { kind: 'task', text: command.task })
       return ack($, command.id, true, 'Started. A Claude Code subagent is working on it; the result comes in a [news] update.')
@@ -741,9 +780,7 @@ async function onCommand($: EngineInterface, command: Command) {
 
   const text = frame(command.prompt)
   if (!isBusy) {
-    isBusy = true
-    report($)
-    void $.prompt.submit({ text })
+    submitTurn($, text)
     await addLine($, { kind: 'sent', text: command.prompt })
     return ack($, command.id, true, 'Claude started a new turn with it.')
   }
@@ -768,35 +805,62 @@ async function onCommand($: EngineInterface, command: Command) {
 // Only tasks this module tracks count: a row left from before a reload would never end.
 function report($: EngineInterface, event?: Activity) {
   const isKept = Boolean(event && KEPT_UNSENT.has(event.kind))
+  const gen = generation
+  // Kept only while it stays on: turning off (which bumps the generation) drops what is kept.
   const keep = () => {
-    if (event && isKept) unsent = [...unsent, event].slice(-20)
+    if (event && isKept && gen === generation) unsent = [...unsent, event].slice(-20)
   }
-  if (!token) return keep()
   void Promise.all([read($, isOn), read($, running)])
     .then(async ([on, list]) => {
-      // Off: nothing is reported, and nothing is kept for later.
+      // Off: nothing is reported, and nothing is kept for later (not even while the link is down,
+      // or it would leave on the next turning on).
       if (!on) return
+      if (!token) return keep()
       const hasTask = list.some(r => tasks.has(r.key) || pendingTasks.has(r.key))
-      const res = await hubFetch($, 'POST', '/events', { events: event ? [event] : [], isBusy: isBusy || hasTask })
-      if (!res.ok) keep()
+      try {
+        const res = await hubFetch($, 'POST', '/events', { events: event ? [event] : [], isBusy: isBusy || hasTask })
+        if (!res.ok) keep()
+      } catch {
+        keep()
+      }
     })
-    .catch(keep)
+    .catch(() => undefined)
 }
 
-// What was kept while the hub could not be reached, sent once it can.
+// Starts a new main turn with a prompt from the call. The session is busy from now on; a submit
+// that fails leaves it free again (unless a turn started meanwhile), so it never sticks busy.
+function submitTurn($: EngineInterface, text: string) {
+  isBusy = true
+  report($)
+  void Promise.resolve()
+    .then(() => $.prompt.submit({ text }))
+    .catch(() => {
+      if (turnId !== null) return
+      isBusy = false
+      report($)
+    })
+}
+
+// What was kept while the hub could not be reached, sent once it can. Off, it is dropped instead.
 function flushUnsent($: EngineInterface) {
   if (!token || unsent.length === 0) return
-  const events = unsent
-  unsent = []
+  const gen = generation
+  const putBack = (events: Activity[]) => {
+    if (gen === generation) unsent = [...events, ...unsent].slice(-20)
+  }
   void read($, isOn)
     .then(async on => {
-      if (!on) return
-      const res = await hubFetch($, 'POST', '/events', { events })
-      if (!res.ok) unsent = [...events, ...unsent].slice(-20)
+      const events = unsent
+      unsent = []
+      if (!on || events.length === 0) return
+      try {
+        const res = await hubFetch($, 'POST', '/events', { events })
+        if (!res.ok) putBack(events)
+      } catch {
+        putBack(events)
+      }
     })
-    .catch(() => {
-      unsent = [...events, ...unsent].slice(-20)
-    })
+    .catch(() => undefined)
 }
 
 async function turnOn($: EngineInterface, options: Record<string, unknown>) {
@@ -812,6 +876,8 @@ async function turnOff($: EngineInterface) {
   const leaving = token
   token = null
   queued = []
+  // Kept while the link was down: never sent once it is off, nor on the next turning on.
+  unsent = []
   if (leaving) await hubFetch($, 'POST', '/unsubscribe', {}, leaving).catch(() => undefined)
   await $.ui.close({ id: PANE }).catch(() => undefined)
   await setLink($, { state: 'off', name: null, reason: null })
@@ -835,11 +901,16 @@ async function toggle($: EngineInterface, options: Record<string, unknown>, to?:
 
 async function show($: EngineInterface, options: Record<string, unknown>, withCall: boolean) {
   if (!(await read($, isOn))) await toggle($, options, true, false)
+  // Turned off while connecting: no window opens and no call starts.
+  const gen = generation
+  const offMeanwhile = 'luke-voice: desligado'
   if (!(await subscribe($, options))) {
+    if (gen !== generation) return offMeanwhile
     const l = await read($, link)
     if (l.reason === NO_NODE) return NO_NODE
     return `O luke-voice não conseguiu ligar o servidor local: ${l.reason ?? 'motivo desconhecido'}. Veja /luke-voice help.`
   }
+  if (gen !== generation) return offMeanwhile
   void $.ui.open({ id: PANE, title: 'luke-voice' })
   const res = await hubFetch($, 'POST', '/show', { call: withCall })
   const l = await read($, link)
@@ -1349,12 +1420,7 @@ export const register: Register = (on, options) => {
       report($, { kind: 'done', ...(e.isAborted ? { text: 'Claude stopped.' } : withFull(e.answer || 'Claude finished.', 1200)) })
       void refreshStatus($)
       const nextPrompt = queued.shift()
-      if (nextPrompt) {
-        $.clock.after(300, () => {
-          isBusy = true
-          void $.prompt.submit({ text: nextPrompt })
-        })
-      }
+      if (nextPrompt) $.clock.after(300, () => submitTurn($, nextPrompt))
     }
     return result
   })
@@ -1373,6 +1439,8 @@ export const register: Register = (on, options) => {
     const leaving = token
     token = null
     if (leaving) await hubFetch($, 'POST', '/unsubscribe', {}, leaving).catch(() => undefined)
+    // Its subagents end with it: its entry in the shared store would otherwise stay forever.
+    if (tasks.size) await saveTasks($, { isEnding: true })
     return next(e)
   })
 
