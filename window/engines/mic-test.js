@@ -98,3 +98,28 @@ export function meterLevel(chunk) {
   const db = dbfs(Math.sqrt(sum / (chunk.length || 1)))
   return clamp((db + 60) / 60, 0, 1)
 }
+
+// The test clip as a 16-bit mono WAV, so the user can hear what Ceci would hear.
+export function encodeWav(audio, sampleRate = 16000) {
+  const buffer = new ArrayBuffer(44 + audio.length * 2)
+  const view = new DataView(buffer)
+  const text = (at, value) => [...value].forEach((char, i) => view.setUint8(at + i, char.charCodeAt(0)))
+  text(0, 'RIFF')
+  view.setUint32(4, 36 + audio.length * 2, true)
+  text(8, 'WAVE')
+  text(12, 'fmt ')
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, 1, true)
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, sampleRate * 2, true)
+  view.setUint16(32, 2, true)
+  view.setUint16(34, 16, true)
+  text(36, 'data')
+  view.setUint32(40, audio.length * 2, true)
+  for (let i = 0; i < audio.length; i++) {
+    const sample = clamp(audio[i], -1, 1)
+    view.setInt16(44 + i * 2, Math.round(sample < 0 ? sample * 32768 : sample * 32767), true)
+  }
+  return buffer
+}
