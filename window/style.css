@@ -1443,12 +1443,19 @@ button:disabled {
   transition: transform 420ms var(--ease-ios);
 }
 
-.segmented[data-value='light'] .thumb {
+.segmented[data-value='light'] .thumb,
+.segmented[data-value='luke'] .thumb {
   transform: translateX(100%);
 }
 
-.segmented[data-value='dark'] .thumb {
+.segmented[data-value='dark'] .thumb,
+.segmented[data-value='joao'] .thumb {
   transform: translateX(200%);
+}
+
+/* The hint under the voice choice sits close to it, and the control's own bottom margin moves to the hint. */
+.segmented + .assistant-hint {
+  margin: -20px 0 28px;
 }
 
 .segmented button {

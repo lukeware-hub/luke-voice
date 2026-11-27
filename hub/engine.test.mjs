@@ -547,19 +547,25 @@ test('a server log past the limit is moved to .old.log when the server starts, r
   assert.equal(readFileSync(join(dir, 'tts.old.log'), 'utf8'), 'x'.repeat(11))
 })
 
-test("Ceci's original voice comes with every install: the same clip, transcript, models and sampling", async () => {
+test("Ceci's, Luke's and João's voices come with every install: the same clips, transcripts, models and sampling", async () => {
   const { readFileSync } = await import('node:fs')
   const { VOICE_SETTINGS } = await import('./engine.mjs')
   const root = join(import.meta.dirname, '..')
   const sha = file => createHash('sha256').update(readFileSync(join(root, file))).digest('hex')
-  // The reference clip the owner picked by ear, and its transcript: the TTS clones Ceci from both.
-  // Changing either changes her voice on every machine, so this test must be updated on purpose.
+  // The reference clips the owner picked by ear, and their transcripts: the TTS clones each voice from
+  // both. Changing either changes that voice on every machine, so this test must be updated on purpose.
   assert.equal(sha('agent/ceci-voice.wav'), '76850ec92eb249893f6bebe92968fea16f2296a8a5fb0b6f58295dd3d8534c18')
   assert.equal(sha('agent/ceci-voice.txt'), 'bf3a8385880f193177565f032b7c74470b80979e654efed89d34082d4ea00f24')
-  // Git must hand both over byte for byte on Windows, Mac and Linux.
+  assert.equal(sha('agent/luke-voice.wav'), 'ad2647819adcdcab69d6425a1568ddb7ad101402c84d8c247cacd0d4d9b78c23')
+  assert.equal(sha('agent/luke-voice.txt'), 'e9767ea2f70bb66d8acfb4ddff62993e7d674b3f0c5ab81276c29853eda66452')
+  assert.equal(sha('agent/joao-voice.wav'), '52bc0f0b98674831d72a07c46a153058a3b546f31d66f8bb0d89454042de4b15')
+  assert.equal(sha('agent/joao-voice.txt'), '648596149a514ac73421c9ddb688a4fbda7d1f719e4ef59cdde6fbbb49ef0279')
+  // Git must hand them over byte for byte on Windows, Mac and Linux.
   const attributes = readFileSync(join(root, '.gitattributes'), 'utf8')
   assert.match(attributes, /^\*\.wav binary$/m)
   assert.match(attributes, /^agent\/ceci-voice\.txt -text$/m)
+  assert.match(attributes, /^agent\/luke-voice\.txt -text$/m)
+  assert.match(attributes, /^agent\/joao-voice\.txt -text$/m)
   // The voice models, from luke-voice's own release, pinned by sha256.
   assert.equal(MODELS['native/qwen3-tts-1.7b-base-q5_k_m.gguf'].sha256, '244e74cd46ba8c6aa4851723b667799ddb08b81839ce61b8bd0c8e247c7b6006')
   assert.equal(MODELS['native/qwen3-tts-1.7b-base-mmproj-icl-q8_0.gguf'].sha256, 'd57d1a06a37e0d3f550ffec25977ac457fe0415b0885609a6c315a0e9f09f631')

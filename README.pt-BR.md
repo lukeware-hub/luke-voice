@@ -147,6 +147,7 @@ A Ceci fala uma resposta frase por frase, cortada em cada vírgula. Ela começa 
 A voz foi escolhida pelo dono, ouvindo:
 - Uma voz anterior, desenhada com o Qwen3-TTS VoiceDesign, foi bem em juízes automáticos, mas o dono ouviu sotaque de Portugal nela. O classificador de sotaque usado na época também chamava de europeias algumas gravações brasileiras reais, então deixou de ser usado como juiz.
 - Agora a Ceci clona uma locutora brasileira real: um trecho do banco CML-TTS em português (veja os Créditos).
+- Escolha quem responde em **Configurações**, na janela da chamada: Ceci, Luke ou João. Luke e João são vozes masculinas, e o nome, as falas e as saudações do assistente mudam junto. A escolha fica salva e vale a partir da próxima chamada, na voz natural e na leve (a ElevenLabs continua com a Ceci).
 - O trecho foi deixado mais alegre (um pouco mais agudo, com mais melodia e 8% mais rápido), porque a leitura original soava sonolenta.
 - O dono comparou as candidatas de ouvido e escolheu esta.
 
@@ -319,5 +320,7 @@ A voz gratuita baixa na instalação partes de terceiros; nenhuma delas está ne
 - espeak-ng (pelo espeak-phonemizer): GPL-3.0.
 
 O trecho de voz de referência da Ceci, `agent/ceci-voice.wav`, vem do CML-TTS (Oliveira et al., 2023), português, locutora 3050, licença CC-BY-4.0; a gravação é uma leitura do LibriVox em domínio público. Ele foi alterado para este projeto: cortado, um semitom mais agudo, com mais melodia e 8% mais rápido.
+
+O trecho de voz de referência do João, `agent/joao-voice.wav`, vem do CML-TTS (Oliveira et al., 2023), português, locutor 8655, licença CC-BY-4.0; a gravação é uma leitura de domínio público do LibriVox. Foi cortado e abaixado um semitom. O trecho de voz de referência do Luke, `agent/luke-voice.wav`, junta duas gravações de um mesmo locutor brasileiro do Mozilla Common Voice 17.0 (português), em domínio público (CC0), cortadas e com o volume igualado. Na voz leve, Luke e João falam com as vozes `pm_alex` e `pm_santa` do Kokoro.
 
 Mais detalhes, em inglês, no [README.md](README.md).

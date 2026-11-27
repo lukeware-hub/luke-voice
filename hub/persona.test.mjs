@@ -35,10 +35,12 @@ test("Ceci's texts stay byte for byte the same", async () => {
 test("Luke's brain prompt is a man's: no Ceci, nothing in the feminine", async () => {
   const prompt = asPersona(await readFile(join(root, 'agent', 'brain-prompt.md'), 'utf8'), 'luke')
   assert.match(prompt, /^Você é o Luke, o assistente de voz/)
-  assert.match(prompt, /Seu nome é Luke\. Você é um homem de 22 anos, e bonito\./)
+  assert.match(prompt, /Seu nome é Luke\. Você é um homem de 36 anos, sério e dedicado\./)
+  assert.match(prompt, /Jeito: sério, dedicado e confiável/)
   assert.match(prompt, /Fale de si no masculino/)
   assert.match(prompt, /Você foi criado por Diego Morais/)
-  assert.doesNotMatch(prompt, /Ceci|mulher|linda|feminino|pronta|criada/)
+  // Serious, never Ceci's bubbly cheer.
+  assert.doesNotMatch(prompt, /Ceci|mulher|linda|feminino|pronta|criada|garota|alegre demais|Oba!/)
   // The name's origin is Ceci's alone: Luke says he does not know his name's story.
   assert.doesNotMatch(prompt, /Cecília|homenagem|Lukelia/)
   assert.match(prompt, /Se perguntarem de onde vem o seu nome, diga com leveza que não conhece essa história, sem inventar\./)
@@ -59,10 +61,30 @@ test("Luke's small talk and router prompt", () => {
   assert.doesNotMatch(router, /Ceci/)
 })
 
+test("João's brain prompt is a man's of 45: serious and very cultured, nothing of Ceci or Luke", async () => {
+  const prompt = asPersona(await readFile(join(root, 'agent', 'brain-prompt.md'), 'utf8'), 'joao')
+  assert.match(prompt, /^Você é o João, o assistente de voz/)
+  assert.match(prompt, /Seu nome é João\. Você é um homem de 45 anos, sério e muito culto\./)
+  assert.match(prompt, /Jeito: sério, sereno e muito culto/)
+  assert.match(prompt, /Fale com eloquência e calma/)
+  assert.match(prompt, /Fale de si no masculino/)
+  assert.doesNotMatch(prompt, /Ceci|\bLuke\b(?! Voice)|mulher|linda|feminino|pronta|criada|carismática|garota|alegre demais|Oba!/)
+  assert.match(asPersona(JSON.stringify(REPLIES), 'joao'), /Eu sou o João!/)
+})
+
+test('the small talk says each age, and Luke and João answer it soberly', () => {
+  assert.match(JSON.stringify(REPLIES), /Eu tenho 25 anos!/)
+  for (const [key, age] of [['luke', 36], ['joao', 45]]) {
+    const all = asPersona(JSON.stringify(REPLIES), key)
+    assert.match(all, new RegExp(`Eu tenho ${age} anos\\.`))
+    assert.doesNotMatch(all, /Oi, oi!|Opa, oi!|Tchau, tchau!|Que nada! Adoro ajudar\.|Tudo lindo por aqui!|Adorei a conversa\./)
+  }
+})
+
 test("Nara's brain prompt is Ceci's with her name: still a woman, in the feminine", async () => {
   const prompt = asPersona(await readFile(join(root, 'agent', 'brain-prompt.md'), 'utf8'), 'nara')
   assert.match(prompt, /^Você é a Nara, a assistente de voz/)
-  assert.match(prompt, /Seu nome é Nara\. Você é uma mulher de 22 anos, e linda\./)
+  assert.match(prompt, /Seu nome é Nara\. Você é uma mulher de 25 anos, e linda\./)
   assert.match(prompt, /Fale de si no feminino/)
   assert.doesNotMatch(prompt, /Ceci/)
   assert.doesNotMatch(prompt, /Cecília|homenagem|Narália|21 de novembro|esposa/)
@@ -70,4 +92,19 @@ test("Nara's brain prompt is Ceci's with her name: still a woman, in the feminin
   assert.match(prompt, /Se perguntarem de onde vem o seu nome, diga com leveza que não conhece essa história, sem inventar\./)
   assert.match(prompt, /"ceci:"/)
   assert.match(asPersona(JSON.stringify(REPLIES), 'nara'), /Eu sou a Nara!/)
+})
+
+test('each voice has tastes of its own, told only when asked, and never borrows the others', async () => {
+  const base = await readFile(join(root, 'agent', 'brain-prompt.md'), 'utf8')
+  const tastes = text => text.split(/\r?\n/).find(line => line.startsWith('- Seus gostos,')) ?? ''
+  const ceci = tastes(base)
+  const luke = tastes(asPersona(base, 'luke'))
+  const joao = tastes(asPersona(base, 'joao'))
+  assert.match(ceci, /unhas.*Pipoca.*bailarina/)
+  assert.match(luke, /academia.*churrasco.*Quando garoto.*de jovem/)
+  assert.match(joao, /Machado de Assis.*vinil.*Quando garoto.*de jovem/)
+  for (const line of [ceci, luke, joao]) assert.match(line, /Só fale disso quando o usuário perguntar de você ou puxar o assunto/)
+  for (const line of [luke, joao]) assert.doesNotMatch(line, /Pipoca|unhas|bailarina|maquiagem|amigas/)
+  assert.doesNotMatch(joao, /academia|churrasco/)
+  assert.match(await readFile(join(root, 'agent', 'prompt.md'), 'utf8'), /- Seus gostos,.*Pipoca/)
 })

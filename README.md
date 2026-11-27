@@ -156,6 +156,7 @@ Ceci says a reply phrase by phrase, cut at each comma. She starts as soon as her
 The voice was chosen by the owner, listening:
 - An earlier voice, designed with Qwen3-TTS VoiceDesign, scored well with automatic judges, but the owner heard a European Portuguese accent in it. The accent classifier used then also called some real Brazilian recordings European, so it was dropped as a judge.
 - Ceci now clones a real Brazilian speaker: a clip from the CML-TTS Portuguese dataset (see Credits).
+- Pick who answers in the call window's **Configurações**: Ceci, Luke or João. Luke and João are male voices, and the assistant's name, words and greetings change with them. The choice is kept and counts from the next call, on the natural and the light voice (ElevenLabs stays Ceci).
 - The clip was made brighter (a little higher, more pitch movement, 8% faster), because the plain reading sounded sleepy.
 - The owner compared candidates by ear and picked this one.
 
@@ -366,3 +367,5 @@ The free voice downloads third-party parts at install time; none of them is in t
 - espeak-ng (through espeak-phonemizer): GPL-3.0.
 
 Ceci's reference voice clip `agent/ceci-voice.wav` comes from CML-TTS (Oliveira et al., 2023), Portuguese, speaker 3050, licensed CC-BY-4.0; the recording is a LibriVox public-domain reading. It was changed for this project: trimmed, raised one semitone, with more pitch movement and 8% faster.
+
+João's reference voice clip `agent/joao-voice.wav` comes from CML-TTS (Oliveira et al., 2023), Portuguese, speaker 8655, licensed CC-BY-4.0; the recording is a LibriVox public-domain reading. It was trimmed and lowered one semitone. Luke's reference voice clip `agent/luke-voice.wav` joins two recordings of one Brazilian speaker from Mozilla Common Voice 17.0 (Portuguese), dedicated to the public domain (CC0), trimmed and loudness-matched. On the light voice, Luke and João speak with Kokoro's `pm_alex` and `pm_santa`.

@@ -45,9 +45,9 @@ function remember(storage, at) {
   }
 }
 
-// The line in the assistant's name: Ceci as written, Luke as "o Luke", Nara by name.
+// The line in the assistant's name: Ceci as written, Luke and João as "o Luke" and "o João", Nara by name.
 export function asName(line, name = 'Ceci') {
-  if (name === 'Luke') return line.replace('a Ceci', 'o Luke')
+  if (name === 'Luke' || name === 'João') return line.replace('a Ceci', `o ${name}`)
   return name === 'Ceci' ? line : line.replace('Ceci', name)
 }
 

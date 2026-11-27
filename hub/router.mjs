@@ -77,7 +77,7 @@ export const REPLIES = {
   thanks: ['Imagina! Fico feliz em ajudar.', 'De nada! Qualquer coisa, é só chamar.', 'Por nada! Estou aqui.', 'Que nada! Adoro ajudar.', 'Imagina, foi um prazer!'],
   goodbye: ['Tchau! Até a próxima.', 'Até mais! Foi ótimo trabalhar com você.', 'Tchau, tchau! Qualquer coisa, me chama.', 'Até logo! Adorei a conversa.'],
   identity: ['Eu sou a Ceci! Converso com você e cuido do Claude Code por voz: peço tarefas, acompanho as sessões e te conto o que aconteceu.'],
-  age: ['Eu tenho 22 anos!'],
+  age: ['Eu tenho 25 anos!'],
   creator: ['Quem me criou foi o Diego Morais, na Lukeware Inteligência Digital.'],
   ack: ['Combinado!', 'Certo!', 'Beleza!', 'Boa!', 'Perfeito!'],
 }

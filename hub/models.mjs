@@ -73,6 +73,19 @@ export const MODELS = {
     size: 522240,
     group: 'light',
   },
+  // The light voice's male voices, for Luke (pm_alex) and João (pm_santa): the same Kokoro voices as Ceci's pf_dora.
+  'light/onnx-community/Kokoro-82M-v1.0-ONNX/voices/pm_alex.bin': {
+    url: 'https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/1939ad2a8e416c0acfeecc08a694d14ef25f2231/voices/pm_alex.bin',
+    sha256: '0175c753f59c54e7fd5a995bedef0c5ff2fb67e0043dd3dcb2ae74ec2acbeb2a',
+    size: 522240,
+    group: 'light',
+  },
+  'light/onnx-community/Kokoro-82M-v1.0-ONNX/voices/pm_santa.bin': {
+    url: 'https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/1939ad2a8e416c0acfeecc08a694d14ef25f2231/voices/pm_santa.bin',
+    sha256: '8b012db3185778afe2e45a62cbad69db73021774fe68dda634bcc748a982eede',
+    size: 522240,
+    group: 'light',
+  },
   // Whisper base (MIT): q8 on the CPU; fp32 only when WebGPU is asked for (light-extra, on demand).
   'light/onnx-community/whisper-base/config.json': {
     url: 'https://huggingface.co/onnx-community/whisper-base/resolve/27a07b4b52b3a4c5886134bb4320e93e1a4bbc7c/config.json',

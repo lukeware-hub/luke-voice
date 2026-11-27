@@ -176,6 +176,14 @@
               <button type="button" role="radio" data-theme-option="light" aria-checked="false">Claro</button>
               <button type="button" role="radio" data-theme-option="dark" aria-checked="false">Escuro</button>
             </div>
+            <div class="group-label" id="assistantLabel">Voz do assistente</div>
+            <div id="assistantGroup" class="segmented" role="radiogroup" aria-labelledby="assistantLabel" aria-describedby="assistantHint" data-value="ceci">
+              <span class="thumb" aria-hidden="true"></span>
+              <button type="button" role="radio" data-assistant-option="ceci" aria-checked="true">Ceci</button>
+              <button type="button" role="radio" data-assistant-option="luke" aria-checked="false">Luke</button>
+              <button type="button" role="radio" data-assistant-option="joao" aria-checked="false">João</button>
+            </div>
+            <p id="assistantHint" class="mic-hint assistant-hint" role="status" aria-live="polite">Vale na próxima chamada e fica salvo. Luke e João são vozes masculinas; ao escolher, o nome do assistente muda.</p>
             <label class="group-label" for="micSelect">Microfone</label>
             <div class="mic">
               <select id="micSelect" class="select" aria-describedby="micHint">
