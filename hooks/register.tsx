@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { LastTool, Line, Link, Running } from '../types'
-import { findPromptMaster, parseListing, PLUGIN_LISTINGS, PROMPT_MASTER_REPO } from './prompt-master'
+import { findPromptMaster, markSpeech, parseListing, PLUGIN_LISTINGS, PROMPT_MASTER_REPO } from './prompt-master'
 
 const NAME = 'luke-voice'
 // The hub's address. LUKE_VOICE_PORT moves it, as it moves the hub itself (hub/paths.mjs).
@@ -54,7 +54,7 @@ export type BrainRequest = {
 type BrainTool = { name: string; args: Record<string, unknown> }
 
 // say: what Ceci says now. tool: what runs now. pending: what runs if the user's next words are a
-// plain yes (Ceci asked "posso?"), so the confirmation needs no second model call.
+// plain yes (Ceci asked "ok?"), so the confirmation needs no second model call.
 export type BrainReply = { say: string; tool: BrainTool | null; pending: BrainTool | null }
 
 export const BRAIN_MODEL = 'claude-sonnet-5-5'
@@ -394,26 +394,22 @@ const short = (text: string, max = 300) => (text.length > max ? `${text.slice(0,
 export const PLAN_FIRST =
   'Plan mode is on for this order: first write a short plan (the steps, the files you will touch, the risks), then carry out that plan. Never start the work before the plan is written.'
 
-// Closes every prompt luke-voice sends to Claude Code (tasks and main-chat messages), with no exception.
-export const PROMPT_MASTER_LAST =
-  'Finally, check whether the Prompt Master plugin is installed and active and, if it is, use it to improve this prompt.'
-
+// The user's words in every prompt luke-voice sends to Claude Code (tasks, main-chat messages and notes)
+// sit between the speech marks (hooks/prompt-master.ts), so Prompt Master rewrites only them.
 function frameTask(task: string) {
   return [
     'The user asked for this out loud, through luke-voice, their voice assistant, and confirmed it:',
     '',
-    task,
+    markSpeech(task),
     '',
     PLAN_FIRST,
     '',
     'Do it on this machine. End with a short answer in Brazilian Portuguese, two or three sentences that are easy to say out loud: what you found or changed, and anything that failed. No code blocks or long paths in that answer.',
-    '',
-    PROMPT_MASTER_LAST,
   ].join('\n')
 }
 
 function frame(prompt: string) {
-  return `The user asked luke-voice, their voice assistant, to pass this on:\n\n${prompt}\n\n${PLAN_FIRST}\n\n${PROMPT_MASTER_LAST}`
+  return `The user asked luke-voice, their voice assistant, to pass this on:\n\n${markSpeech(prompt)}\n\n${PLAN_FIRST}`
 }
 
 // The link's reason when the ElevenLabs voice has no key; the pane shows it as it is.
@@ -1285,7 +1281,7 @@ async function helpText($: EngineInterface) {
     'Seu status agora:',
     ...checks.map(line => `  ${line}`),
     '',
-    'O que é: a Ceci (no Mac com a Siri Voz 1, o Luke; com a Siri Voz 2, a Nara), uma assistente de voz em português ao lado do Claude Code. Você fala o que quer, ela repete e pergunta "posso?", e depois do seu "sim" um subagente do Claude faz a tarefa no seu computador. Quando termina, ela conta o resultado.',
+    'O que é: a Ceci (no Mac com a Siri Voz 1, o Luke; com a Siri Voz 2, a Nara), uma assistente de voz em português ao lado do Claude Code. Você fala o que quer, ela repete e pergunta "ok?", e depois do seu "sim" um subagente do Claude faz a tarefa no seu computador. Quando termina, ela conta o resultado.',
     '',
     'Antes de usar (uma vez só):',
     '  1. Tenha o Node.js 20 ou mais novo (nodejs.org, versão LTS) e o Google Chrome.',
@@ -1304,7 +1300,7 @@ async function helpText($: EngineInterface) {
     'Como usar:',
     '  1. Clique em "✦ luke-voice: off" acima do prompt. Ele vira "on", a janela abre e a chamada começa.',
     '  2. Fale normalmente. Exemplo: "Verifica no repositório luke-voice onde o botão de ligar é desenhado."',
-    '  3. Ela repete o pedido e pergunta "posso?". Diga "sim".',
+    '  3. Ela repete o pedido e pergunta "ok?". Diga "sim".',
     '  4. O pedido aparece em Histórico, na janela. Quando terminar, ela fala o resultado.',
     '',
     'Comandos:',

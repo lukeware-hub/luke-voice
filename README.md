@@ -2,7 +2,7 @@
 
 **Leia em português: [README.pt-BR.md](README.pt-BR.md)**
 
-Ceci, a voice assistant beside your Claude Code session, in Brazilian Portuguese. You say what you want, she repeats it and asks "posso?", and after your "sim" a Claude Code subagent does the task on your computer. When it finishes, she tells you the result out loud, without waiting for you to speak: if no call is running she starts one, and a result that comes while the window is closed is kept until she has told it.
+Ceci, a voice assistant beside your Claude Code session, in Brazilian Portuguese. You say what you want, she repeats it and asks "ok?", and after your "sim" a Claude Code subagent does the task on your computer. When it finishes, she tells you the result out loud, without waiting for you to speak: if no call is running she starts one, and a result that comes while the window is closed is kept until she has told it.
 
 Ceci has two voices:
 
@@ -105,7 +105,7 @@ To install without questions, set `LUKE_VOICE_NO_PROMPT=1` before you run it; ad
 ## Use
 
 Speak normally, in Portuguese. Example: *"Verifica no repositório luke-voice onde o botão de ligar é desenhado."*
-1. Ceci repeats it and asks "posso?". Say "sim".
+1. Ceci repeats it and asks "ok?". Say "sim".
 2. The request shows in **Histórico** in the window.
 3. She tells you the answer when the subagent finishes. The main chat stays free.
 
@@ -135,7 +135,7 @@ The brain (Ceci, Luke or Nara) is Claude Sonnet 5.5, called directly through the
 
 Some things need no model call at all:
 - "pare" or "para" stops Claude, with or without her name and as many times as you say it ("Para, Ceci, para!", "chega, Ceci").
-- When Ceci asks "posso?", a plain "sim" runs the pending action at once, and a plain "não" cancels it.
+- When Ceci asks "ok?", a plain "sim" runs the pending action at once, and a plain "não" cancels it.
 - When the brain takes more than 600 ms, Ceci says a short acknowledgement: a quick "Entendi." after a short sentence, and a listening line such as "Deixa eu entender o que você está falando." after a long one, never the same twice in a row (`window/engines/acks.js`). They are made once per window, only while nobody is talking, so they never delay her first answer.
 - On the gpu profile, a local router answers small talk (greetings, thanks, goodbyes, "who are you", her age, who created her) in about 0.3 s, with lines written in `hub/router.mjs`, so it never invents anything. Anything else, and any request, goes to Claude Sonnet. A word check on top of the small model makes sure a request is never answered locally (0 of 49 test requests were).
 
@@ -149,7 +149,7 @@ Measured on an RTX 3060 Ti, gpu profile:
 - first audio of a reply: 0.74 to 0.94 s;
 - transcription: about 0.25 s;
 - end of turn: about 0.18 s;
-- "sim" after "posso?" until "Comecei": about 0.7 s.
+- "sim" after "ok?" until "Comecei": about 0.7 s.
 
 Ceci says a reply phrase by phrase, cut at each comma. She starts as soon as her first sentence is ready, and the next sentence is made while she says it; she no longer waits until the audio ready covers the whole reply, which took up to 17 s on a long reply. The voice's own silence around each phrase is cut, and the window puts a steady pause after it: 0.15 s after a comma, 0.3 s after a sentence end (. ! ?) and 0.4 s after "…". The voice's own silence at a sentence end was 0.42 s on average and up to about 1 s.
 
@@ -190,7 +190,7 @@ If [Prompt Master](https://github.com/lukeware-hub/prompt-master), the Lukeware 
 
 luke-voice asks Claude Code what is installed, the way `/plugin` does: `claude plugin list --json` and `claude plugin marketplace list --json`. It counts only the plugin named exactly `prompt-master`, enabled, installed for the user (or for this project), from a marketplace that comes from the GitHub repository `lukeware-hub/prompt-master`. A plugin with the same or a similar name from any other place, or a copy whose source cannot be told (the organization library), does not count. `/luke-voice status` shows the result.
 
-Prompt Master rewrites what you type at the prompt. The prompts luke-voice sends for you are sent by a plugin, and Prompt Master leaves those as they are.
+Prompt Master also rewrites what you say to Ceci, in every prompt luke-voice sends for you: a voice task's subagent, a note added to Claude's running turn and a prompt that starts a turn. luke-voice puts your words between `<user-speech>` and `</user-speech>`, and Prompt Master rewrites only those words: luke-voice's own lines around them (plan first, where to work, the answer in Portuguese) stay as written. Prompt Master always takes the marks out, also when it is off or its rewrite fails, and then your words go as spoken. Without Prompt Master the marks reach Claude as they are, a tag saying the words inside are yours. No prompt asks Claude to run Prompt Master: `/prompt-master` is only your on/off switch.
 
 ### Ceci's memory
 
@@ -198,7 +198,7 @@ Ceci never forgets a conversation. Every call is recorded whole in one memory pe
 
 - **Remembering:** on every turn Ceci reads a summary of everything since the first conversation, the latest conversations and what matches what you just said. Ask her "lembra da primeira conversa?" or "o que a gente falou semana passada?" and she searches the memory.
 - **Reviewing:** the **Memória** tab in the call window lists every conversation by day, with a search, in pages of 10, 50 or 100 (10 by default; only the page on screen is loaded); in Claude Code, `/luke-voice memoria` and `/luke-voice memoria buscar <texto>`.
-- **Deleting (the only way anything leaves):** ask Ceci ("apaga a conversa de ontem"; she asks "posso?" first), use the **Apagar** buttons in the Memória tab, or `/luke-voice memoria apagar <#conversa | AAAA-MM-DD | AAAA-MM | palavras | tudo>`. A delete also rewrites the summaries that mentioned it and compacts the file, so the words are gone from the disk. Uninstalling asks whether to delete the memory too.
+- **Deleting (the only way anything leaves):** ask Ceci ("apaga a conversa de ontem"; she asks "ok?" first), use the **Apagar** buttons in the Memória tab, or `/luke-voice memoria apagar <#conversa | AAAA-MM-DD | AAAA-MM | palavras | tudo>`. A delete also rewrites the summaries that mentioned it and compacts the file, so the words are gone from the disk. Uninstalling asks whether to delete the memory too.
 - Summaries are written by Claude Haiku on your Claude account, while no call is live. Remembered lines go to the brain with each turn, like the conversation does.
 - **Knowledge graph:** a minute after a call ends (with the summaries), the hub starts a [Graphify](https://github.com/Graphify-Labs/graphify) update in the background, at most once every 10 minutes and never during a call. It opens the memory read-only, writes one transcript per new or grown call to `~/.ceci/graph/corpus/` and runs `graphify extract` incrementally, so only those transcripts are read again; the graph lands in `~/.ceci/graph/graphify-out/` (`graph.json`, `GRAPH_REPORT.md`, `graph.html`), never in the database. A call you delete from the memory leaves the corpus on the next update. It needs `graphify` on the PATH (`pip install graphifyy`) and uses Claude Code on your account (Haiku) by default. Settings: `CECI_GRAPH=0` turns it off, `CECI_GRAPH_MODEL`, `CECI_GRAPH_BACKEND`, `CECI_GRAPHIFY` (the command), `CECI_GRAPH_HOME` (the folder). `node hub/graph.mjs` runs one update by hand; `~/.ceci/graph/graph.log` and `state.json` say how the last one went.
 

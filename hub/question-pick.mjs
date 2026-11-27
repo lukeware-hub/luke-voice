@@ -118,7 +118,7 @@ export function wavSamples(buffer) {
 }
 
 // Questions Ceci asks often, improved in the background once the engine is up.
-export const COMMON_QUESTIONS = ['Posso?', 'Posso começar?', 'Quer que eu faça mais alguma coisa?', 'Mais alguma coisa?', 'Tudo bem?', 'Pode ser?', 'Quer que eu continue?']
+export const COMMON_QUESTIONS = ['Ok?', 'Começo, ok?', 'Quer que eu faça mais alguma coisa?', 'Mais alguma coisa?', 'Tudo bem?', 'Pode ser?', 'Quer que eu continue?']
 // Seeds tried for a question, after Ceci's own (the take said live).
 const MORE_SEEDS = [1, 2, 3, 4, 5, 6, 7, 8].map(s => s + 100)
 // At most this many takes per question in all. Each take holds the voice's single slot on the GPU

@@ -1,10 +1,13 @@
 import { expect, test } from 'claude-code/testing'
 import type { Args, On } from 'claude-code'
 
-import { PLAN_FIRST, PROMPT_MASTER_LAST, asPersona, brainArgs, brainInput, classifyTask, NO_NODE, parseBrain, parseBrainText, parseSummary, memoryTarget, preview, withFull, summaryPrompt, TIERS } from './register'
+import { PLAN_FIRST, asPersona, brainArgs, brainInput, classifyTask, NO_NODE, parseBrain, parseBrainText, parseSummary, memoryTarget, preview, withFull, summaryPrompt, TIERS } from './register'
 import type { BrainRequest } from './register'
 
 const FOOTER = { plugin: 'luke-voice', component: 'SessionMode', props: { modes: [] } } as const
+// A prompt from the call as luke-voice relays it: only the user's words sit between the speech marks, which
+// Prompt Master rewrites; luke-voice's own lines stay outside them, and nothing asks the model to run Prompt Master.
+const relayed = (words: string) => `The user asked luke-voice, their voice assistant, to pass this on:\n\n<user-speech>\n${words}\n</user-speech>\n\n${PLAN_FIRST}`
 const run = (args: string) => ({ command: 'luke-voice', args, origin: { kind: 'composer' } }) as Args<'command.run'>
 
 type Call = { method: string; path: string; port: string; body: Record<string, unknown> }
@@ -272,7 +275,7 @@ test('a prompt sent from the call starts a turn, framed as relayed, and is acked
   await $.command.run(run('off'))
   release()
 
-  expect(sent).toEqual([`The user asked luke-voice, their voice assistant, to pass this on:\n\nadd tests for auth\n\n${PLAN_FIRST}\n\n${PROMPT_MASTER_LAST}`])
+  expect(sent).toEqual([relayed('add tests for auth')])
   expect(calls.find(c => c.path === '/ack')?.body).toEqual({ id: 'c1', ok: true, message: 'Claude started a new turn with it.' })
 })
 
@@ -305,8 +308,8 @@ test('while Claude is busy, a prompt added as a note and a queued one both carry
   await $.command.run(run('off'))
   release()
 
-  expect(appended).toEqual([`The user asked luke-voice, their voice assistant, to pass this on:\n\nolha os logs\n\n${PLAN_FIRST}\n\n${PROMPT_MASTER_LAST}`])
-  expect(sent).toEqual([`The user asked luke-voice, their voice assistant, to pass this on:\n\ndepois roda os testes\n\n${PLAN_FIRST}\n\n${PROMPT_MASTER_LAST}`])
+  expect(appended).toEqual([relayed('olha os logs')])
+  expect(sent).toEqual([relayed('depois roda os testes')])
   expect(calls.filter(c => c.path === '/ack').map(c => c.body.message)).toEqual(["Added as a note to Claude's running turn.", 'Queued. Claude gets it when the current turn ends.'])
 })
 
@@ -392,7 +395,11 @@ test('a voice task runs in a Claude Code subagent, and its answer is reported as
 
   expect(spawned[0]).toContain('verifica o login no repo xpto')
   expect(spawned[0]).toContain(PLAN_FIRST)
-  expect(spawned[0].endsWith(PROMPT_MASTER_LAST)).toBe(true)
+  // Only the task's words are marked, for Prompt Master to rewrite; the lines around them are luke-voice's own.
+  expect(spawned[0]?.startsWith('The user asked for this out loud, through luke-voice, their voice assistant, and confirmed it:\n\n<user-speech>\nverifica o login no repo xpto\n</user-speech>\n\n')).toBe(true)
+  expect(spawned[0]?.match(/<\/?user-speech>/g)).toEqual(['<user-speech>', '</user-speech>'])
+  expect(spawned[0]?.endsWith('No code blocks or long paths in that answer.')).toBe(true)
+  expect(spawned[0]).not.toContain('Prompt Master')
   expect(calls.find(c => c.path === '/ack')?.body).toEqual({ id: 't1', ok: true, message: 'Started. A Claude Code subagent is working on it; the result comes in a [news] update.' })
   const events = calls.filter(c => c.path === '/events').map(c => JSON.stringify(c.body))
   expect(events.filter(e => e.includes('task_done')).length).toBe(1)

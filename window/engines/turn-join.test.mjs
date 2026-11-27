@@ -161,7 +161,7 @@ test('a held user turn reaches the history once, when committed, and a joined on
   log.commit()
   log.commit()
   assert.deepEqual(log.history(), [{ role: 'luke', text: 'Posso começar?' }, { role: 'user', text: 'é, sim, pode' }])
-  assert.deepEqual(effects, ['é, sim, pode'], 'the effects of a turn (letting go of the "posso?") run once, only for the turn that stands')
+  assert.deepEqual(effects, ['é, sim, pode'], 'the effects of a turn (letting go of the "ok?") run once, only for the turn that stands')
   // A new hold replaces one that was never committed (it was joined), with no effect.
   log.hold('a', () => effects.push('a'))
   log.hold('a b', () => effects.push('a b'))

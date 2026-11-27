@@ -30,7 +30,7 @@ export const isStopClaude = text => isStopOnly(text) && /\b(claude|tarefas?|tudo
 // "espera"), which only quiets her, null when it is not a stop.
 export const stopTarget = text => (isStopClaude(text) ? 'claude' : isStopOnly(text) ? 'ceci' : null)
 
-// Words a short answer to "posso?" is made of. A yes must have at least one YES word and nothing
+// Words a short answer to "ok?" is made of. A yes must have at least one YES word and nothing
 // outside YES and FILLER; a no, at least one NO word and nothing outside NO and FILLER. Longer
 // answers ("sim, mas só na pasta X") go to the brain.
 // The ears cut short words: "Pode." comes back as "Pod." and "ok" as "Okei" (heard on Qwen3-ASR).
@@ -59,7 +59,7 @@ const NO = new Set([
 // "claro que não" is a no and not a yes beside a no.
 const NO_PHRASES = ['claro que nao', 'logico que nao', 'obvio que nao', 'com certeza nao', 'certeza que nao', 'acho que nao', 'de jeito nenhum', 'de jeito algum', 'nem pensar', 'nem a pau', 'nem morto', 'nem morta', 'por enquanto nao', 'ainda nao']
 const NO_PHRASES_RE = new RegExp(`\\b(?:${NO_PHRASES.join('|')})\\b`, 'g')
-// A one-word answer the ears misheard, taken only when it is the whole answer to "posso?": a soft,
+// A one-word answer the ears misheard, taken only when it is the whole answer to "ok?": a soft,
 // quick "sim" comes back as "Fim." or "Sin.", and a "não" as "Mão." or "Nau." (heard on the real engine).
 const LONE_YES = new Set(['fim', 'sin', 'si', 'cim', 'simm', 'siim'])
 const LONE_NO = new Set(['mao', 'nau', 'naao', 'naaao'])

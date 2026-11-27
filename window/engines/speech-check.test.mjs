@@ -15,19 +15,19 @@ test('a frame counts as speech above 0.5, and as a soft frame above 0.3', () => 
   assert.deepEqual(counted([0.5, 0.51, 0.3, 0.31, 0.1]), { frames: 1, soft: 3 }, 'a speech frame is a soft frame too')
 })
 
-test('clear speech passes with or without a "posso?" waiting', () => {
+test('clear speech passes with or without a "ok?" waiting', () => {
   const clear = counted(Array(MIN_SPEECH_FRAMES).fill(0.9))
   assert.equal(hasSpeech(clear), true)
   assert.equal(hasSpeech(clear, { isAnswer: true }), true)
 })
 
-test('a soft short "sim" is noise to the plain check, but passes while a "posso?" waits', () => {
+test('a soft short "sim" is noise to the plain check, but passes while a "ok?" waits', () => {
   const sim = counted(SOFT_SIM)
   assert.equal(hasSpeech(sim), false, 'the plain bar still drops it, as before')
-  assert.equal(hasSpeech(sim, { isAnswer: true }), true, 'right after "posso?" the answer is heard')
+  assert.equal(hasSpeech(sim, { isAnswer: true }), true, 'right after "ok?" the answer is heard')
 })
 
-test('noise is dropped even while a "posso?" waits', () => {
+test('noise is dropped even while a "ok?" waits', () => {
   assert.equal(hasSpeech(counted(NOISE)), false)
   assert.equal(hasSpeech(counted(NOISE), { isAnswer: true }), false)
   assert.equal(hasSpeech(counted([]), { isAnswer: true }), false)
