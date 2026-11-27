@@ -110,12 +110,14 @@ const overrides = Object.fromEntries(
 // The worker loads either the whole browser voice, or (with the native engine) only the end-of-turn
 // models. A worker loaded one way is replaced when the next call needs the other.
 let workerKind = null
+// Kokoro's voice for the browser (light) voice: set per call from the hub's persona.
+let kokoroVoice = 'pf_dora'
 const loadVoice = kind => {
   if (workerLoad && workerKind !== kind) stopWorker(new Error('The voice worker was replaced.'))
   workerKind = kind
   if (!workerLoad) {
     // A failed load is forgotten, unless a newer one already replaced it (a replaced worker fails its own).
-    const load = ask('load', kind === 'native' ? { ...overrides, native: true } : overrides).catch(error => {
+    const load = ask('load', kind === 'native' ? { ...overrides, native: true } : { voice: kokoroVoice, ...overrides }).catch(error => {
       if (workerLoad === load) workerLoad = null
       return Promise.reject(error)
     })
@@ -261,16 +263,18 @@ export async function startSession({
   // it, rather than spend the whole call on the light voice. A download takes minutes: no wait then.
   const waitUntil = Date.now() + NATIVE_WAIT_MS
   while (forceNative !== '0' && config.engine === 'starting' && !config.download?.total && Date.now() < waitUntil) {
-    onStatus('Aquecendo a voz natural da Ceci…')
+    onStatus(`Aquecendo a voz natural ${['Luke', 'João'].includes(config.persona?.name) ? 'do' : 'da'} ${config.persona?.name ?? 'Ceci'}…`)
     await new Promise(resolve => setTimeout(resolve, 1000))
     config = await hub('GET', '/config').catch(() => ({}))
   }
   const isNative = forceNative === '0' ? false : Boolean(config.native?.tts && config.native?.asr)
   // No natural voice on this Mac, but a Premium voice of macOS: the hub speaks with it, the page still listens.
   const isMacVoice = !isNative && forceNative !== '0' && Boolean(config.macVoice)
-  // Luke or Nara when the Mac speaks with its own voice (the hub's persona); Ceci otherwise.
-  const isLuke = isMacVoice && config.persona?.name === 'Luke'
-  const herName = isMacVoice && config.persona?.name === 'Nara' ? 'Nara' : 'Ceci'
+  // Who answers is the hub's persona: Ceci, Luke or João (the user's choice in Configurações), or Nara on a Mac's own voice.
+  const herName = ['Luke', 'João', 'Nara'].includes(config.persona?.name) ? config.persona.name : 'Ceci'
+  const isMale = herName === 'Luke' || herName === 'João'
+  // The light voice (Kokoro) is a male one for Luke and João; the native one clones the hub's reference clip.
+  kokoroVoice = herName === 'Luke' ? 'pm_alex' : herName === 'João' ? 'pm_santa' : 'pf_dora'
   if (!isNative && config.download?.total) onStatus(`Preparando a voz natural: ${percent(config.download)}%. Por enquanto, a voz leve.`)
   // The natural voice was expected (this machine has the gpu profile, or the hub was starting it)
   // but failed or did not come up in time: the user is told, never left guessing why she sounds different.
@@ -410,7 +414,7 @@ export async function startSession({
       out = await response.json()
     } catch (error) {
       // A hung engine: this turn is dropped, and the user hears nothing back, so say why.
-      if (error?.name === 'TimeoutError') throw new Error(`${isLuke ? 'O Luke' : `A ${herName}`} não conseguiu ouvir a tempo. Fale de novo.`)
+      if (error?.name === 'TimeoutError') throw new Error(`${isMale ? 'O' : 'A'} ${herName} não conseguiu ouvir a tempo. Fale de novo.`)
       throw error
     }
     return { text: String(out.text ?? ''), ms: (out.ms ?? 0) + check.ms }
@@ -1090,7 +1094,7 @@ export async function startSession({
   // Ceci greets from the same lines as the ElevenLabs agent (greetings.js), a different one each
   // call, so the user knows she is listening. Then, while nobody talks, the acknowledgements.
   // A failed greeting is only logged.
-  void say(pickGreeting({ name: isLuke ? 'Luke' : herName }))
+  void say(pickGreeting({ name: herName }))
     .catch(error => console.warn(`[luke-voice] the greeting failed: ${error?.message ?? error}`))
     .then(warmAcks)
   return session

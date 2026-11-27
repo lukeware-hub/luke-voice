@@ -1612,3 +1612,48 @@ test('hub.json that cannot be read for a moment (EBUSY, EPERM) is read again, ne
   assert.throws(() => loadSecrets(file, { read: denied, retryMs: 1 }), /denied/)
   assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), kept, 'the tokens every mod holds are kept')
 })
+
+test('the window picks who answers on the free voice: /assistant sets the persona, is kept, and refuses unknown voices', async () => {
+  const hub5 = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {}, profile: () => ({ profile: 'gpu' }), platform: 'win32' })
+  await new Promise(resolve => hub5.listen(0, '127.0.0.1', resolve))
+  const p = hub5.address().port
+  const call = (method, path, body, headers = { 'x-luke-key': WINDOW }) =>
+    new Promise((resolve, reject) => {
+      const req = request({ host: '127.0.0.1', port: p, method, path, headers: { host: `127.0.0.1:${p}`, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin', ...headers } }, res => {
+        const chunks = []
+        res.on('data', chunk => chunks.push(chunk))
+        res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(Buffer.concat(chunks).toString() || '{}') }))
+      })
+      req.on('error', reject)
+      req.end(body)
+    })
+  try {
+    assert.equal((await call('GET', '/config')).body.persona.name, 'Ceci')
+    assert.equal((await call('POST', '/assistant', '{"assistant":"joao"}', {})).status, 401)
+    assert.equal((await call('POST', '/assistant', '{"assistant":"outra"}')).status, 400)
+    const chosen = await call('POST', '/assistant', '{"assistant":"joao"}')
+    assert.deepEqual(chosen.body.persona, { key: 'joao', name: 'João', gender: 'male' })
+    assert.deepEqual((await call('GET', '/config')).body.persona, { key: 'joao', name: 'João', gender: 'male' })
+    // Kept across a restart of the hub.
+    const hub6 = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {}, profile: () => ({ profile: 'gpu' }), platform: 'win32' })
+    await new Promise(resolve => hub6.listen(0, '127.0.0.1', resolve))
+    const q = hub6.address().port
+    const again = await new Promise((resolve, reject) => {
+      const req = request({ host: '127.0.0.1', port: q, method: 'GET', path: '/config', headers: { host: `127.0.0.1:${q}`, 'x-luke-key': WINDOW, 'sec-fetch-site': 'same-origin' } }, res => {
+        const chunks = []
+        res.on('data', chunk => chunks.push(chunk))
+        res.on('end', () => resolve(JSON.parse(Buffer.concat(chunks).toString())))
+      })
+      req.on('error', reject)
+      req.end()
+    })
+    assert.equal(again.persona.key, 'joao')
+    hub6.closeAllConnections()
+    await new Promise(resolve => hub6.close(resolve))
+  } finally {
+    // The temp home is shared by the other tests: back to Ceci.
+    await call('POST', '/assistant', '{"assistant":"ceci"}')
+    hub5.closeAllConnections()
+    await new Promise(resolve => hub5.close(resolve))
+  }
+})

@@ -16,6 +16,9 @@ export function personaFor({ platform = process.platform, voice = null, gender =
 }
 
 // What the window and the mod are told: { key, name, gender }.
+// The voices the user can pick in Configurações, in the order the window shows them.
+export const ASSISTANTS = ['ceci', 'luke', 'joao']
+
 export const personaInfo = key => ({ key, name: PERSONAS[key].name, gender: PERSONAS[key].gender })
 
 // A text in the persona's words: Ceci's text as it is, the others' with every replacement, in order

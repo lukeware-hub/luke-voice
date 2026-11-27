@@ -157,7 +157,7 @@ export function asPersona(text: string, key: string | undefined, personas: Perso
 }
 
 async function promptFor($: EngineInterface, persona: string | undefined): Promise<string> {
-  const key = persona === 'luke' || persona === 'nara' ? persona : 'ceci'
+  const key = persona === 'luke' || persona === 'joao' || persona === 'nara' ? persona : 'ceci'
   const known = brainPrompts.get(key)
   if (known) return known
   const base = await $.fs.read(`${$.plugin.root}/agent/brain-prompt.md`)
@@ -194,7 +194,7 @@ async function askBrain($: EngineInterface, request: BrainRequest): Promise<Brai
   // A slow or failed direct call (a timeout, say) leaves too little time for a second, paid call.
   const left = BRAIN_BUDGET_MS - ((await $.clock.now()) - startedAt)
   if (left < MIN_FALLBACK_MS) throw new Error(`the brain did not answer in time: ${failure || 'no reply'}`)
-  const out = await $.process.run(brainArgs($.plugin.root, request.persona === 'luke' || request.persona === 'nara' ? brainPrompt : null), { timeoutMs: left, stdin: brainInput(request) })
+  const out = await $.process.run(brainArgs($.plugin.root, request.persona === 'luke' || request.persona === 'joao' || request.persona === 'nara' ? brainPrompt : null), { timeoutMs: left, stdin: brainInput(request) })
   if (out.exitCode !== 0 && !out.stdout.trim()) throw new Error(out.stderr.trim() || `claude exited with ${out.exitCode}`)
   return parseBrain(out.stdout)
 }
@@ -665,7 +665,7 @@ function chosenProvider(options: Record<string, unknown>): VoiceProvider | '' {
 }
 
 // The free voice is Luke or Nara when the Mac speaks with its own voice (the hub's persona), Ceci otherwise.
-const personaName = (name: unknown) => (name === 'Luke' || name === 'Nara' ? name : 'Ceci')
+const personaName = (name: unknown) => (name === 'Luke' || name === 'João' || name === 'Nara' ? name : 'Ceci')
 const voiceName = (provider: string, name: unknown = 'Ceci') => (provider === 'elevenlabs' ? 'ElevenLabs' : `gratuita (${personaName(name)}, no seu computador)`)
 
 async function apiKey($: EngineInterface, options: Record<string, unknown>) {
@@ -1117,7 +1117,7 @@ async function show($: EngineInterface, options: Record<string, unknown>, withCa
   if (res.json.isOpened === false) return `Não consegui abrir a janela da chamada. Abra este endereço no Chrome ou no Edge: ${String(res.json.url ?? '')}`
   const keyNote = l.reason === NO_KEY ? ' Falta a chave da ElevenLabs: salve com /plugin configure luke-voice@luke-voice, ou use /luke-voice voz local.' : ''
   const who = withCall ? (await hubFetch($, 'GET', '/health', undefined, null).catch(() => null))?.json?.persona?.name : null
-  return `${withCall ? (who === 'Luke' ? 'Chamando o Luke' : `Chamando a ${personaName(who)}`) : 'Janela da chamada'} na sessão "${l.name}".${res.json.isWindowOpen ? '' : ' A janela da chamada está abrindo.'}${keyNote}`
+  return `${withCall ? (who === 'Luke' || who === 'João' ? `Chamando o ${who}` : `Chamando a ${personaName(who)}`) : 'Janela da chamada'} na sessão "${l.name}".${res.json.isWindowOpen ? '' : ' A janela da chamada está abrindo.'}${keyNote}`
 }
 
 // /luke-voice voz [local|elevenlabs]: shows the voice, or switches it for the next call.

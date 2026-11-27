@@ -26,7 +26,7 @@ function applyTheme(theme) {
   if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme
   else delete document.documentElement.dataset.theme
   const value = document.documentElement.dataset.theme ?? 'system'
-  const group = document.querySelector('.segmented')
+  const group = document.querySelector('[aria-labelledby="themeLabel"]')
   if (group) group.dataset.value = value
   for (const option of document.querySelectorAll('[data-theme-option]')) {
     option.setAttribute('aria-checked', String(option.dataset.themeOption === value))
@@ -45,6 +45,28 @@ for (const option of document.querySelectorAll('[data-theme-option]')) {
     } catch {
       // No storage: the choice holds until the window closes.
     }
+  })
+}
+
+// Voz do assistente: Ceci, Luke or João. The hub keeps the choice; it counts from the next call.
+const ASSISTANT_NAMES = { ceci: 'Ceci', luke: 'Luke', joao: 'João' }
+function showAssistantChoice(key) {
+  const value = ASSISTANT_NAMES[key] ? key : 'ceci'
+  const group = document.getElementById('assistantGroup')
+  if (group) group.dataset.value = value
+  for (const option of document.querySelectorAll('[data-assistant-option]')) {
+    option.setAttribute('aria-checked', String(option.dataset.assistantOption === value))
+  }
+}
+for (const option of document.querySelectorAll('[data-assistant-option]')) {
+  option.addEventListener('click', async () => {
+    const out = await hub('POST', '/assistant', { assistant: option.dataset.assistantOption }).catch(error => ({ ok: false, message: error.message }))
+    const hint = document.getElementById('assistantHint')
+    if (out.ok) {
+      applyPersona(out.persona)
+      void renderFacts()
+    }
+    if (hint) hint.textContent = out.ok ? 'Vale na próxima chamada e fica salvo. Luke e João são vozes masculinas; ao escolher, o nome do assistente muda.' : `Não consegui trocar a voz: ${out.message ?? 'tente de novo'}.`
   })
 }
 
@@ -879,17 +901,27 @@ function voiceFacts(health) {
         : `processador (${info.threads} threads)`
       : 'carrega na primeira chamada'
   return [
-    ['Voz', `${['Luke', 'Nara'].includes(health.persona?.name) ? health.persona.name : 'Ceci'}, gratuita, no seu computador`, 'ok'],
+    ['Voz', `${['Luke', 'João', 'Nara'].includes(health.persona?.name) ? health.persona.name : 'Ceci'}, gratuita, no seu computador`, 'ok'],
     ['Perfil', ...profile],
     ...(model ? [['Modelos', model, '']] : []),
     ['Roda em', runsOn, ''],
   ]
 }
 
+// The window opens with the voice the user saved (the hub's persona), not always Ceci.
+async function syncAssistant() {
+  const health = await fetch('/health')
+    .then(r => r.json())
+    .catch(() => null)
+  if (health?.persona) applyPersona(health.persona)
+}
+void syncAssistant()
+
 async function renderFacts() {
   const health = await fetch('/health')
     .then(r => r.json())
     .catch(() => null)
+  if (health?.persona) applyPersona(health.persona)
   const rows = health
     ? [
         ['Versão', health.version, ''],
@@ -1092,17 +1124,18 @@ async function microphone() {
   return resolveMicrophone(savedMicrophone(), devices)
 }
 
-// Who answers: Ceci, or Luke or Nara when the Mac speaks with its own voice (the hub's persona).
+// Who answers: Ceci, Luke or João (the user's choice in Configurações), or Nara on a Mac's own voice (the hub's persona).
 function applyPersona(who) {
-  const isLuke = who?.name === 'Luke'
-  const name = isLuke || who?.name === 'Nara' ? who.name : 'Ceci'
+  const name = ['Luke', 'João', 'Nara'].includes(who?.name) ? who.name : 'Ceci'
+  const isMale = name === 'Luke' || name === 'João'
+  showAssistantChoice(who?.key)
   document.title = name
   const title = document.querySelector('h1.title')
   if (title) title.textContent = name
-  const [to, he] = isLuke ? ['ao Luke', 'ele'] : [`à ${name}`, 'ela']
+  const [to, he] = isMale ? [`ao ${name}`, 'ele'] : [`à ${name}`, 'ela']
   STATES.live.banner[2] = `Peça algo ${to}. Antes de agir no computador, ${he} confirma com você.`
   const intro = document.getElementById('helpIntro')
-  if (intro) intro.textContent = `Fale com ${isLuke ? 'o Luke' : `a ${name}`} como falaria com uma pessoa. Antes de mexer no seu computador, ${he} repete o pedido e espera o seu "sim".`
+  if (intro) intro.textContent = `Fale com ${isMale ? 'o' : 'a'} ${name} como falaria com uma pessoa. Antes de mexer no seu computador, ${he} repete o pedido e espera o seu "sim".`
 }
 
 // The voice engine the hub picked: the free local voice, or ElevenLabs. Loaded once per page.

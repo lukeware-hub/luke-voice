@@ -74,7 +74,7 @@ test('both voices are Ceci: same name, age and creator, told only when asked, an
   for (const file of ['agent/prompt.md', 'agent/brain-prompt.md']) {
     const text = await readFile(join(root, file), 'utf8')
     assert.match(text, /^Você é a Ceci, a assistente de voz que orquestra o Claude Code/, file)
-    assert.match(text, /mulher de 22 anos/, file)
+    assert.match(text, /mulher de 25 anos/, file)
     assert.match(text, /criada por Diego Morais na Lukeware Inteligência Digital LTDA, a empresa da qual ele é dono. Lukeware é o nome da empresa, não o seu/, file)
     assert.match(text, /Só fale da sua idade, da sua aparência ou de quem te criou quando o usuário perguntar/, file)
     assert.match(text, /Nunca invente/, file)
