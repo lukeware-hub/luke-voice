@@ -91,6 +91,7 @@ const STATIC = {
   '/engines/vad.js': ['engines/vad.js', 'text/javascript; charset=utf-8'],
   '/engines/gain.js': ['engines/gain.js', 'text/javascript; charset=utf-8'],
   '/engines/microphone.js': ['engines/microphone.js', 'text/javascript; charset=utf-8'],
+  '/engines/mic-test.js': ['engines/mic-test.js', 'text/javascript; charset=utf-8'],
   '/engines/piper-ids.js': ['engines/piper-ids.js', 'text/javascript; charset=utf-8'],
   '/engines/transcript.js': ['engines/transcript.js', 'text/javascript; charset=utf-8'],
   '/engines/speech-check.js': ['engines/speech-check.js', 'text/javascript; charset=utf-8'],

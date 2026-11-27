@@ -15,6 +15,7 @@ import {
   taskKey,
 } from '/guard.js'
 import { inputOptions, micConstraints, saveMicrophone, savedMicrophone } from '/engines/microphone.js'
+import { analyzeRecording, meterLevel } from '/engines/mic-test.js'
 
 // Appearance: follows the system unless the user picked light or dark in Configurações.
 // Runs before the key exchange below awaits, so the saved theme lands on the first frames.
@@ -63,6 +64,83 @@ async function listMicrophones() {
 micSelect?.addEventListener('change', () => saveMicrophone(micSelect.value))
 navigator.mediaDevices?.addEventListener?.('devicechange', listMicrophones)
 listMicrophones()
+
+// Mic test: records 5 s from the chosen microphone, then mic-test.js judges the clip.
+const TEST_SECONDS = 5
+const TEST_RATE = 16000
+const micTestBtn = document.getElementById('micTestBtn')
+const micTestLabel = document.getElementById('micTestLabel')
+const micMeter = document.getElementById('micMeter')
+const micResult = document.getElementById('micResult')
+const micBadge = document.getElementById('micBadge')
+const micTips = document.getElementById('micTips')
+let micTesting = false
+
+function showTestResult(quality, label, tips) {
+  micResult.hidden = false
+  micResult.dataset.quality = quality
+  micBadge.textContent = label
+  micTips.replaceChildren(...tips.map(tip => Object.assign(document.createElement('li'), { textContent: tip })))
+}
+
+function setMicTesting(on) {
+  micTesting = on
+  micTestBtn.disabled = on
+  micTestLabel.textContent = on ? 'Abrindo microfone...' : 'Gravar teste'
+  if (!on) micMeter.style.transform = 'scaleX(0)'
+}
+
+async function recordMicTest() {
+  if (micTesting) return
+  if (callState === 'live' || callState === 'connecting') {
+    showTestResult('ruim', 'Indisponível', ['Encerre a chamada para testar o microfone.'])
+    return
+  }
+  setMicTesting(true)
+  micResult.hidden = true
+  let stream
+  let context
+  try {
+    // The same constraints the call uses, so the test hears what Ceci would hear.
+    micTestLabel.textContent = 'Aguardando permissão...'
+    const request = navigator.mediaDevices.getUserMedia({
+      audio: micConstraints(savedMicrophone(), { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: false }),
+    })
+    const timeout = new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error('timeout'), { name: 'NotAllowedError' })), 15000))
+    // A stream that arrives after the timeout is stopped too, or the mic stays on.
+    stream = await Promise.race([request, timeout]).catch(error => {
+      request.then(late => late.getTracks().forEach(track => track.stop()), () => {})
+      throw error
+    })
+    micTestLabel.textContent = 'Gravando...'
+    listMicrophones()
+    context = new AudioContext({ sampleRate: TEST_RATE })
+    await context.audioWorklet.addModule('/engines/mic-worklet.js')
+    const frames = new AudioWorkletNode(context, 'luke-mic-frames')
+    context.createMediaStreamSource(stream).connect(frames)
+    const chunks = []
+    frames.port.onmessage = ({ data }) => {
+      chunks.push(data)
+      micMeter.style.transform = `scaleX(${meterLevel(data)})`
+    }
+    await new Promise(resolve => setTimeout(resolve, TEST_SECONDS * 1000))
+    frames.port.onmessage = null
+    const audio = new Float32Array(chunks.length * 512)
+    chunks.forEach((chunk, i) => audio.set(chunk, i * 512))
+    const result = analyzeRecording(audio, TEST_RATE)
+    showTestResult(result.quality, result.label, result.tips)
+  } catch (error) {
+    const denied = error?.name === 'NotAllowedError' || error?.name === 'SecurityError'
+    showTestResult('pessimo', 'Sem acesso', [
+      denied ? 'Libere o microfone nesta janela e tente de novo.' : 'Não consegui abrir este microfone. Escolha outro e tente de novo.',
+    ])
+  } finally {
+    stream?.getTracks().forEach(track => track.stop())
+    await context?.close().catch(() => {})
+    setMicTesting(false)
+  }
+}
+micTestBtn?.addEventListener('click', () => void recordMicTest())
 
 const params = new URLSearchParams(location.search)
 const STALE_WINDOW = 'Esta janela ficou desatualizada. Feche-a e digite /luke-voice window no Claude Code.'
@@ -375,6 +453,8 @@ function setCall(state, caption) {
   setText(ui.callLabel, isLive ? 'Encerrar' : 'Chamar')
   ui.mute.disabled = state !== 'live'
   ui.mic.disabled = state !== 'live'
+  // The test and the call would fight over the microphone.
+  if (micTestBtn) micTestBtn.disabled = isLive || micTesting
   ui.headline.textContent = STATES[state]?.headline ?? ''
   setCaption(caption ?? STATES[state]?.caption ?? '')
   if (state === 'live') setOrb(isMuted ? 'muted' : 'listening')
