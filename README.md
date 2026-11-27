@@ -120,7 +120,7 @@ Say **"pare"** (or "para tudo", "Ceci, para") to stop Claude at once.
 | `/luke-voice window` | bring the window to the front |
 | `/luke-voice voz` | show the voice; `voz local` or `voz elevenlabs` switches it for the next call |
 | `/luke-voice setup` | download and check Ceci's free voice (for people who update through the marketplace) |
-| `/luke-voice status` | technical status: hub, voice, profile, call, key, queue, setup progress |
+| `/luke-voice status` | technical status: hub, voice, profile, call, key, queue, setup progress, Prompt Master |
 | `/luke-voice help` | everything you need to know, plus a check of what is missing |
 | `/luke-voice update` | update luke-voice to the newest version (refreshes the marketplace, then updates the plugin; close and reopen Claude Code afterwards) |
 | `/luke-voice uninstall` | remove luke-voice and the downloaded voice (asks for `/luke-voice uninstall confirmar` first) |
@@ -183,6 +183,14 @@ Pick it in any of these ways; the newest choice wins:
 - `/plugin configure luke-voice@luke-voice`, option **voice_provider**.
 
 With no choice at all, luke-voice uses ElevenLabs while a key is saved, and the free voice otherwise.
+
+### Prompt Master, when installed
+
+If [Prompt Master](https://github.com/lukeware-hub/prompt-master), the Lukeware Hub plugin that rewrites each prompt before Claude reads it, is installed, luke-voice requires it: each time luke-voice turns on, it turns Prompt Master on if it was off, and while luke-voice stays on, turning Prompt Master off (its button or `/prompt-master`) keeps it on, with a toast saying so. Without Prompt Master, luke-voice works as before, with no error.
+
+luke-voice asks Claude Code what is installed, the way `/plugin` does: `claude plugin list --json` and `claude plugin marketplace list --json`. It counts only the plugin named exactly `prompt-master`, enabled, installed for the user (or for this project), from a marketplace that comes from the GitHub repository `lukeware-hub/prompt-master`. A plugin with the same or a similar name from any other place, or a copy whose source cannot be told (the organization library), does not count. `/luke-voice status` shows the result.
+
+Prompt Master rewrites what you type at the prompt. The prompts luke-voice sends for you are sent by a plugin, and Prompt Master leaves those as they are.
 
 ### Ceci's memory
 
@@ -308,7 +316,7 @@ Claude session ── luke-voice mod ── events, long-poll ──┤
 - The window key never goes on a command line, where other users of the computer could read it. The hub opens the window with a one-time launch code that expires in two minutes (fifteen when the user has to open the address by hand). The window trades it once for the key, keeps the key in its tab's sessionStorage so a reload still works, and removes the code from the address bar.
 - The model and vendor files (`/models/`, `/vendor/`) start large downloads, so they are served only to the window: a same-origin `Sec-Fetch-Site`, or, from a browser that does not send it, the window's own address as `Origin` or `Referer`, or the window key.
 - The agent requires signed tokens, so its id alone cannot start a call.
-- Prompts reach Claude framed as relayed by luke-voice, and the pane lists each one.
+- Prompts reach Claude framed as relayed by luke-voice, and the pane lists each one. Every order, a prompt from the call or a voice task, also tells Claude that plan mode is on: write a short plan first, then carry it out.
 - The call window loads the ElevenLabs client from a pinned CDN file checked with Subresource Integrity.
 - The llama.cpp binaries are official GitHub release assets, pinned by sha256.
 - Every model file is pinned by revision and sha256 and checked before use.

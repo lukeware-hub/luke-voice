@@ -111,7 +111,7 @@ Diga **"pare"** (ou "para tudo", "Ceci, para") para parar o Claude na hora.
 | `/luke-voice window` | traz a janela para a frente |
 | `/luke-voice voz` | mostra a voz; `voz local` ou `voz elevenlabs` troca a voz para a próxima chamada |
 | `/luke-voice setup` | baixa e confere a voz gratuita da Ceci (para quem atualiza pelo marketplace) |
-| `/luke-voice status` | estado técnico: hub, voz, perfil, chamada, chave, fila, progresso do setup |
+| `/luke-voice status` | estado técnico: hub, voz, perfil, chamada, chave, fila, progresso do setup, Prompt Master |
 | `/luke-voice help` | tudo que você precisa saber, e o que está faltando |
 | `/luke-voice update` | atualiza o luke-voice para a versão mais nova (atualiza a lista de versões e depois o plugin; feche e abra o Claude Code em seguida) |
 | `/luke-voice uninstall` | remove o luke-voice e a voz baixada (pede `/luke-voice uninstall confirmar` antes) |
@@ -174,6 +174,14 @@ Escolha de qualquer um destes jeitos; vale a escolha mais recente:
 - `/plugin configure luke-voice@luke-voice`, opção **voice_provider**.
 
 Sem nenhuma escolha, o luke-voice usa a ElevenLabs se houver chave salva, e a voz gratuita se não houver.
+
+### Prompt Master, quando instalado
+
+Se o [Prompt Master](https://github.com/lukeware-hub/prompt-master), o plugin da Lukeware Hub que reescreve cada prompt antes de o Claude ler, estiver instalado, o luke-voice passa a exigi-lo: toda vez que o luke-voice liga, ele liga o Prompt Master se estiver desligado, e enquanto o luke-voice fica ligado, desligar o Prompt Master (pelo botão ou por `/prompt-master`) o mantém ligado, com um aviso. Sem o Prompt Master, o luke-voice funciona como antes, sem erro.
+
+O luke-voice pergunta ao Claude Code o que está instalado, como o `/plugin` faz: `claude plugin list --json` e `claude plugin marketplace list --json`. Só conta o plugin chamado exatamente `prompt-master`, ativado, instalado para o usuário (ou para este projeto), vindo de um marketplace que aponta para o repositório `lukeware-hub/prompt-master` no GitHub. Um plugin com nome igual ou parecido vindo de qualquer outro lugar, ou uma cópia cuja origem não dá para saber (a biblioteca da organização), não conta. `/luke-voice status` mostra o resultado.
+
+O Prompt Master reescreve o que você digita no prompt. Os prompts que o luke-voice manda por você são enviados por um plugin, e o Prompt Master os deixa como estão.
 
 ### A memória da Ceci
 
