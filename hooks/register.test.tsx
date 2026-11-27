@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Args, On } from 'claude-code'
 
-import { PLAN_FIRST, asPersona, brainArgs, brainInput, classifyTask, NO_NODE, parseBrain, parseBrainText, parseSummary, memoryTarget, preview, withFull, summaryPrompt, TIERS } from './register'
+import { PLAN_FIRST, PROMPT_MASTER_LAST, asPersona, brainArgs, brainInput, classifyTask, NO_NODE, parseBrain, parseBrainText, parseSummary, memoryTarget, preview, withFull, summaryPrompt, TIERS } from './register'
 import type { BrainRequest } from './register'
 
 const FOOTER = { plugin: 'luke-voice', component: 'SessionMode', props: { modes: [] } } as const
@@ -272,7 +272,7 @@ test('a prompt sent from the call starts a turn, framed as relayed, and is acked
   await $.command.run(run('off'))
   release()
 
-  expect(sent).toEqual([`The user asked luke-voice, their voice assistant, to pass this on:\n\nadd tests for auth\n\n${PLAN_FIRST}`])
+  expect(sent).toEqual([`The user asked luke-voice, their voice assistant, to pass this on:\n\nadd tests for auth\n\n${PLAN_FIRST}\n\n${PROMPT_MASTER_LAST}`])
   expect(calls.find(c => c.path === '/ack')?.body).toEqual({ id: 'c1', ok: true, message: 'Claude started a new turn with it.' })
 })
 
@@ -305,8 +305,8 @@ test('while Claude is busy, a prompt added as a note and a queued one both carry
   await $.command.run(run('off'))
   release()
 
-  expect(appended).toEqual([`The user asked luke-voice, their voice assistant, to pass this on:\n\nolha os logs\n\n${PLAN_FIRST}`])
-  expect(sent).toEqual([`The user asked luke-voice, their voice assistant, to pass this on:\n\ndepois roda os testes\n\n${PLAN_FIRST}`])
+  expect(appended).toEqual([`The user asked luke-voice, their voice assistant, to pass this on:\n\nolha os logs\n\n${PLAN_FIRST}\n\n${PROMPT_MASTER_LAST}`])
+  expect(sent).toEqual([`The user asked luke-voice, their voice assistant, to pass this on:\n\ndepois roda os testes\n\n${PLAN_FIRST}\n\n${PROMPT_MASTER_LAST}`])
   expect(calls.filter(c => c.path === '/ack').map(c => c.body.message)).toEqual(["Added as a note to Claude's running turn.", 'Queued. Claude gets it when the current turn ends.'])
 })
 
@@ -392,6 +392,7 @@ test('a voice task runs in a Claude Code subagent, and its answer is reported as
 
   expect(spawned[0]).toContain('verifica o login no repo xpto')
   expect(spawned[0]).toContain(PLAN_FIRST)
+  expect(spawned[0].endsWith(PROMPT_MASTER_LAST)).toBe(true)
   expect(calls.find(c => c.path === '/ack')?.body).toEqual({ id: 't1', ok: true, message: 'Started. A Claude Code subagent is working on it; the result comes in a [news] update.' })
   const events = calls.filter(c => c.path === '/events').map(c => JSON.stringify(c.body))
   expect(events.filter(e => e.includes('task_done')).length).toBe(1)

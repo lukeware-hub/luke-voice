@@ -394,6 +394,10 @@ const short = (text: string, max = 300) => (text.length > max ? `${text.slice(0,
 export const PLAN_FIRST =
   'Plan mode is on for this order: first write a short plan (the steps, the files you will touch, the risks), then carry out that plan. Never start the work before the plan is written.'
 
+// Closes every prompt luke-voice sends to Claude Code (tasks and main-chat messages), with no exception.
+export const PROMPT_MASTER_LAST =
+  'Finally, check whether the Prompt Master plugin is installed and active and, if it is, use it to improve this prompt.'
+
 function frameTask(task: string) {
   return [
     'The user asked for this out loud, through luke-voice, their voice assistant, and confirmed it:',
@@ -403,11 +407,13 @@ function frameTask(task: string) {
     PLAN_FIRST,
     '',
     'Do it on this machine. End with a short answer in Brazilian Portuguese, two or three sentences that are easy to say out loud: what you found or changed, and anything that failed. No code blocks or long paths in that answer.',
+    '',
+    PROMPT_MASTER_LAST,
   ].join('\n')
 }
 
 function frame(prompt: string) {
-  return `The user asked luke-voice, their voice assistant, to pass this on:\n\n${prompt}\n\n${PLAN_FIRST}`
+  return `The user asked luke-voice, their voice assistant, to pass this on:\n\n${prompt}\n\n${PLAN_FIRST}\n\n${PROMPT_MASTER_LAST}`
 }
 
 // The link's reason when the ElevenLabs voice has no key; the pane shows it as it is.

@@ -45,9 +45,22 @@ export function asksForSilence(message) {
 // user speaks again. Automatic notices echoed back are not the user.
 export function createQuietMode() {
   let on = false
+  // Set by the Silenciar button: stays on until the button is pressed again, not until the user speaks.
+  let manual = false
   return {
     get on() {
       return on
+    },
+    get manual() {
+      return manual
+    },
+    // The Silenciar button. Returns 'on' or 'off' when the state changed, or null.
+    toggle(next) {
+      if (next === on && next === manual) return null
+      const changed = next !== on
+      on = next
+      manual = next
+      return changed ? (next ? 'on' : 'off') : null
     },
     // Returns 'on' or 'off' when the state changed, or null.
     userSpoke(message) {
@@ -57,12 +70,13 @@ export function createQuietMode() {
         on = true
         return 'on'
       }
-      if (!on) return null
+      if (!on || manual) return null
       on = false
       return 'off'
     },
     clear() {
       on = false
+      manual = false
     },
   }
 }
