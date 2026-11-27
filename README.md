@@ -96,7 +96,7 @@ To install without questions, set `LUKE_VOICE_NO_PROMPT=1` before you run it; ad
 2. The first time, luke-voice turns on by itself, the call window opens and Ceci greets you. Just talk.
    - **Free voice:** the installer already downloaded it. If you updated through the marketplace and nothing was downloaded yet, the first call prepares it, with the progress in the window (or run `/luke-voice setup`).
    - **ElevenLabs:** luke-voice creates an agent named `luke-voice` and adds the voice "Roberta" to your account.
-3. From then on: **✦ luke-voice: on/off** above the prompt turns it on and off, and `/luke-voice call` starts a call.
+3. From then on: **✦ luke-voice: on/off** (above the prompt on Desktop, in the prompt footer in the terminal) turns it on and off, and `/luke-voice call` starts a call.
 
 **On a Mac:** the first call asks whether Chrome may use the microphone: click **Allow**. A Mac with Apple silicon gets the natural voice; an Intel Mac gets the light voice.
 

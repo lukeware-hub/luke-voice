@@ -128,11 +128,48 @@ test('it starts off and the footer button shows it', async ($, on) => {
     return <Text>engine</Text>
   })
 
-  for (const surface of ['terminal', 'desktop'] as const) {
-    const ui = await $.ui.mount({ ...FOOTER, surface })
-    expect((await ui.find({ type: 'Text', text: /engine/ }))?.text).toBe('engine')
-    const button = await ui.find({ type: 'Button', key: 'luke-voice-toggle' })
-    expect(button?.props.label).toBe('✦ luke-voice: off')
+  const ui = await $.ui.mount({ ...FOOTER, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /engine/ }))?.text).toBe('engine')
+  const button = await ui.find({ type: 'Button', key: 'luke-voice-toggle' })
+  expect(button?.props.label).toBe('✦ luke-voice: off')
+  await ui.unmount()
+})
+
+test('on desktop the footer has no luke-voice button; the toggle sits above the prompt and a press toggles it', async ($, on) => {
+  const { calls, stored } = engine(on, [() => new Promise(() => undefined)])
+  on('ui.render', { component: 'SessionMode' }, ($, e) => {
+    const { Box } = $.ui.resolve(e)
+    return <Box />
+  })
+
+  on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
+    const { Box } = $.ui.resolve(e)
+    return <Box />
+  })
+  const footer = await $.ui.mount({ ...FOOTER, surface: 'desktop' })
+  expect(await footer.find({ type: 'Button', key: 'luke-voice-toggle' })).toBeUndefined()
+  await footer.unmount()
+
+  const band = await $.ui.mount({ plugin: 'luke-voice', component: 'AbovePrompt', props: { hasSurvey: false, isCollapsed: false }, surface: 'desktop' } as any)
+  expect((await band.find({ type: 'Button', key: 'luke-voice-toggle' }))?.props.label).toBe('✦ luke-voice: off')
+
+  await band.press({ key: 'luke-voice-toggle' })
+  await until(() => calls.some(c => c.path === '/subscribe'))
+  expect(stored).toEqual([true])
+  expect((await band.find({ type: 'Button', key: 'luke-voice-toggle' }))?.props.label).toBe('✦ luke-voice: on')
+  await band.unmount()
+})
+
+test('the band above the prompt is skipped on the terminal and during a survey', async ($, on) => {
+  engine(on)
+  on('ui.render', ($, e) => {
+    const { Box } = $.ui.resolve(e)
+    return <Box />
+  })
+
+  for (const [surface, hasSurvey] of [['terminal', false], ['desktop', true]] as const) {
+    const ui = await $.ui.mount({ plugin: 'luke-voice', component: 'AbovePrompt', props: { hasSurvey, isCollapsed: false }, surface } as any)
+    expect(await ui.find({ type: 'Button', key: 'luke-voice-toggle' })).toBeUndefined()
     await ui.unmount()
   }
 })
