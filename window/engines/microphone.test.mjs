@@ -46,3 +46,30 @@ test('only audio inputs are listed, named, without the default alias', () => {
     { id: 'b', label: 'Microfone 2' },
   ])
 })
+
+test('a strict request asks for exactly the chosen microphone, so a wrong id fails loudly', () => {
+  assert.deepEqual(micConstraints('usb-1', { channelCount: 1 }, { strict: true }), { channelCount: 1, deviceId: { exact: 'usb-1' } })
+  assert.deepEqual(micConstraints('', { channelCount: 1 }, { strict: true }), { channelCount: 1 })
+})
+
+test('devices without an id (permission not given yet) are not listed', () => {
+  assert.deepEqual(inputOptions([{ kind: 'audioinput', deviceId: '', label: '' }]), [])
+})
+
+test('the "communications" alias is dropped, the real device stays', () => {
+  const list = inputOptions([
+    { kind: 'audioinput', deviceId: 'communications', label: 'Comunicações - Headset', groupId: 'g1' },
+    { kind: 'audioinput', deviceId: 'a', label: 'Headset', groupId: 'g1' },
+  ])
+  assert.deepEqual(list, [{ id: 'a', label: 'Headset' }])
+})
+
+test('the same hardware seen twice (same group) is listed once; unknown groups are kept', () => {
+  const list = inputOptions([
+    { kind: 'audioinput', deviceId: 'a', label: 'Headset (Hands-Free)', groupId: 'g1' },
+    { kind: 'audioinput', deviceId: 'b', label: 'Headset (Stereo)', groupId: 'g1' },
+    { kind: 'audioinput', deviceId: 'c', label: 'USB', groupId: '' },
+    { kind: 'audioinput', deviceId: 'd', label: 'Webcam', groupId: '' },
+  ])
+  assert.deepEqual(list.map(item => item.id), ['a', 'c', 'd'])
+})
