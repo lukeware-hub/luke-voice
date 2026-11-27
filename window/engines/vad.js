@@ -25,7 +25,7 @@ const DEFAULTS = {
   holdRatio: 0.7,
   startFrames: 3, // ~100 ms of speech starts an utterance
   bargeFrames: 8, // ~250 ms of loud speech interrupts Ceci
-  endFrames: 40, // ~1.3 s of silence ends it (breaths mid-sentence last up to ~1 s)
+  endFrames: 25, // ~0.8 s of silence ends it (a longer breath mid-sentence is joined, see turn-join.js)
   // With a turn model (Smart Turn), a pause of candidateFrames makes a candidate end: the model
   // says whether the user is done. If not, it is asked again every candidateEvery frames of the
   // same pause (0: once), and the silence still ends the turn at endFrames. 0 turns candidates off.

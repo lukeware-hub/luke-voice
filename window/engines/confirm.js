@@ -23,6 +23,14 @@ export const REPEAT = 'Pode repetir para mim, por favor?'
 export const MAX_REPEATS = 2
 const isRepeatAsk = say => /\bpode(?:ria)? repetir\b/i.test(String(say ?? ''))
 
+// The brain's arguments for the tool are the asked ones: none given, or equal in any key order.
+const canonical = value =>
+  Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value
+function sameArgs(given, asked) {
+  if (given == null || (typeof given === 'object' && Object.keys(given).length === 0)) return true
+  return JSON.stringify(canonical(given)) === JSON.stringify(canonical(asked ?? {}))
+}
+
 // -> { action: 'say' | 'pend' | 'run', say, tool?, pending }. `pending` is the new "posso?"
 // ({ tool, at }) or null; it replaces the last one, so a notice lets an unanswered one go.
 // `answering` is the live "posso?" this user turn answers (liveAction), or null.
@@ -33,9 +41,10 @@ export function decide({ kind, reply, now, answering = null }) {
   // Stopping Claude and reading the activity do not change anything: the user's turn runs them.
   if (tool && !PENDABLE.includes(tool.name)) return { action: 'run', say, tool, pending: null }
   // The user answered Ceci's "posso?" with a yes the fast path did not catch ("pode, Ceci, roda aí"),
-  // and the brain read it as a yes: the action Ceci asked about runs now, as she said it (the
-  // brain does not see its arguments), with no second question.
-  if (tool && answering?.tool?.name === tool.name) return { action: 'run', say, tool: answering.tool, pending: null }
+  // and the brain read it as a yes: the action Ceci asked about runs now, as she said it, with no
+  // second question. Only with the same arguments (or none): other ones are a changed request, and
+  // that one asks "posso?" again below instead of running the old action.
+  if (tool && answering?.tool?.name === tool.name && sameArgs(tool.args, answering.tool.args)) return { action: 'run', say, tool: answering.tool, pending: null }
   const wanted = tool ?? (PENDABLE.includes(reply?.pending?.name) ? reply.pending : null)
   // The brain could not make out the answer to "posso?" and asks to hear it again: the same
   // action keeps waiting (the brain does not see its arguments, so it cannot ask again itself).

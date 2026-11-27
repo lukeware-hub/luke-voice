@@ -134,6 +134,43 @@ test('the build is downloaded once, checked, unpacked once, and reused', async (
   }
 })
 
+test('the build is unpacked aside and moved in whole: a second process (setup and hub) never sees it half done', async () => {
+  const { readdirSync, rmSync } = await import('node:fs')
+  const dir = fresh()
+  const bytes = Buffer.from('fake llama archive')
+  const saved = BINARIES['test-x64']
+  BINARIES['test-x64'] = { url: 'https://github.com/ggml-org/llama.cpp/releases/download/b1/x.zip', sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length, exe: 'llama-server.exe' }
+  const targets = []
+  // Two unpacks at once, each slow: like the hub and setup.mjs preparing together.
+  const run = async (_tar, args) => {
+    const target = args[args.indexOf('-C') + 1]
+    targets.push(target)
+    await new Promise(resolve => setTimeout(resolve, 50))
+    writeFileSync(join(target, 'llama-server.exe'), '')
+    return { ok: true, stdout: '', stderr: '' }
+  }
+  try {
+    const request = async () => new Response(bytes, { status: 200 })
+    // A folder an older unpack left half done (no marker) is replaced, not trusted.
+    mkdirSync(join(dir, LLAMA_BUILD), { recursive: true })
+    writeFileSync(join(dir, LLAMA_BUILD, 'partial.dll'), '')
+    const [a, b] = await Promise.all([ensureBinaries({ dir, key: 'test-x64', request, run }), ensureBinaries({ dir, key: 'test-x64', request, run })])
+    assert.equal(a, b)
+    assert.ok(existsSync(a))
+    assert.ok(existsSync(join(dir, LLAMA_BUILD, '.unpacked')))
+    assert.equal(existsSync(join(dir, LLAMA_BUILD, 'partial.dll')), false)
+    for (const target of targets) assert.notEqual(target, join(dir, LLAMA_BUILD), 'tar never writes into the build folder itself')
+    assert.deepEqual(readdirSync(dir).filter(name => name.endsWith('.tmp')), [], 'no unpack folder is left behind')
+    // An unpack that fails leaves nothing behind.
+    rmSync(join(dir, LLAMA_BUILD), { recursive: true })
+    await assert.rejects(ensureBinaries({ dir, key: 'test-x64', request, run: async () => ({ ok: false, stdout: '', stderr: 'bad zip' }) }), /bad zip/)
+    assert.deepEqual(readdirSync(dir).filter(name => name !== 'downloads'), [])
+  } finally {
+    if (saved) BINARIES['test-x64'] = saved
+    else delete BINARIES['test-x64']
+  }
+})
+
 // A stand-in for llama-server: answers /health on the port it is given.
 const FAKE = `
 const port = Number(process.argv[process.argv.indexOf('--port') + 1])
@@ -188,6 +225,29 @@ const ttsModels = () => {
   return models
 }
 const sleepMs = ms => new Promise(resolve => setTimeout(resolve, ms))
+
+test('a stop while a server is still getting its port starts no server, so none is left running untracked', async () => {
+  const dir = fresh()
+  let spawns = 0
+  const spawn = (...args) => (spawns++, nodeSpawn(...args))
+  const engine = createEngine({ dir, models: ttsModels(), spawn, command: [process.execPath, fakeServer(dir)], readyTimeoutMs: 10_000 })
+  try {
+    const started = engine.start(['tts'])
+    engine.stop()
+    assert.deepEqual(await started, { tts: false })
+    assert.equal(spawns, 0, 'a llama-server was started after stop(), with nothing to stop it')
+    assert.equal(engine.url('tts'), null)
+    // Setup stops and starts again at once: only the new start runs a server.
+    const old = engine.start(['tts'])
+    engine.stop()
+    const again = engine.start(['tts'])
+    assert.deepEqual(await old, { tts: false })
+    assert.deepEqual(await again, { tts: true })
+    assert.equal(spawns, 1)
+  } finally {
+    engine.stop()
+  }
+})
 
 test('a lean start runs the ears on the CPU, and a crashed ear restarts lean too', async () => {
   const dir = fresh()

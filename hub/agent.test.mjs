@@ -108,6 +108,76 @@ test('both voices are Ceci: same name, age and creator, told only when asked, an
   assert.match(eleven, /firstMessage: pickGreeting\(\)/)
 })
 
+// A stand-in for the ElevenLabs API: counts the agents and tools created, and can fail once.
+function fakeElevenLabs({ failFirst = false } = {}) {
+  const created = { agents: 0, tools: 0 }
+  let calls = 0
+  const fetch = async (url, init = {}) => {
+    calls++
+    await new Promise(resolve => setTimeout(resolve, 5))
+    if (failFirst && calls === 1) return new Response('boom', { status: 500 })
+    const path = new URL(url).pathname.replace('/v1', '')
+    const method = init.method ?? 'GET'
+    const json = body => new Response(JSON.stringify(body), { status: 200 })
+    if (method === 'GET' && path === '/convai/tools') return json({ tools: [] })
+    if (method === 'POST' && path === '/convai/tools') return json({ id: `tool-${++created.tools}` })
+    if (method === 'GET' && path === '/convai/agents') return json({ agents: [] })
+    if (method === 'POST' && path === '/convai/agents/create') return json({ agent_id: `agent-${++created.agents}` })
+    if (method === 'GET' && path.startsWith('/voices')) return json({ voices: [{ voice_id: 'v' }] })
+    if (method === 'GET' && path.startsWith('/convai/agents/')) return json({})
+    return json({})
+  }
+  return { fetch, created }
+}
+
+async function withState(fake, run) {
+  const { mkdtempSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const saved = { fetch: globalThis.fetch, home: process.env.LUKE_VOICE_HOME, id: process.env.LUKE_VOICE_AGENT_ID }
+  const home = mkdtempSync(join(tmpdir(), 'luke-agent-'))
+  globalThis.fetch = fake.fetch
+  process.env.LUKE_VOICE_HOME = home
+  delete process.env.LUKE_VOICE_AGENT_ID
+  try {
+    return await run(home)
+  } finally {
+    globalThis.fetch = saved.fetch
+    if (saved.home === undefined) delete process.env.LUKE_VOICE_HOME
+    else process.env.LUKE_VOICE_HOME = saved.home
+    if (saved.id !== undefined) process.env.LUKE_VOICE_AGENT_ID = saved.id
+  }
+}
+
+const ROOT = join(import.meta.dirname, '..')
+
+test('two token requests at once create the agent and its tools once, and a failed sync is tried again', async () => {
+  const { ensureAgent, readDefinition } = await import('./agent.mjs')
+  const tools = (await readDefinition(ROOT)).def.tools.length
+  const fake = fakeElevenLabs()
+  await withState(fake, async () => {
+    const [a, b] = await Promise.all([ensureAgent('k', ROOT), ensureAgent('k', ROOT)])
+    assert.equal(a, b)
+    assert.equal(fake.created.agents, 1)
+    assert.equal(fake.created.tools, tools)
+  })
+  const failing = fakeElevenLabs({ failFirst: true })
+  await withState(failing, async () => {
+    await assert.rejects(ensureAgent('k', ROOT), /500/)
+    assert.equal(await ensureAgent('k', ROOT), 'agent-1')
+  })
+})
+
+test('a truncated agent.json is synced over instead of failing every call, and is written whole', async () => {
+  const { readFileSync, readdirSync, writeFileSync } = await import('node:fs')
+  const { ensureAgent } = await import('./agent.mjs')
+  await withState(fakeElevenLabs(), async home => {
+    writeFileSync(join(home, 'agent.json'), '{"id": "agent-')
+    assert.equal(await ensureAgent('k', ROOT), 'agent-1')
+    assert.equal(JSON.parse(readFileSync(join(home, 'agent.json'), 'utf8')).id, 'agent-1')
+    assert.deepEqual(readdirSync(home).filter(name => name.startsWith('agent.json')), ['agent.json'], 'no temp file is left')
+  })
+})
+
 test('every ElevenLabs request carries a timeout, so a hung API never holds a call', async () => {
   const { conversationToken } = await import('./agent.mjs')
   const saved = globalThis.fetch

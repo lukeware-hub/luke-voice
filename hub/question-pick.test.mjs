@@ -41,6 +41,40 @@ test('the samples of a streamed WAV are read even when its size is unknown', () 
   assert.ok(Math.abs(samples[100] - x[100]) < 1e-3)
 })
 
+test('a WAV cut off before its data is no samples, not a crash', () => {
+  const header = wav(take(0.2, 0)).subarray(0, 36)
+  assert.deepEqual(wavSamples(header), { samples: new Float32Array(0), rate: FS })
+  assert.equal(wavSamples(header.subarray(0, 20)).samples.length, 0)
+})
+
+test('a take with no sound in it is a failed take: never served, and retried later instead of at once', async () => {
+  const cut = wav(take(0.2, 0)).subarray(0, 36)
+  const calls = []
+  const dir = mkdtempSync(join(tmpdir(), 'luke-voice-takes-'))
+  const takes = createQuestionTakes({ say: async (_text, seed) => (calls.push(seed), cut), dir, voiceKey: 'v', idleMs: 0, retryMs: 50, maxTakes: 9 })
+  takes.warm(['Posso?'])
+  await new Promise(r => setTimeout(r, 300))
+  assert.ok(calls.length >= 2 && calls.length <= 4, `${calls.length} takes asked for a take that never has sound`)
+  assert.equal(readdirSync(dir).length, 0, 'nothing kept')
+  takes.stop()
+})
+
+test('a live line longer than the idle wait holds the background search without spinning', async () => {
+  let looks = 0
+  const calls = []
+  const dir = mkdtempSync(join(tmpdir(), 'luke-voice-takes-'))
+  const takes = createQuestionTakes({ say: async (_text, seed) => (calls.push(seed), null), dir, voiceKey: 'v', idleMs: 20, now: () => (looks++, Date.now()) })
+  const done = takes.live()
+  takes.warm(['Posso?'])
+  await new Promise(r => setTimeout(r, 200))
+  assert.deepEqual(calls, [], 'nothing while the live line plays')
+  assert.ok(looks < 20, `${looks} looks at the clock while one live line played`)
+  done()
+  await new Promise(r => setTimeout(r, 100))
+  assert.deepEqual(calls, [101])
+  takes.stop()
+})
+
 test('in the background, takes are made only while no live line is wanted, and a live line stops them', async () => {
   const flat = wav(take(1.2, 0))
   const rising = wav(take(1.2, 6))

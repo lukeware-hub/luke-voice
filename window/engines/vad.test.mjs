@@ -31,10 +31,10 @@ test('speech after silence starts an utterance, and silence ends it with the aud
   assert.equal(audio.length, (18 + 27 + 5) * FRAME)
 })
 
-test('a breath of about 1 s in the middle of a sentence does not end the turn', () => {
+test('a breath of about 0.6 s in the middle of a sentence does not end the turn', () => {
   const vad = createVad()
   const speech = () => Array(20).fill(0).map(() => tone(0.1))
-  const breath = Array(31).fill(0).map(silence) // ~1 s
+  const breath = Array(19).fill(0).map(silence) // ~0.6 s
   const events = feed(vad, [...Array(20).fill(0).map(silence), ...speech(), ...breath, ...speech(), ...Array(45).fill(0).map(silence)])
   assert.deepEqual(events.map(e => e.type), ['start', 'end'])
 })

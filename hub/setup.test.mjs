@@ -139,6 +139,24 @@ test('the install test asks the ears with the glossary, so they write "Ceci" and
   }
 })
 
+test('a hung engine fails the install test in time instead of holding setup forever', async () => {
+  const { createServer } = await import('node:http')
+  // Takes every request and never answers it.
+  const server = createServer(req => req.resume())
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const url = `http://127.0.0.1:${server.address().port}`
+  const engine = { start: async () => {}, status: () => ({ tts: true, asr: true, router: true }), warm: async () => {}, url: () => url, stop: () => {} }
+  try {
+    const started = Date.now()
+    const result = await smokeTest({ profile: 'gpu' }, { engine, voice: 'missing.wav', timeoutMs: 200 })
+    assert.equal(result.ok, false)
+    assert.ok(Date.now() - started < 5000, 'the test waited on a hung engine')
+  } finally {
+    server.closeAllConnections()
+    server.close()
+  }
+})
+
 test('a voice made slower than real time (an integrated GPU) fails the install test, so the light voice is used', async () => {
   const { createServer } = await import('node:http')
   // 0.3 s of 48 kHz 16-bit mono speech, by its WAV header (at 24 kHz it would last twice as long).

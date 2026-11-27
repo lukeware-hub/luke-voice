@@ -62,6 +62,13 @@ const MAX_ENDED = 200
 // for the browser to start; one handed to the user to open by hand lasts longer.
 const LAUNCH_MS = 120_000
 const MANUAL_LAUNCH_MS = 15 * 60_000
+// A window the hub just opened has this long to connect its stream. Meanwhile no second one is
+// opened: a cold Chrome takes seconds to start, and a second /show (or a finished task) in that
+// time would open a second window.
+const LAUNCH_WAIT_MS = 20_000
+// How many tokens of replaced and ended sessions the hub keeps answering 409 or 410, oldest
+// forgotten first: a hub that runs for weeks must not keep every token it ever handed out.
+const MAX_GONE = 500
 // A session whose luke-voice is older than 0.9.5 cannot think for the free voice: it would hand
 // the command to Claude as a prompt. It says which session to restart instead.
 const oldSessionSay = name => `A sessão ${name} está com uma versão antiga do luke-voice. Feche o Claude Code e abra de novo para atualizar.`
@@ -139,13 +146,27 @@ function sameSecret(given, expected) {
 // (the one that wins the port) does not hold would get every mod refused with 401. So the file is
 // only created when missing, whole and in one step (a hard link of a finished temp file), and the
 // hub that finds it already there takes its tokens. A truncated or broken file is replaced (temp
-// file and rename) instead of failing every start.
-export function loadSecrets(file = stateFile('hub.json')) {
+// file and rename) instead of failing every start. A file that cannot be read for a moment (Windows:
+// EBUSY or EPERM while an antivirus or a backup holds it) is read again, then the error is thrown:
+// replacing it would change the tokens every running mod holds.
+export function loadSecrets(file = stateFile('hub.json'), { read = path => readFileSync(path, 'utf8'), retryMs = 100, tries = 5 } = {}) {
   let saved = null
-  try {
-    saved = JSON.parse(readFileSync(file, 'utf8')) ?? {}
-  } catch (error) {
-    if (error.code !== 'ENOENT') saved = {}
+  for (let attempt = 1; ; attempt++) {
+    let text
+    try {
+      text = read(file)
+    } catch (error) {
+      if (error.code === 'ENOENT') break
+      if (attempt >= tries) throw error
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, retryMs)
+      continue
+    }
+    try {
+      saved = JSON.parse(text) ?? {}
+    } catch {
+      saved = {}
+    }
+    break
   }
   if (saved?.serviceToken && saved?.windowKey) return { serviceToken: saved.serviceToken, windowKey: saved.windowKey }
   // The window key survives a hub restart: an open window keeps working instead of failing with "key".
@@ -159,7 +180,7 @@ export function loadSecrets(file = stateFile('hub.json')) {
         linkSync(temp, file)
       } catch (error) {
         // Another hub created it first: use its tokens.
-        if (error.code === 'EEXIST') return loadSecrets(file)
+        if (error.code === 'EEXIST') return loadSecrets(file, { read, retryMs, tries })
         // A disk without hard links.
         renameSync(temp, file)
       }
@@ -354,12 +375,24 @@ export function createEngineRunner({ engine, setDownload, warmQuestions = () => 
   }
 }
 
-export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, engine = null, profile = () => null, voiceRef = null, onLocalVoice = () => {}, onSetup = () => ({ started: false }), engineState = () => 'off', macVoice = () => null, macVoiceGender = () => null, macVoiceSiri = () => null, macSay = sayWav, platform = process.platform, log = () => {}, onShutdown = () => process.exit(0), questionsDir = join(stateDir(), 'cache', 'questions'), staleMs = STALE_SESSION_MS, sweepMs = 10_000, sttWaitMs = STT_WAIT_MS, clock = Date.now, noticesFile = stateFile('notices.json'), reopenMs = REOPEN_FOR_NOTICE_MS, windowLog = stateFile('window.log'), memory = null, graph = null, summarizeEveryMs = 120_000, endedFile = stateFile('ended.json') }) {
+export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, engine = null, profile = () => null, voiceRef = null, onLocalVoice = () => {}, onSetup = () => ({ started: false }), engineState = () => 'off', macVoice = () => null, macVoiceGender = () => null, macVoiceSiri = () => null, macSay = sayWav, platform = process.platform, log = () => {}, onShutdown = () => process.exit(0), questionsDir = join(stateDir(), 'cache', 'questions'), staleMs = STALE_SESSION_MS, sweepMs = 10_000, sttWaitMs = STT_WAIT_MS, clock = Date.now, noticesFile = stateFile('notices.json'), reopenMs = REOPEN_FOR_NOTICE_MS, windowLog = stateFile('window.log'), memory = null, graph = null, summarizeEveryMs = 120_000, endedFile = stateFile('ended.json'), ackWaitMs = ACK_WAIT_MS, maxGone = MAX_GONE }) {
   const sessions = new Map() // token -> session
   const launches = new Map() // one-time launch code -> when it expires
   const replaced = new Set() // tokens a newer subscription of the same Claude session took over
   const ended = new Set() // tokens of sessions the user ended from the window: their mod turns off
+  // Adds a token to `replaced` or `ended`, forgetting the oldest past maxGone. A forgotten one is
+  // answered 401, as any unknown token: its mod subscribes again or turns off.
+  const rememberGone = (set, token) => {
+    set.add(token)
+    for (const old of set) {
+      if (set.size <= maxGone) break
+      set.delete(old)
+    }
+  }
   const streams = new Set() // window SSE responses
+  // Until when a window the hub opened is still starting (see LAUNCH_WAIT_MS); 0 when none is.
+  let launchingUntil = 0
+  const canOpenWindow = () => streams.size === 0 && clock() >= launchingUntil
   // Voice-task results not yet handed to the voice (notices.mjs), and when a result last opened
   // the window, so a burst of results opens it once.
   const notices = createNotices({ file: noticesFile, clock })
@@ -471,6 +504,21 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     return `http://127.0.0.1:${PORT}/?n=${code}${startCall ? '&call=1' : ''}`
   }
 
+  // Opens the window, and no other until it connects its stream (or LAUNCH_WAIT_MS passes). Resolves
+  // to what open() said: false when nothing could be opened, which leaves no launch waiting.
+  const openLaunched = async url => {
+    launchingUntil = clock() + LAUNCH_WAIT_MS
+    let isOpened
+    try {
+      isOpened = await open(url, { log })
+    } catch (error) {
+      launchingUntil = 0
+      throw error
+    }
+    if (isOpened === false) launchingUntil = 0
+    return isOpened
+  }
+
   function uniqueName(cwd) {
     const base = (basename(cwd || '') || 'session').toLowerCase().replace(/[^a-z0-9-]+/g, '-').slice(0, 24) || 'session'
     let name = base
@@ -483,17 +531,23 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     for (const resolve of waiters) resolve()
   }
 
-  function enqueue(session, command, wait = ACK_WAIT_MS) {
+  function enqueue(session, command, wait = ackWaitMs) {
     const id = newSecret().slice(0, 12)
     session.inbox.push({ id, ...command })
     wake(session)
     return new Promise(resolve => {
       const timer = setTimeout(() => {
         acks.delete(id)
+        // Not pulled yet: it leaves the inbox, or the mod would run it later (a prompt the window
+        // already reported as failed, a stale stop or think).
+        const at = session.inbox.findIndex(queued => queued.id === id)
+        if (at >= 0) session.inbox.splice(at, 1)
         resolve({ ok: false, message: `The ${session.name} session did not answer in time.` })
       }, wait)
+      // Answered once, by the mod's ack or the session ending: the entry goes with it.
       acks.set(id, result => {
         clearTimeout(timer)
+        acks.delete(id)
         resolve(result)
       })
     })
@@ -578,6 +632,9 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       const scope = body.scope ?? {}
       const result = memory.deleteMemory(scope, { how: String(body.how ?? how).slice(0, 20) })
       broadcast({ type: 'memory', deleted: result.deleted })
+      // The knowledge graph holds the deleted words too (its transcripts, Graphify's output): the
+      // next run takes them out, as soon as no call is live and the safety gap allows.
+      if (result.deleted) graph?.schedule(0)
       return [200, { ok: true, ...result }]
     },
   })
@@ -620,6 +677,22 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     summaryTimer.unref?.()
   }
 
+  // Every change of the call state goes through here: the window's /call, its stream closing, a
+  // shutdown, the hub exiting idle. A call that goes live is a new conversation in the memory; one
+  // that ends closes it, and its summary is written soon after.
+  function setCall(next) {
+    const was = call
+    call = next
+    if (memory && call === 'live' && was !== 'live') memory.startCall({ persona: personaNow(), voice: voiceProvider() })
+    if (memory && call !== 'live' && was === 'live') {
+      memory.endCall()
+      scheduleSummaries(65_000)
+      // The knowledge graph (hub/graph.mjs) takes the new conversation at the same moment, in the
+      // background, at most once per its safety gap.
+      graph?.schedule(65_000)
+    }
+  }
+
   function activityText(session) {
     if (!session) return 'No Claude session is connected.'
     const lines = session.activity.map(a => `${a.kind}: ${a.text}`)
@@ -633,7 +706,8 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     'POST /setup': () => [200, onSetup()],
     ...memoryRoutes('command'),
     'POST /events': (session, body) => {
-      const events = Array.isArray(body.events) ? body.events.slice(0, 50) : []
+      // An entry that is not an object (null, a number) is skipped, not a 500 for the whole batch.
+      const events = Array.isArray(body.events) ? body.events.slice(0, 50).filter(event => event && typeof event === 'object') : []
       // Everything the sessions report is kept in Ceci's memory, marked as not the user's words.
       for (const event of events) remember({ kind: SESSION_KINDS[String(event.kind)] ?? 'session_info', text: String(event.full ?? event.text ?? '').slice(0, MEMORY_TEXT), session: session.name, untrusted: true })
       for (const event of events) {
@@ -651,9 +725,9 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       })
       if (events.length) broadcast({ type: 'activity', session: session.name, events: told })
       // No window to tell it: open one that starts the call, so Ceci says it without being asked.
-      if (told.some(event => event.id) && streams.size === 0 && clock() - reopenedAt >= reopenMs) {
+      if (told.some(event => event.id) && canOpenWindow() && clock() - reopenedAt >= reopenMs) {
         reopenedAt = clock()
-        void Promise.resolve(open(launchUrl(true), { log })).catch(() => {})
+        void openLaunched(launchUrl(true)).catch(() => {})
       }
       sendRoster()
       return [200, { ok: true }]
@@ -685,24 +759,24 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       return [200, { commands: session.inbox.splice(0), call, isFocused: focused === session.name }]
     },
     'POST /ack': (_session, body) => {
-      const resolve = acks.get(body.id)
-      acks.delete(body.id)
-      resolve?.({ ok: Boolean(body.ok), message: String(body.message ?? '') })
+      acks.get(body.id)?.({ ok: Boolean(body.ok), message: String(body.message ?? '') })
       return [200, { ok: true }]
     },
     'POST /show': async (session, body) => {
       focused = session.name
       const startCall = Boolean(body.call)
-      if (streams.size === 0) {
+      if (canOpenWindow()) {
         const url = launchUrl(startCall)
         // Never "the window is opening" when nothing could open it: the mod gets the address
         // instead, with a code of its own that lasts while the user gets to it.
-        if ((await open(url, { log })) === false) {
+        if ((await openLaunched(url)) === false) {
           launches.delete(new URL(url).searchParams.get('n'))
           sendRoster()
           return [200, { ok: true, isWindowOpen: false, isOpened: false, url: launchUrl(startCall, MANUAL_LAUNCH_MS) }]
         }
       } else {
+        // An open window moves to this session; one still starting reads the focus from the roster
+        // it gets when its stream connects.
         broadcast({ type: 'focus', name: session.name, startCall })
       }
       sendRoster()
@@ -746,14 +820,15 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     'POST /session-end': (_none, body) => {
       const session = byName(String(body.name ?? ''))
       if (!session) return [404, { ok: false, error: missing(String(body.name ?? '')) }]
-      ended.add(session.token)
+      rememberGone(ended, session.token)
       // Remembered by its Claude session too: a new subscription from it is refused (see /subscribe).
       if (session.sessionId) {
         endedIds.delete(session.sessionId)
         endedIds.add(session.sessionId)
         saveEnded()
       }
-      // Its waiting commands get no answer now: the window is not left hanging on them.
+      // Its waiting commands get no answer now: the window is not left hanging on them. Answering
+      // one also forgets its ack (see enqueue).
       for (const command of session.inbox) acks.get(command.id)?.({ ok: false, message: `The ${session.name} session was ended.` })
       session.inbox = []
       drop(session)
@@ -865,18 +940,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       return [200, { text: session ? activityText(session) : missing(name) }]
     },
     'POST /call': (_none, body) => {
-      const was = call
-      call = ['idle', 'connecting', 'live', 'error'].includes(body.state) ? body.state : 'idle'
-      // A call that goes live is a new conversation in the memory; one that ends closes it, and its
-      // summary is written soon after.
-      if (memory && call === 'live' && was !== 'live') memory.startCall({ persona: personaNow(), voice: voiceProvider() })
-      if (memory && call !== 'live' && was === 'live') {
-        memory.endCall()
-        scheduleSummaries(65_000)
-        // The knowledge graph (hub/graph.mjs) takes the new conversation at the same moment, in the
-        // background, at most once per its safety gap.
-        graph?.schedule(65_000)
-      }
+      setCall(['idle', 'connecting', 'live', 'error'].includes(body.state) ? body.state : 'idle')
       sendRoster()
       return [200, { ok: true }]
     },
@@ -1110,7 +1174,17 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       chunks.push(chunk)
     }
     const text = Buffer.concat(chunks).toString('utf8')
-    return text ? JSON.parse(text) : {}
+    if (!text) return {}
+    // A body that is not JSON, or JSON that is not an object (null, a list), is the caller's error:
+    // 400, not a 500 from the route reading its fields.
+    let body
+    try {
+      body = JSON.parse(text)
+    } catch {
+      throw Object.assign(new Error('The body is not valid JSON.'), { status: 400 })
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw Object.assign(new Error('The body must be a JSON object.'), { status: 400 })
+    return body
   }
 
   function send(res, status, body) {
@@ -1168,10 +1242,11 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
         const previous = sessionId ? [...sessions.values()].find(s => s.sessionId === sessionId) : undefined
         if (previous) {
           sessions.delete(previous.token)
-          replaced.add(previous.token)
+          rememberGone(replaced, previous.token)
           wake(previous)
         }
-        const session = { token, sessionId, name: previous?.name ?? uniqueName(body.cwd), cwd: String(body.cwd ?? ''), canThink: typeof body.version === 'string' || typeof body.provider === 'string', canSummarize: body.canSummarize === true, inbox: previous?.inbox ?? [], waiters: [], activity: [], isBusy: false, needsYou: false, seenAt: Date.now() }
+        const cwd = typeof body.cwd === 'string' ? body.cwd : ''
+        const session = { token, sessionId, name: previous?.name ?? uniqueName(cwd), cwd, canThink: typeof body.version === 'string' || typeof body.provider === 'string', canSummarize: body.canSummarize === true, inbox: previous?.inbox ?? [], waiters: [], activity: [], isBusy: false, needsYou: false, seenAt: Date.now() }
         sessions.set(token, session)
         focused ??= session.name
         sendRoster()
@@ -1181,6 +1256,8 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       if (route === 'POST /shutdown') {
         if (!sameSecret(bearer, serviceToken)) return send(res, 401, { error: 'token' })
         broadcast({ type: 'end' })
+        // A call still live is closed in the memory now: the hub is about to exit.
+        setCall('idle')
         send(res, 200, { ok: true })
         setTimeout(onShutdown, 100)
         return
@@ -1260,6 +1337,8 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
         if (!sameSecret(url.searchParams.get('k'), windowKey)) return send(res, 403, { error: 'key' })
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' })
         streams.add(res)
+        // The window the hub opened is up: the next /show may open another once this one closes.
+        launchingUntil = 0
         res.write(`data: ${JSON.stringify({ type: 'roster', sessions: roster(), focused, call })}\n\n`)
         // Results this window has not heard yet (it was closed, or reconnecting, when they came).
         const unheard = notices.pending()
@@ -1268,7 +1347,8 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
         req.on('close', () => {
           clearInterval(ping)
           streams.delete(res)
-          if (streams.size === 0) call = 'idle'
+          // The last window closed (or crashed) mid-call: the call ends, in the memory too.
+          if (streams.size === 0) setCall('idle')
         })
         return
       }
@@ -1324,6 +1404,9 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
   server.on('close', () => questions?.stop())
   server.voiceProvider = voiceProvider
   server.callState = () => call
+  // The hub exits (idle): a call still live is closed in the memory first.
+  server.endCall = () => setCall('idle')
+  server.pendingAcks = () => acks.size
   return server
 }
 
@@ -1394,6 +1477,8 @@ if (isMainModule(import.meta.url, process.argv[1])) {
     if (hub.voiceProvider() === 'local') runner.startOnce()
   })
   setInterval(() => {
-    if (hub.idleFor() > 10 * 60_000) process.exit(0)
+    if (hub.idleFor() <= 10 * 60_000) return
+    hub.endCall()
+    process.exit(0)
   }, 60_000).unref()
 }

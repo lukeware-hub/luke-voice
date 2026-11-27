@@ -140,6 +140,14 @@ test('dates are read as day and month, and a bare fraction stays a fraction', ()
   assert.equal(spokenForms('Use 1/2 xícara, 3/4 do tempo, e 32/13 não é data.'), 'Use 1/2 xícara, 3/4 do tempo, e 32/13 não é data.')
 })
 
+test('a count like "12/12 passaram" stays a count; a day the month does not have is no date', () => {
+  assert.equal(spokenForms('Os testes: 12/12 passaram, 10/12 testes ok, 11/12 dos casos.'), 'Os testes: 12/12 passaram, 10/12 testes ok, 11/12 dos casos.')
+  assert.equal(spokenForms('Rodou 30/02 e 31/04.'), 'Rodou 30/02 e 31/04.')
+  // Real dates still read as dates, also before other words.
+  assert.equal(spokenForms('Em 12/12 passamos lá, e 29/02 é bissexto.'), 'Em 12 de dezembro passamos lá, e 29 de fevereiro é bissexto.')
+  assert.equal(spokenForms('Até 10/12/2026 passaram 3.'), 'Até 10 de dezembro de 2026 passaram 3.')
+})
+
 test('reais and centavos are said in words; big round amounts keep their digits', () => {
   assert.equal(spokenForms('Custa R$ 1.500,00, R$ 2,50, R$1,01 ou R$ 0,99.'), 'Custa mil e quinhentos reais, dois reais e cinquenta centavos, um real e um centavo ou noventa e nove centavos.')
   assert.equal(spokenForms('R$ 1.000.000,00 e R$ 3.250,90.'), 'um milhão de reais e três mil duzentos e cinquenta reais e noventa centavos.')

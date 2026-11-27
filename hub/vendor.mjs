@@ -63,8 +63,9 @@ const inFlight = new Map()
 // The path of a verified vendored file, downloading it on first use (the hub streams it from
 // disk). Null for an unknown path.
 export async function vendorFile(path, { dir = join(stateDir(), 'vendor'), request = fetch } = {}) {
+  // Own entries only: "__proto__" or "constructor" from a URL are not files.
+  if (!Object.hasOwn(VENDOR, path)) return null
   const entry = VENDOR[path]
-  if (!entry) return null
   const file = join(dir, ...path.split('/'))
   const info = statOf(file)
   if (info) {

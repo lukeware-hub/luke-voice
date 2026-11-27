@@ -4,6 +4,7 @@
 // official release builds (Vulkan on Windows and Linux, Metal on macOS), pinned by sha256; the
 // models are in hub/models.mjs. No Python, no PyTorch.
 import { execFile, execFileSync, spawn as nodeSpawn } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { availableParallelism } from 'node:os'
@@ -181,20 +182,43 @@ const runFile = (file, args, { timeoutMs = 20_000 } = {}) =>
 const tarCommand = () => (process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar')
 
 // The llama.cpp build for this platform, downloaded, checked and unpacked once. Returns llama-server's path.
+// The hub and setup.mjs may unpack at the same time: each unpacks into a folder of its own and
+// moves it in whole, with its marker, so neither ever sees (or writes into) a half-unpacked build.
 export async function ensureBinaries({ dir = engineDir(), key = platformKey(), request, onProgress, run = runFile } = {}) {
   const entry = BINARIES[key]
   if (!entry) throw new Error(`No native engine for ${process.platform}-${process.arch}.`)
   const target = join(dir, LLAMA_BUILD)
   const exe = join(target, ...entry.exe.split('/'))
   const marker = join(target, '.unpacked')
-  if (existsSync(marker) && existsSync(exe)) return exe
+  const isUnpacked = () => existsSync(marker) && existsSync(exe)
+  if (isUnpacked()) return exe
   const archive = join(dir, 'downloads', entry.url.slice(entry.url.lastIndexOf('/') + 1))
   await ensureFile(entry, archive, { request, onProgress })
-  mkdirSync(target, { recursive: true })
-  const out = await run(tarCommand(), ['-xf', archive, '-C', target], { timeoutMs: 120_000 })
-  if (!out.ok || !existsSync(exe)) throw new Error(`Could not unpack the voice engine: ${out.stderr.trim() || 'llama-server is missing'}`)
-  writeFileSync(marker, LLAMA_BUILD)
-  return exe
+  if (isUnpacked()) return exe
+  const temp = join(dir, `${LLAMA_BUILD}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`)
+  try {
+    mkdirSync(temp, { recursive: true })
+    const out = await run(tarCommand(), ['-xf', archive, '-C', temp], { timeoutMs: 120_000 })
+    if (!out.ok || !existsSync(join(temp, ...entry.exe.split('/')))) throw new Error(`Could not unpack the voice engine: ${out.stderr.trim() || 'llama-server is missing'}`)
+    writeFileSync(join(temp, '.unpacked'), LLAMA_BUILD)
+    // Another process moved its build in meanwhile: use that one.
+    if (isUnpacked()) return exe
+    // A folder with no marker is an unpack an older version left half done: nothing runs from it.
+    if (existsSync(target)) rmSync(target, { recursive: true, force: true })
+    for (let attempt = 1; ; attempt++) {
+      try {
+        renameSync(temp, target)
+        return exe
+      } catch (error) {
+        if (isUnpacked()) return exe
+        // Windows: an antivirus still scanning the new files holds the folder for a moment.
+        if (attempt >= 5 || !['EPERM', 'EBUSY', 'EACCES'].includes(error.code)) throw error
+        await sleep(200 * attempt)
+      }
+    }
+  } finally {
+    rmSync(temp, { recursive: true, force: true })
+  }
 }
 
 export async function listDevices(exe, run = runFile) {
@@ -412,6 +436,9 @@ export function rotateLog(file, maxBytes = MAX_LOG_BYTES) {
 export function createEngine({ dir = engineDir(), models = modelsDir(), spawn = nodeSpawn, request = fetch, log = () => {}, command = null, readyTimeoutMs = 90_000, latePollMs = 2000, guard = null, maxLogBytes = MAX_LOG_BYTES } = {}) {
   const services = new Map() // name -> { port, child, isReady, restarts: number[], isStopping, hasExited, firstWait }
   let isStopped = false
+  // Bumped by every stop(): a start that began before it spawns nothing, even when a new start()
+  // has run since.
+  let stops = 0
   let guarded = guard
   // How the servers run, from the profile: { lean } puts the ears on the CPU. Kept for restarts.
   let runAs = { lean: false }
@@ -441,7 +468,11 @@ export function createEngine({ dir = engineDir(), models = modelsDir(), spawn = 
   async function startOne(name, exe) {
     const spec = SERVICES[name]
     const files = spec.models.map(path => join(models, ...path.split('/')))
+    const epoch = stops
     const port = await freePort()
+    // Stopped while the port was found (setup, hub exit): a server spawned now would be in no map,
+    // so nothing would ever stop it.
+    if (isStopped || epoch !== stops) return false
     const base = command ?? [exe]
     const args = [...base.slice(1), ...spec.args(files, runAs), '--host', '127.0.0.1', '--port', String(port)]
     mkdirSync(dir, { recursive: true })
@@ -569,6 +600,7 @@ export function createEngine({ dir = engineDir(), models = modelsDir(), spawn = 
     },
     stop() {
       isStopped = true
+      stops++
       for (const service of services.values()) {
         service.isStopping = true
         service.child.kill()

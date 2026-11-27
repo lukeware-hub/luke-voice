@@ -173,6 +173,27 @@ test('one run at a time: a held lock skips the run, a dead one is taken over', a
   memory.close()
 })
 
+test('a lock is never seen half-written: one still being written is held, not taken over as stale', () => {
+  const dir = fresh('ceci-graph-')
+  // A run between creating the lock and writing it (an older version wrote it in two steps).
+  writeFileSync(join(dir, 'run.lock'), '')
+  assert.equal(isLocked(dir), true)
+  assert.equal(takeLock(dir), false)
+  assert.equal(readFileSync(join(dir, 'run.lock'), 'utf8'), '', 'the live lock is left where it is')
+  // An unreadable lock long past its writing is stale and taken over.
+  assert.equal(takeLock(dir, { now: Date.now() + 10 * MIN }), true)
+  assert.equal(JSON.parse(readFileSync(join(dir, 'run.lock'), 'utf8')).pid, process.pid)
+  // The lock is linked in whole: no temporary file is left beside it.
+  assert.deepEqual(readdirSync(dir), ['run.lock'])
+})
+
+test('a lock taken over from a dead run holds against the next run', () => {
+  const dir = fresh('ceci-graph-')
+  writeFileSync(join(dir, 'run.lock'), JSON.stringify({ pid: 999_999_999, at: Date.now() }))
+  assert.equal(takeLock(dir), true)
+  assert.equal(takeLock(dir), false)
+})
+
 test('the Graphify command follows the CECI_GRAPH_* settings', () => {
   const dir = join('x', 'graph')
   const other = graphifyCommand(dir, { CECI_GRAPH_BACKEND: 'gemini', CECI_GRAPH_MODEL: 'gemini-flash' })
