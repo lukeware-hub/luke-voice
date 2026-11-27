@@ -10,8 +10,10 @@ import {
   createQuietMode,
   createSpeechFilter,
   createVoiceGate,
+  queueSpeech,
   quoteUntrusted,
   safeKind,
+  taskKey,
 } from './guard.js'
 
 test('a short "silenciar" asks for silence; a long sentence that mentions it does not', () => {
@@ -131,4 +133,21 @@ test('a long task\'s progress line is said each time it comes (it changes every 
   const speech = createSpeechFilter()
   assert.equal(speech.shouldSpeak('a', 'task_progress', 'Task: testes\nRunning for: 2min 00s'), true)
   assert.equal(speech.shouldSpeak('a', 'task_progress', 'Task: testes\nRunning for: 4min 00s'), true)
+})
+
+test('waiting news holds one progress line per task, and a result takes its progress lines out', () => {
+  const item = (kind, session, text, id = null) => ({ text: `${kind}: ${text}`, id, kind, session, task: taskKey(session, text) })
+  const pending = []
+  assert.equal(queueSpeech(pending, item('task_progress', 'a', 'Task: testes\nRunning for: 2min 00s')), true)
+  assert.equal(queueSpeech(pending, item('task_progress', 'b', 'Task: testes\nRunning for: 2min 00s')), true)
+  assert.equal(queueSpeech(pending, item('task_progress', 'a', 'Task: testes\nRunning for: 4min 00s')), true)
+  assert.deepEqual(pending.map(p => `${p.session} ${p.text}`), ['b task_progress: Task: testes\nRunning for: 2min 00s', 'a task_progress: Task: testes\nRunning for: 4min 00s'])
+  // The result of session a's task: its progress goes, session b's stays.
+  assert.equal(queueSpeech(pending, item('task_done', 'a', 'Task: testes\nResult: passaram', 'n1')), true)
+  assert.deepEqual(pending.map(p => `${p.session} ${p.kind}`), ['b task_progress', 'a task_done'])
+  // The same result again, with another id, is not queued a second time.
+  assert.equal(queueSpeech(pending, item('task_done', 'a', 'Task: testes\nResult: passaram', 'n2')), false)
+  assert.equal(pending.length, 2)
+  // Text with no task line has no key: nothing is replaced.
+  assert.equal(taskKey('a', 'Claude finished.'), null)
 })

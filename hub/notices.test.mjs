@@ -32,3 +32,22 @@ test('a result too old to be news is dropped instead of said', () => {
   now = 1200
   assert.deepEqual(notices.pending().map(n => n.text), ['new'])
 })
+
+test('a result sent again just after the window acked it is not told twice; later it is news again', () => {
+  let now = 0
+  const notices = createNotices({ clock: () => now, repeatMs: 1000 })
+  const first = notices.add('api', 'Task: testes\nResult: passaram')
+  assert.equal(notices.ack(first.id), true)
+  now = 500
+  const repeat = notices.add('api', 'Task: testes\nResult: passaram')
+  assert.equal(repeat.isHeard, true)
+  assert.equal(repeat.id, first.id)
+  assert.deepEqual(notices.pending(), [])
+  // Another session's same text is its own notice.
+  assert.equal(notices.add('web', 'Task: testes\nResult: passaram').isHeard, undefined)
+  // The same task run again, past the window, is a new notice to say.
+  now = 2000
+  const later = notices.add('api', 'Task: testes\nResult: passaram')
+  assert.equal(later.isHeard, undefined)
+  assert.notEqual(later.id, first.id)
+})

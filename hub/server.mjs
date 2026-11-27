@@ -712,7 +712,8 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       // Everything the sessions report is kept in Ceci's memory, marked as not the user's words.
       for (const event of events) remember({ kind: SESSION_KINDS[String(event.kind)] ?? 'session_info', text: String(event.full ?? event.text ?? '').slice(0, MEMORY_TEXT), session: session.name, untrusted: true })
       for (const event of events) {
-        const item = { kind: String(event.kind ?? 'info').slice(0, 20), text: String(event.text ?? '').slice(0, 2000) }
+        // As long as a task's result may be (2500 in hooks/register.tsx), so it is not cut again here.
+        const item = { kind: String(event.kind ?? 'info').slice(0, 20), text: String(event.text ?? '').slice(0, 2500) }
         session.activity.push(item)
         if (item.kind === 'attention') session.needsYou = true
         if (item.kind === 'done' || item.kind === 'prompt') session.needsYou = false
@@ -720,11 +721,17 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       session.activity.splice(0, Math.max(0, session.activity.length - MAX_ACTIVITY))
       if (typeof body.isBusy === 'boolean') session.isBusy = body.isBusy
       // A finished task is kept until a window hands it to the voice: it carries the notice's id.
-      const told = events.map(event => {
-        if (String(event.kind) !== 'task_done') return event
-        return { ...event, id: notices.add(session.name, String(event.text ?? '').slice(0, 2000)).id }
-      })
-      if (events.length) broadcast({ type: 'activity', session: session.name, events: told })
+      const told = events
+        .map(event => {
+          if (String(event.kind) !== 'task_done') return event
+          const notice = notices.add(session.name, String(event.text ?? '').slice(0, 2500))
+          // The same result the window handed to the voice a moment ago (the mod sent it again):
+          // not broadcast, so Ceci does not say it twice.
+          if (notice.isHeard) return null
+          return { ...event, id: notice.id }
+        })
+        .filter(Boolean)
+      if (told.length) broadcast({ type: 'activity', session: session.name, events: told })
       // No window to tell it: open one that starts the call, so Ceci says it without being asked.
       if (told.some(event => event.id) && canOpenWindow() && clock() - reopenedAt >= reopenMs) {
         reopenedAt = clock()
@@ -896,7 +903,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       const request = {
         kind: ['user', 'notice', 'tool_result'].includes(body.kind) ? body.kind : 'user',
         text: clip(body.text, 4000),
-        context: (Array.isArray(body.context) ? body.context : []).slice(-8).map(c => clip(c, 1500)),
+        context: (Array.isArray(body.context) ? body.context : []).slice(-8).map(c => clip(c, 2500)),
         turns: (Array.isArray(body.turns) ? body.turns : []).slice(-12).map(t => ({ role: t?.role === 'luke' ? 'luke' : 'user', text: clip(t?.text, 500) })),
         sessions: roster(),
         focused,

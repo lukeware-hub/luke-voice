@@ -287,6 +287,13 @@ async function reportProgress($: EngineInterface) {
   const now = await $.clock.now()
   for (const row of await read($, running)) {
     if (!tasks.has(row.key)) continue
+    // First seen already past two intervals: only after a reload of this module, which forgot when
+    // the last update went out (a fresh task gets its first at PROGRESS_MS). It waits a full
+    // interval instead of repeating, right away, the update the user may have just heard.
+    if (!progressAt.has(row.key) && now - row.startedAt >= 2 * PROGRESS_MS) {
+      progressAt.set(row.key, now)
+      continue
+    }
     const last = progressAt.get(row.key) ?? row.startedAt
     if (now - row.startedAt < PROGRESS_MS || now - last < PROGRESS_MS) continue
     progressAt.set(row.key, now)
@@ -1472,7 +1479,7 @@ export const register: Register = (on, options) => {
         taskEfforts.delete(e.agentId)
         void saveTasks($)
         const answer = e.answer || 'Done, with no answer.'
-        report($, { kind: 'task_done', ...withFull(`Task: ${task}\nResult: ${answer}`, 1500) })
+        report($, { kind: 'task_done', ...withFull(`Task: ${task}\nResult: ${answer}`, 2500) })
         await addLine($, { kind: 'result', text: answer })
       }
     }
