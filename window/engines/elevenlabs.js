@@ -51,10 +51,13 @@ export async function startSession({ hub, prepare = async () => {}, windowKey: _
   client.catch(() => {})
   const { token } = await hub('POST', '/token')
   const { Conversation } = await client
-  await prepare()
+  const ready = await prepare()
+  // The client asks for this device with an exact request, so an unplugged one would fail the call:
+  // prepare names the device that is really there ('' = the system default, which the client opens by itself).
+  const inputDeviceId = typeof ready?.inputDeviceId === 'string' ? ready.inputDeviceId || undefined : options.inputDeviceId
   // A different greeting each call (greetings.js); agent/agent.json allows this override.
   const overrides = { ...options.overrides, agent: { firstMessage: pickGreeting(), ...options.overrides?.agent } }
-  return Conversation.startSession({ conversationToken: token, connectionType: 'webrtc', ...options, overrides })
+  return Conversation.startSession({ conversationToken: token, connectionType: 'webrtc', ...options, inputDeviceId, overrides })
 }
 
 // What to say when the call drops in its first seconds.

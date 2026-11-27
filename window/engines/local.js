@@ -276,8 +276,11 @@ export async function startSession({
   // The natural voice was expected (this machine has the gpu profile, or the hub was starting it)
   // but failed or did not come up in time: the user is told, never left guessing why she sounds different.
   else if (!isNative && forceNative !== '0' && (config.profile === 'gpu' || ['starting', 'failed'].includes(config.engine))) onStatus(NATIVE_DOWN, { isWarning: true })
+  // prepare may name the device to open (the saved one, or '' when it is unplugged and the default stands in).
+  let deviceId = inputDeviceId
   try {
-    await prepare()
+    const ready = await prepare()
+    if (typeof ready?.inputDeviceId === 'string') deviceId = ready.inputDeviceId
     await loadVoice(isNative ? 'native' : 'browser')
   } finally {
     listeners.delete(showProgress)
@@ -290,7 +293,7 @@ export async function startSession({
   const stream = await navigator.mediaDevices.getUserMedia({
     // No automatic gain: it raised whatever was left of Ceci's echo after the echo canceller,
     // and the raised echo interrupted her.
-    audio: micConstraints(inputDeviceId, { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: false }),
+    audio: micConstraints(deviceId, { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: false }),
   })
   let micContext = null
   let outContext = null
