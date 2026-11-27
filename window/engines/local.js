@@ -325,7 +325,7 @@ export async function startSession({
   }
   // Chrome may start an audio context suspended (no click on the page yet): the next click resumes it.
   const resumeAudio = () => {
-    for (const audio of [micContext, outContext]) if (audio.state === 'suspended') audio.resume().catch(() => {})
+    for (const audio of [micContext, outContext]) if (audio.state === 'suspended' && !(isPaused && audio === outContext)) audio.resume().catch(() => {})
   }
   document.addEventListener('click', resumeAudio)
 
@@ -333,6 +333,8 @@ export async function startSession({
   const context = []
   const turns = createTurnLog()
   let isMuted = false
+  // Silenciar is on: she neither speaks nor hears until it is turned off.
+  let isPaused = false
   let isEnded = false
   let mode = 'listening'
   let speech = 0 // bumped to cancel what is being said
@@ -935,7 +937,7 @@ export async function startSession({
   let frameCount = 0
   let isAskingTurn = false
   frames.port.onmessage = ({ data: frame }) => {
-    if (isEnded || isMuted || frame.length !== FRAME) return
+    if (isEnded || isMuted || isPaused || frame.length !== FRAME) return
     // Her audio is playing now. Not `mode`: that stays 'speaking' while a reply is still being made
     // (held for its comma pauses) or after an acknowledgement, with nothing coming out of the
     // speakers, and the detector's higher bar for her voice then kept a normal voice from being heard.
@@ -1026,6 +1028,21 @@ export async function startSession({
         cutReply.clear()
         isBargeTurn = false
         unduck()
+      }
+    },
+    // Silenciar: Ceci stops saying and hearing. Her audio is frozen where it is (the output clock
+    // stops, so what is queued plays on from the same point) and nothing the mic picks up is taken
+    // in. News and replies still in the queue wait: they are said after the pause ends.
+    setPaused: next => {
+      isPaused = Boolean(next)
+      if (isPaused) {
+        vad.reset()
+        cutReply.clear()
+        isBargeTurn = false
+        unduck()
+        outContext.suspend().catch(() => {})
+      } else {
+        outContext.resume().catch(() => {})
       }
     },
     // The user is mid-utterance, or what they said is still being written down or answered: the

@@ -492,7 +492,7 @@ function setOrb(next) {
 
 function setMuted(next) {
   isMuted = next
-  conversation?.setMicMuted(isMuted)
+  conversation?.setMicMuted(isMuted || (quiet.manual && !conversation.setPaused))
   // Mutar: only the speaker's microphone. Ceci's silent mode (Silenciar) is separate.
   ui.mic.setAttribute('aria-pressed', String(isMuted))
   ui.micLabel.textContent = isMuted ? 'Desmutar' : 'Mutar'
@@ -923,6 +923,8 @@ function speakWhenQuiet() {
   // Muted, the mic hears nothing, so the user always looks quiet: a notice spoken now would hold
   // the turn queue (a brain call and its speech) and the user's first words after unmuting wait.
   if (isMuted) return
+  // Silenciar paused her: not even "Recebi uma notificação". The news waits for Reativar.
+  if (quiet.manual) return
   if (mode === 'speaking' || Date.now() - silentSince < SPEAK_AFTER_SILENCE_MS) return
   // The user is mid-sentence: the news waits until they have been quiet for a moment too.
   if (conversation.isUserSpeaking?.()) {
@@ -1191,7 +1193,7 @@ async function startCall() {
         mode = next
         if (callState === 'live') {
           setOrb(isMuted ? 'muted' : next === 'speaking' ? 'speaking' : 'listening')
-          ui.headline.textContent = next === 'speaking' ? 'Falando…' : quiet.on ? 'Modo silêncio' : STATES.live.headline
+          ui.headline.textContent = quiet.manual ? 'Modo silêncio' : next === 'speaking' ? 'Falando…' : quiet.on ? 'Modo silêncio' : STATES.live.headline
         }
         if (next !== 'speaking') silentSince = Date.now()
       },
@@ -1230,9 +1232,25 @@ function setSilent(next) {
   ui.mute.setAttribute('aria-pressed', String(quiet.on))
   ui.muteLabel.textContent = quiet.on ? 'Reativar' : 'Silenciar'
   swapIcon(ui.muteIcon, quiet.on ? 'i-play-fill' : 'i-waveform')
+  applyPause()
   if (!change) return
   conversation?.sendContextualUpdate(change === 'on' ? QUIET_ON : QUIET_OFF)
-  if (callState === 'live' && mode !== 'speaking') ui.headline.textContent = quiet.on ? 'Modo silêncio' : STATES.live.headline
+  if (callState === 'live') ui.headline.textContent = quiet.on ? 'Modo silêncio' : mode === 'speaking' ? 'Falando…' : STATES.live.headline
+  // Back from silence the news held meanwhile waits for a quiet moment again.
+  if (!quiet.manual) {
+    silentSince = Date.now()
+    speakWhenQuiet()
+  }
+}
+
+// The Silenciar button pauses Ceci for real: she stops speaking (resuming where she stopped) and
+// hearing. The voice engine that cannot freeze its audio gets the closest thing: volume and mic off.
+function applyPause() {
+  if (!conversation) return
+  const paused = quiet.manual
+  if (conversation.setPaused) return conversation.setPaused(paused)
+  conversation.setVolume?.({ volume: paused ? 0 : 1 })
+  conversation.setMicMuted(isMuted || paused)
 }
 
 // What a call leaves behind when it ends, by the user or dropped by the voice.
