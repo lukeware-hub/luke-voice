@@ -269,11 +269,6 @@ const tasks = new Map<string, string>()
 // Spawned tasks whose agent id is not known yet, by the prompt their subagent starts with: a queue,
 // so the same task asked twice is tracked (and reported) twice.
 const pendingTasks = new Map<string, string[]>()
-// Orders from the call waiting to be refined: by agent id once the refine subagent is known, and by
-// the subagent's prompt until then (a queue, so the same order said twice is refined twice).
-type Send = Extract<Command, { type: 'send' }>
-const refines = new Map<string, { command: Send; startedAt: number }>()
-const pendingRefines = new Map<string, Send[]>()
 // The effort each voice-task subagent runs at, by agent id, or by its prompt until the id is known.
 const taskEfforts = new Map<string, Effort>()
 // Finished work reported while the link to the hub was down (a hub restart, a reconnect): sent
@@ -391,6 +386,8 @@ export function classifyTask(task: string): Complexity {
   return 'simple'
 }
 
+type Send = Extract<Command, { type: 'send' }>
+
 const short = (text: string, max = 300) => (text.length > max ? `${text.slice(0, max - 1)}…` : text)
 
 // Every order luke-voice sends to Claude, with no exception, comes with plan mode on: Claude writes the
@@ -413,14 +410,16 @@ function frameTask(task: string) {
   ].join('\n')
 }
 
-// Every order from the call is refined by a subagent first, then sent to the main chat. The refine
+// Every order from the call is refined first (one model call), then sent to the main chat. The refine
 // subagent has no Prompt Master tool to call (Prompt Master only rewrites what the user types), so the
 // prompt gives it Prompt Master's own template. The speech is NOT between the speech marks here, and
 // neither is the refined prompt later: Prompt Master's hook would rewrite them a second time.
 export const REFINED_OPEN = '<refined-prompt>'
 export const REFINED_CLOSE = '</refined-prompt>'
-// How long a refinement may take before the order is given up (and the user told).
-export const REFINE_TIMEOUT_MS = 2 * 60_000
+// A refinement is one direct model call (no subagent: starting an agent loop took many seconds), on
+// Haiku at low effort. The target is 2 s; past this the order is given up and the user told.
+export const REFINE_TIMEOUT_MS = 15_000
+export const REFINE_MAX_TOKENS = 700
 
 export function refinePrompt(speech: string) {
   const words = speech.split(REFINED_OPEN).join('').split(REFINED_CLOSE).join('')
@@ -835,43 +834,37 @@ async function onCommand($: EngineInterface, command: Command) {
     }
   }
 
-  return startRefine($, command)
+  return void refineAndSend($, command)
 }
 
-function takeRefine(prompt: string) {
-  const list = pendingRefines.get(prompt)
-  const command = list?.shift()
-  if (!list?.length) pendingRefines.delete(prompt)
-  return command
-}
-
-// An order from the call is not sent as it was heard: a subagent refines it first (refinePrompt), and
-// the refined prompt goes to the main chat when it answers (deliver). The ack comes now, since a
-// refinement takes longer than the call's tool waits.
-async function startRefine($: EngineInterface, command: Send) {
-  const prompt = refinePrompt(command.prompt)
+// An order from the call is not sent as it was heard: one direct model call refines it first
+// (refinePrompt), and only the refined prompt goes to the main chat (deliver). Each step is timed, so a
+// slow refinement shows where the time went.
+async function refineAndSend($: EngineInterface, command: Send) {
+  const t0 = await $.clock.now()
   try {
-    pendingRefines.set(prompt, [...(pendingRefines.get(prompt) ?? []), command])
-    const spawned = await $.agent.spawn({ prompt, description: 'luke-voice refine', model: TIERS.medium.model })
-    if (spawned.deny) {
-      takeRefine(prompt)
-      return ack($, command.id, false, `Could not refine the order, so nothing was sent: ${spawned.deny}`)
+    const prompt = refinePrompt(command.prompt)
+    const t1 = await $.clock.now()
+    const reply = await $.model.complete({ model: SUMMARY_MODEL, prompt, effort: 'low', maxTokens: REFINE_MAX_TOKENS, timeoutMs: REFINE_TIMEOUT_MS })
+    const t2 = await $.clock.now()
+    const refined = reply.isAnswered ? parseRefined(reply.text) : null
+    if (!refined) {
+      await failRefine($, command, reply.isAnswered ? 'a resposta veio sem o prompt refinado' : `o modelo não respondeu (${reply.reason})`)
+      return ack($, command.id, false, 'The refinement failed, so nothing was sent to Claude.')
     }
-    // The id comes with the spawn, or with the subagent's turn.start (matched by its prompt).
-    if (spawned.agentId && !refines.has(spawned.agentId)) {
-      const waiting = takeRefine(prompt) ?? command
-      refines.set(spawned.agentId, { command: waiting, startedAt: await $.clock.now() })
-      taskEfforts.set(spawned.agentId, TIERS.medium.effort)
-    }
-    await addLine($, { kind: 'info', text: 'Refinando a ordem com o Prompt Master…' })
-    return ack($, command.id, true, "Started refining the order with Prompt Master; it goes to Claude's chat once refined.")
+    await deliver($, command, refined)
+    const t3 = await $.clock.now()
+    const seconds = (ms: number) => (ms / 1000).toFixed(1)
+    await addLine($, { kind: 'info', text: `Ordem refinada em ${seconds(t2 - t0)} s (prompt ${seconds(t1 - t0)} s, modelo ${seconds(t2 - t1)} s, entrega ${seconds(t3 - t2)} s).` })
+    return ack($, command.id, true, `Refined with Prompt Master in ${seconds(t2 - t0)} s and sent to Claude's chat.`)
   } catch (error) {
-    takeRefine(prompt)
-    return ack($, command.id, false, `Could not refine the order, so nothing was sent: ${error instanceof Error ? error.message : error}`)
+    const why = error instanceof Error ? error.message : String(error)
+    await failRefine($, command, why)
+    return ack($, command.id, false, `Could not refine the order, so nothing was sent: ${why}`)
   }
 }
 
-// The refinement failed, was stopped or took too long: nothing is sent, and the user hears it, through
+// The refinement failed or took too long: nothing is sent, and the user hears it, through
 // the same spoken result a finished task has.
 async function failRefine($: EngineInterface, command: Send, why: string) {
   report($, { kind: 'task_done', ...withFull(`Task: ${short(command.prompt, 300)}\nResult: O refinamento da ordem falhou (${why}). NÃO enviei nada ao Claude; o texto cru não foi mandado. Peça de novo se quiser.`, 2500) })
@@ -896,19 +889,6 @@ async function deliver($: EngineInterface, command: Send, refined: string) {
   }
   queued.push(text)
   return addLine($, { kind: 'queued', text: refined })
-}
-
-// A refinement that never answers is given up after REFINE_TIMEOUT_MS, and its subagent stopped.
-async function expireRefines($: EngineInterface) {
-  if (refines.size === 0) return
-  const now = await $.clock.now()
-  for (const [agentId, { command, startedAt }] of [...refines]) {
-    if (now - startedAt < REFINE_TIMEOUT_MS) continue
-    refines.delete(agentId)
-    taskEfforts.delete(agentId)
-    await $.agent.call({ tool: 'TaskStop', input: { task_id: agentId } }).catch(() => undefined)
-    await failRefine($, command, 'demorou demais')
-  }
 }
 
 // Sends an event, or with none only the session's state. The session is busy while Claude's own
@@ -1444,7 +1424,6 @@ export const register: Register = (on, options) => {
     await $.command.register({ name: NAME, description: 'Ceci, voice assistant: on/off, call, end, window, voz, memoria, setup, status, help, update, uninstall' })
     // Redraw the pane while a task runs, so its elapsed time moves; a long one gets a spoken update.
     $.clock.every(15_000, () => {
-      void expireRefines($).catch(() => undefined)
       void read($, running)
         .then(list => (list.length > 0 ? update($, running, l => [...l]).then(() => reportProgress($)) : undefined))
         .catch(() => undefined)
@@ -1521,13 +1500,6 @@ export const register: Register = (on, options) => {
       const resumed = tasks.get(e.agentId) ?? ''
       if (!(await read($, running)).some(r => r.key === e.agentId)) await startRunning($, e.agentId, resumed)
     }
-    if (e.agentId !== undefined && !refines.has(e.agentId) && pendingRefines.has(e.text)) {
-      const command = takeRefine(e.text)
-      if (command) {
-        refines.set(e.agentId, { command, startedAt: await $.clock.now() })
-        taskEfforts.set(e.agentId, TIERS.medium.effort)
-      }
-    }
     if (e.agentId === undefined) {
       isBusy = true
       turnId = e.turnId
@@ -1570,14 +1542,6 @@ export const register: Register = (on, options) => {
 
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
-    const refining = e.agentId !== undefined ? refines.get(e.agentId) : undefined
-    if (e.agentId !== undefined && refining) {
-      refines.delete(e.agentId)
-      taskEfforts.delete(e.agentId)
-      const refined = e.isAborted ? null : parseRefined(e.answer ?? '')
-      if (refined) await deliver($, refining.command, refined)
-      else await failRefine($, refining.command, e.isAborted ? 'foi interrompido' : 'a resposta veio sem o prompt refinado')
-    }
     const task = e.agentId !== undefined ? tasks.get(e.agentId) : undefined
     if (e.agentId !== undefined && task !== undefined) {
       await stopRunning($, e.agentId)

@@ -9,7 +9,7 @@
     {
       "type": "client",
       "name": "luke_send_to_claude",
-      "description": "Sends an order to the main Claude Code chat of the focused session. It is the only way to act on the user's computer (read code, search a repository, run a command, change files): never a subagent. Call it only after you said the order back in one sentence and the user clearly said yes. Before it reaches the chat, luke-voice refines the order with Prompt Master in a subagent and sends only the refined prompt; if the refinement fails nothing is sent and a [news] update says so. The result arrives later in a [news] update.",
+      "description": "Sends an order to the main Claude Code chat of the focused session. It is the only way to act on the user's computer (read code, search a repository, run a command, change files): never a subagent. Call it only after you said the order back in one sentence and the user clearly said yes. Before it reaches the chat, luke-voice refines the order with Prompt Master in one quick model call and sends only the refined prompt; if the refinement fails nothing is sent and a [news] update says so. The result arrives later in a [news] update.",
       "expects_response": true,
       "response_timeout_secs": 20,
       "parameters": {
