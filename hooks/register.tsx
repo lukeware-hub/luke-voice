@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { LastTool, Line, Link, Running } from '../types'
+import { findPromptMaster, parseListing, PLUGIN_LISTINGS, PROMPT_MASTER_REPO } from './prompt-master'
 
 const NAME = 'luke-voice'
 // The hub's address. LUKE_VOICE_PORT moves it, as it moves the hub itself (hub/paths.mjs).
@@ -380,18 +381,26 @@ export function classifyTask(task: string): Complexity {
 
 const short = (text: string, max = 300) => (text.length > max ? `${text.slice(0, max - 1)}…` : text)
 
+// Every order luke-voice sends to Claude, with no exception, comes with plan mode on: Claude writes the
+// plan first and only then does the work. The engine has no call to switch a session or subagent into
+// plan mode, so the order carries the rule itself.
+export const PLAN_FIRST =
+  'Plan mode is on for this order: first write a short plan (the steps, the files you will touch, the risks), then carry out that plan. Never start the work before the plan is written.'
+
 function frameTask(task: string) {
   return [
     'The user asked for this out loud, through luke-voice, their voice assistant, and confirmed it:',
     '',
     task,
     '',
+    PLAN_FIRST,
+    '',
     'Do it on this machine. End with a short answer in Brazilian Portuguese, two or three sentences that are easy to say out loud: what you found or changed, and anything that failed. No code blocks or long paths in that answer.',
   ].join('\n')
 }
 
 function frame(prompt: string) {
-  return `The user asked luke-voice, their voice assistant, to pass this on:\n\n${prompt}`
+  return `The user asked luke-voice, their voice assistant, to pass this on:\n\n${prompt}\n\n${PLAN_FIRST}`
 }
 
 // The link's reason when the ElevenLabs voice has no key; the pane shows it as it is.
@@ -867,6 +876,50 @@ async function turnOn($: EngineInterface, options: Record<string, unknown>) {
   const gen = ++generation
   await setLink($, { state: 'connecting', reason: null })
   void pollLoop($, options, gen).catch(() => undefined)
+  void requirePromptMaster($).catch(() => undefined)
+}
+
+// Prompt Master (hooks/prompt-master.ts): its own on/off, which only Prompt Master writes.
+const promptMasterOn = { plugin: 'prompt-master', key: 'isOn' } as const
+// The Lukeware Hub Prompt Master's id (`prompt-master@<marketplace>`) the listings found, or null.
+// Looked up once each time luke-voice turns on (its generation), so one installed meanwhile counts
+// from the next turning on: the listings run `claude` twice, about a second each.
+let promptMaster: { gen: number; id: Promise<string | null> } | null = null
+
+async function listing($: EngineInterface, args: readonly string[]) {
+  const out = await $.process.run(['claude', ...args], { timeoutMs: 30_000 })
+  return out.exitCode === 0 ? parseListing(out.stdout) : null
+}
+
+// Asks Claude Code which plugins are installed and where their marketplaces come from. Any failure
+// (no `claude` on the PATH, an old one without --json, a timeout) means none: luke-voice goes on.
+function findInstalledPromptMaster($: EngineInterface): Promise<string | null> {
+  if (promptMaster?.gen !== generation) {
+    const id = (async () => {
+      try {
+        const [plugins, marketplaces] = await Promise.all(PLUGIN_LISTINGS.map(args => listing($, args)))
+        return findPromptMaster(plugins, marketplaces, await $.session.cwd())
+      } catch {
+        return null
+      }
+    })()
+    promptMaster = { gen: generation, id }
+  }
+  return promptMaster.id
+}
+
+// Whether Prompt Master is required now: luke-voice is on and the Lukeware Hub one is installed.
+async function isPromptMasterRequired($: EngineInterface) {
+  return (await read($, isOn)) && (await findInstalledPromptMaster($)) !== null
+}
+
+// With luke-voice on, an installed Prompt Master is required: one left off is turned on by its own
+// command, which saves the choice as Prompt Master does. Nothing happens when it is not installed,
+// or not loaded in this session (its value is unset then).
+async function requirePromptMaster($: EngineInterface) {
+  if (!(await isPromptMasterRequired($))) return
+  if ((await $.state.get(promptMasterOn)).value !== false) return
+  await $.command.run({ command: 'prompt-master' })
 }
 
 // Off: leave the hub, stop polling, drop the queue and close the pane. The hub ends the call
@@ -958,6 +1011,7 @@ async function statusText($: EngineInterface) {
   const l = await read($, link)
   const health = await hubFetch($, 'GET', '/health', undefined, null).catch(() => null)
   const h = health?.json ?? {}
+  const promptMasterId = await findInstalledPromptMaster($)
   return [
     `luke-voice: on (${l.state}${l.name ? `, session "${l.name}"` : ''})`,
     health?.ok ? `hub: up, version ${h.version}, ${h.sessions} session(s), call ${h.call}, window ${h.isWindowOpen ? 'open' : 'closed'}` : 'hub: down',
@@ -965,6 +1019,7 @@ async function statusText($: EngineInterface) {
     health?.ok && h.provider === 'local' ? `perfil: ${profileText(h)}` : null,
     health?.ok && (h.provider ?? 'elevenlabs') === 'elevenlabs' && !h.hasKey ? 'missing: ElevenLabs API key' : null,
     queued.length ? `queued prompts: ${queued.length}` : null,
+    promptMasterId ? `prompt master: required (${promptMasterId}, ${PROMPT_MASTER_REPO})` : 'prompt master: not installed',
   ]
     .filter(Boolean)
     .join('\n')
@@ -1334,6 +1389,13 @@ export const register: Register = (on, options) => {
         return { text: `Não conheço "${short(arg, 40)}". Use /luke-voice help para ver tudo que dá para fazer.` }
     }
   }).catch((_$, error) => ({ text: `luke-voice: ${error instanceof Error ? error.message : String(error)}` }))
+
+  // While Prompt Master is required, turning it off (its button or /prompt-master) keeps it on.
+  on('state.set', { plugin: 'prompt-master', key: 'isOn' }, async ($, e, next) => {
+    if (e.value !== false || !(await isPromptMasterRequired($))) return next(e)
+    $.ui.toast('Prompt Master fica ligado enquanto o luke-voice está ligado.')
+    return next({ ...e, value: true })
+  }).catch(($, e, next) => next(e))
 
   on('prompt.submit', async ($, e, next) => {
     if (e.origin.kind === 'composer' && !e.isMeta && e.text.trim()) report($, { kind: 'prompt', ...withFull(e.text, 600) })

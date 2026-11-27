@@ -30,5 +30,7 @@ declare module 'claude-code' {
       /** The pane rows opened to their full text, by row id. */
       expanded: Shaped<string[]>
     }
+    /** Prompt Master's on/off (lukeware-hub/prompt-master), which Prompt Master alone writes. */
+    'prompt-master': { isOn: boolean }
   }
 }
