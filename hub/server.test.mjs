@@ -970,13 +970,13 @@ test('with a Mac Premium voice and no natural voice, /tts speaks with say and /c
     assert.deepEqual(said, [['Luciana (Premium)', 'Oi, eu sou a Ceci.']])
     assert.equal(JSON.parse((await call('GET', '/config')).body).macVoice, 'Luciana (Premium)')
     // A female Mac voice is Ceci; a male one is Luke, from the next call.
-    assert.deepEqual(JSON.parse((await call('GET', '/config')).body).persona, { key: 'ceci', name: 'Ceci', gender: 'female' })
+    assert.deepEqual(JSON.parse((await call('GET', '/config')).body).persona, { key: 'ceci', name: 'Ceci', gender: 'female', light: 'pf_dora' })
     genderNow = 'male'
-    assert.deepEqual(JSON.parse((await call('GET', '/config')).body).persona, { key: 'luke', name: 'Luke', gender: 'male' })
+    assert.deepEqual(JSON.parse((await call('GET', '/config')).body).persona, { key: 'luke', name: 'Luke', gender: 'male', light: 'pm_alex' })
     // Siri Voz 2 (sandra) is Nara.
     siriNow = 'sandra'
     genderNow = 'female'
-    assert.deepEqual(JSON.parse((await call('GET', '/config')).body).persona, { key: 'nara', name: 'Nara', gender: 'female' })
+    assert.deepEqual(JSON.parse((await call('GET', '/config')).body).persona, { key: 'nara', name: 'Nara', gender: 'female', light: 'pf_dora' })
     // The natural voice runs here: the Mac voice stays out of it.
     profileNow = { profile: 'gpu' }
     assert.equal(JSON.parse((await call('GET', '/config')).body).macVoice, null)
@@ -1003,7 +1003,7 @@ test('off the Mac, the persona is always Ceci, even with a male voice reported',
       req.on('error', reject)
       req.end()
     })
-    assert.deepEqual(body.persona, { key: 'ceci', name: 'Ceci', gender: 'female' })
+    assert.deepEqual(body.persona, { key: 'ceci', name: 'Ceci', gender: 'female', light: 'pf_dora' })
   } finally {
     hub5.closeAllConnections()
     hub5.close()
@@ -1632,8 +1632,8 @@ test('the window picks who answers on the free voice: /assistant sets the person
     assert.equal((await call('POST', '/assistant', '{"assistant":"joao"}', {})).status, 401)
     assert.equal((await call('POST', '/assistant', '{"assistant":"outra"}')).status, 400)
     const chosen = await call('POST', '/assistant', '{"assistant":"joao"}')
-    assert.deepEqual(chosen.body.persona, { key: 'joao', name: 'João', gender: 'male' })
-    assert.deepEqual((await call('GET', '/config')).body.persona, { key: 'joao', name: 'João', gender: 'male' })
+    assert.deepEqual(chosen.body.persona, { key: 'joao', name: 'João', gender: 'male', light: 'pm_santa' })
+    assert.deepEqual((await call('GET', '/config')).body.persona, { key: 'joao', name: 'João', gender: 'male', light: 'pm_santa' })
     // Kept across a restart of the hub.
     const hub6 = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {}, profile: () => ({ profile: 'gpu' }), platform: 'win32' })
     await new Promise(resolve => hub6.listen(0, '127.0.0.1', resolve))
@@ -1655,5 +1655,41 @@ test('the window picks who answers on the free voice: /assistant sets the person
     await call('POST', '/assistant', '{"assistant":"ceci"}')
     hub5.closeAllConnections()
     await new Promise(resolve => hub5.close(resolve))
+  }
+})
+
+test('a voice from the studio appears in /voices and can be chosen; once its folder is gone, Ceci answers', async () => {
+  const { mkdirSync, rmSync } = await import('node:fs')
+  const dir = join(process.env.LUKE_VOICE_HOME, 'voices', 'rafa')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'voice.wav'), 'RIFF')
+  writeFileSync(join(dir, 'voice.txt'), 'Oi.')
+  writeFileSync(join(dir, 'voice.json'), JSON.stringify({ name: 'Rafa', gender: 'male', age: 41 }))
+  const hub7 = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {}, profile: () => ({ profile: 'gpu' }), platform: 'win32' })
+  await new Promise(resolve => hub7.listen(0, '127.0.0.1', resolve))
+  const p = hub7.address().port
+  const call = (method, path, body) =>
+    new Promise((resolve, reject) => {
+      const req = request({ host: '127.0.0.1', port: p, method, path, headers: { host: `127.0.0.1:${p}`, 'x-luke-key': WINDOW, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' } }, res => {
+        const chunks = []
+        res.on('data', chunk => chunks.push(chunk))
+        res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(Buffer.concat(chunks).toString() || '{}') }))
+      })
+      req.on('error', reject)
+      req.end(body)
+    })
+  try {
+    const listed = await call('GET', '/voices')
+    assert.deepEqual(listed.body.voices.map(v => v.key), ['ceci', 'luke', 'joao', 'rafa'])
+    assert.equal(listed.body.voices.at(-1).name, 'Rafa')
+    assert.equal((await call('POST', '/assistant', '{"assistant":"rafa"}')).body.persona.name, 'Rafa')
+    assert.equal((await call('GET', '/voices')).body.chosen, 'rafa')
+    rmSync(dir, { recursive: true, force: true })
+    assert.equal((await call('GET', '/config')).body.persona.key, 'ceci')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+    await call('POST', '/assistant', '{"assistant":"ceci"}')
+    hub7.closeAllConnections()
+    await new Promise(resolve => hub7.close(resolve))
   }
 })

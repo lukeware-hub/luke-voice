@@ -157,6 +157,7 @@ The voice was chosen by the owner, listening:
 - An earlier voice, designed with Qwen3-TTS VoiceDesign, scored well with automatic judges, but the owner heard a European Portuguese accent in it. The accent classifier used then also called some real Brazilian recordings European, so it was dropped as a judge.
 - Ceci now clones a real Brazilian speaker: a clip from the CML-TTS Portuguese dataset (see Credits).
 - Pick who answers in the call window's **Configurações**: Ceci, Luke or João. Luke and João are male voices, and the assistant's name, words and greetings change with them. The choice is kept and counts from the next call, on the natural and the light voice (ElevenLabs stays Ceci).
+- Make your own voices with the [luke-voice-studio](https://github.com/lukeware-hub/luke-voice-studio) skill: from a `.wav` file it makes a voice with a name, age and personality, kept in `~/.luke-voice/voices/<id>/` (an update never removes it) and listed in **Configurações** next to Ceci, Luke and João. A folder named `ceci`, `luke` or `joao` replaces that voice's clip on this computer only.
 - The clip was made brighter (a little higher, more pitch movement, 8% faster), because the plain reading sounded sleepy.
 - The owner compared candidates by ear and picked this one.
 

@@ -48,27 +48,55 @@ for (const option of document.querySelectorAll('[data-theme-option]')) {
   })
 }
 
-// Voz do assistente: Ceci, Luke or João. The hub keeps the choice; it counts from the next call.
-const ASSISTANT_NAMES = { ceci: 'Ceci', luke: 'Luke', joao: 'João' }
+// Voz do assistente: Ceci, Luke, João and the user's own voices (the hub's GET /voices, made with the
+// luke-voice-studio skill). The hub keeps the choice; it counts from the next call.
+const ASSISTANT_HINT = 'Vale na próxima chamada e fica salvo. Ao escolher, o nome do assistente muda. Para criar vozes novas, use a skill luke-voice-studio.'
+let assistantChosen = 'ceci'
 function showAssistantChoice(key) {
-  const value = ASSISTANT_NAMES[key] ? key : 'ceci'
+  if (typeof key === 'string' && key) assistantChosen = key
   const group = document.getElementById('assistantGroup')
-  if (group) group.dataset.value = value
-  for (const option of document.querySelectorAll('[data-assistant-option]')) {
-    option.setAttribute('aria-checked', String(option.dataset.assistantOption === value))
+  if (!group) return
+  const options = [...group.querySelectorAll('[data-assistant-option]')]
+  const at = Math.max(0, options.findIndex(option => option.dataset.assistantOption === assistantChosen))
+  group.style.setProperty('--i', String(at))
+  for (const option of options) option.setAttribute('aria-checked', String(option.dataset.assistantOption === assistantChosen))
+}
+async function chooseAssistant(key) {
+  const out = await hub('POST', '/assistant', { assistant: key }).catch(error => ({ ok: false, message: error.message }))
+  const hint = document.getElementById('assistantHint')
+  if (out.ok) {
+    applyPersona(out.persona)
+    void renderFacts()
   }
+  if (hint) hint.textContent = out.ok ? ASSISTANT_HINT : `Não consegui trocar a voz: ${out.message ?? 'tente de novo'}.`
 }
-for (const option of document.querySelectorAll('[data-assistant-option]')) {
-  option.addEventListener('click', async () => {
-    const out = await hub('POST', '/assistant', { assistant: option.dataset.assistantOption }).catch(error => ({ ok: false, message: error.message }))
-    const hint = document.getElementById('assistantHint')
-    if (out.ok) {
-      applyPersona(out.persona)
-      void renderFacts()
-    }
-    if (hint) hint.textContent = out.ok ? 'Vale na próxima chamada e fica salvo. Luke e João são vozes masculinas; ao escolher, o nome do assistente muda.' : `Não consegui trocar a voz: ${out.message ?? 'tente de novo'}.`
-  })
+// One button per voice, in the hub's order. The page's own buttons (Ceci, Luke, João) stand in until
+// the list arrives.
+function renderAssistantOptions(voices) {
+  const group = document.getElementById('assistantGroup')
+  if (!group || !Array.isArray(voices) || voices.length === 0) return
+  for (const old of group.querySelectorAll('[data-assistant-option]')) old.remove()
+  for (const voice of voices) {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.setAttribute('role', 'radio')
+    button.dataset.assistantOption = voice.key
+    button.textContent = voice.name
+    group.append(button)
+  }
+  group.style.setProperty('--n', String(voices.length))
+  showAssistantChoice(assistantChosen)
 }
+async function loadAssistants() {
+  const out = await hub('GET', '/voices').catch(() => null)
+  if (!out?.voices) return
+  renderAssistantOptions(out.voices)
+  showAssistantChoice(out.chosen)
+}
+document.getElementById('assistantGroup')?.addEventListener('click', event => {
+  const option = event.target instanceof Element ? event.target.closest('[data-assistant-option]') : null
+  if (option) void chooseAssistant(option.dataset.assistantOption)
+})
 
 // Microphone: lists the system's audio inputs and keeps the chosen one for every call.
 const micSelect = document.getElementById('micSelect')
@@ -481,7 +509,10 @@ function showView(name) {
       entries = 0
       ui.historyCount.hidden = true
     }
-    if (name === 'settings') void renderFacts()
+    if (name === 'settings') {
+      void renderFacts()
+      void loadAssistants()
+    }
     if (name === 'memory') void loadMemory()
   }
   // The selection pill glides to the new item (a view transition); without one, it just moves.
@@ -901,7 +932,7 @@ function voiceFacts(health) {
         : `processador (${info.threads} threads)`
       : 'carrega na primeira chamada'
   return [
-    ['Voz', `${['Luke', 'João', 'Nara'].includes(health.persona?.name) ? health.persona.name : 'Ceci'}, gratuita, no seu computador`, 'ok'],
+    ['Voz', `${health.persona?.name || 'Ceci'}, gratuita, no seu computador`, 'ok'],
     ['Perfil', ...profile],
     ...(model ? [['Modelos', model, '']] : []),
     ['Roda em', runsOn, ''],
@@ -1126,8 +1157,8 @@ async function microphone() {
 
 // Who answers: Ceci, Luke or João (the user's choice in Configurações), or Nara on a Mac's own voice (the hub's persona).
 function applyPersona(who) {
-  const name = ['Luke', 'João', 'Nara'].includes(who?.name) ? who.name : 'Ceci'
-  const isMale = name === 'Luke' || name === 'João'
+  const name = typeof who?.name === 'string' && who.name.trim() ? who.name.trim() : 'Ceci'
+  const isMale = who?.gender === 'male'
   showAssistantChoice(who?.key)
   document.title = name
   const title = document.querySelector('h1.title')

@@ -1443,14 +1443,23 @@ button:disabled {
   transition: transform 420ms var(--ease-ios);
 }
 
-.segmented[data-value='light'] .thumb,
-.segmented[data-value='luke'] .thumb {
+.segmented[data-value='light'] .thumb {
   transform: translateX(100%);
 }
 
-.segmented[data-value='dark'] .thumb,
-.segmented[data-value='joao'] .thumb {
+.segmented[data-value='dark'] .thumb {
   transform: translateX(200%);
+}
+
+/* The voice choice has as many segments as voices (--n, set by app.js); the thumb sits on --i. */
+#assistantGroup {
+  grid-template-columns: repeat(var(--n, 3), minmax(0, 1fr));
+  max-width: max(420px, calc(110px * var(--n, 3)));
+}
+
+#assistantGroup .thumb {
+  width: calc((100% - 4px) / var(--n, 3));
+  transform: translateX(calc(100% * var(--i, 0)));
 }
 
 /* The hint under the voice choice sits close to it, and the control's own bottom margin moves to the hint. */

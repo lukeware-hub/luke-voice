@@ -271,10 +271,10 @@ export async function startSession({
   // No natural voice on this Mac, but a Premium voice of macOS: the hub speaks with it, the page still listens.
   const isMacVoice = !isNative && forceNative !== '0' && Boolean(config.macVoice)
   // Who answers is the hub's persona: Ceci, Luke or João (the user's choice in Configurações), or Nara on a Mac's own voice.
-  const herName = ['Luke', 'João', 'Nara'].includes(config.persona?.name) ? config.persona.name : 'Ceci'
-  const isMale = herName === 'Luke' || herName === 'João'
+  const herName = typeof config.persona?.name === 'string' && config.persona.name.trim() ? config.persona.name.trim() : 'Ceci'
+  const isMale = config.persona?.gender === 'male'
   // The light voice (Kokoro) is a male one for Luke and João; the native one clones the hub's reference clip.
-  kokoroVoice = herName === 'Luke' ? 'pm_alex' : herName === 'João' ? 'pm_santa' : 'pf_dora'
+  kokoroVoice = ['pf_dora', 'pm_alex', 'pm_santa'].includes(config.persona?.light) ? config.persona.light : isMale ? 'pm_alex' : 'pf_dora'
   if (!isNative && config.download?.total) onStatus(`Preparando a voz natural: ${percent(config.download)}%. Por enquanto, a voz leve.`)
   // The natural voice was expected (this machine has the gpu profile, or the hub was starting it)
   // but failed or did not come up in time: the user is told, never left guessing why she sounds different.
@@ -1094,7 +1094,7 @@ export async function startSession({
   // Ceci greets from the same lines as the ElevenLabs agent (greetings.js), a different one each
   // call, so the user knows she is listening. Then, while nobody talks, the acknowledgements.
   // A failed greeting is only logged.
-  void say(pickGreeting({ name: herName }))
+  void say(pickGreeting({ name: herName, gender: isMale ? 'male' : 'female' }))
     .catch(error => console.warn(`[luke-voice] the greeting failed: ${error?.message ?? error}`))
     .then(warmAcks)
   return session

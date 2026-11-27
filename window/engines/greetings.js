@@ -45,17 +45,18 @@ function remember(storage, at) {
   }
 }
 
-// The line in the assistant's name: Ceci as written, Luke and João as "o Luke" and "o João", Nara by name.
-export function asName(line, name = 'Ceci') {
-  if (name === 'Luke' || name === 'João') return line.replace('a Ceci', `o ${name}`)
+// The line in the assistant's name: Ceci as written, any other woman by name, a man as "o <name>"
+// and without Ceci's bubbly words (Luke, João and the user's male voices are sober).
+export function asName(line, name = 'Ceci', gender = name === 'Luke' || name === 'João' ? 'male' : 'female') {
+  if (gender === 'male') return line.replace('Que alegria te ouvir! ', '').replace(', com toda a energia', '').replace('a Ceci', `o ${name}`)
   return name === 'Ceci' ? line : line.replace('Ceci', name)
 }
 
 // A greeting for this time of day, with a line other than the one said last time.
-export function pickGreeting({ name = 'Ceci', random = Math.random, storage = globalThis.localStorage, now = new Date() } = {}) {
+export function pickGreeting({ name = 'Ceci', gender, random = Math.random, storage = globalThis.localStorage, now = new Date() } = {}) {
   const last = lastIndex(storage)
   const choices = GREETINGS.map((_, at) => at).filter(at => at !== last)
   const at = choices[Math.min(choices.length - 1, Math.floor(random() * choices.length))]
   remember(storage, at)
-  return `${salutation(now.getHours())}! ${asName(GREETINGS[at], name)}`
+  return `${salutation(now.getHours())}! ${asName(GREETINGS[at], name, gender)}`
 }

@@ -148,6 +148,7 @@ A voz foi escolhida pelo dono, ouvindo:
 - Uma voz anterior, desenhada com o Qwen3-TTS VoiceDesign, foi bem em juízes automáticos, mas o dono ouviu sotaque de Portugal nela. O classificador de sotaque usado na época também chamava de europeias algumas gravações brasileiras reais, então deixou de ser usado como juiz.
 - Agora a Ceci clona uma locutora brasileira real: um trecho do banco CML-TTS em português (veja os Créditos).
 - Escolha quem responde em **Configurações**, na janela da chamada: Ceci, Luke ou João. Luke e João são vozes masculinas, e o nome, as falas e as saudações do assistente mudam junto. A escolha fica salva e vale a partir da próxima chamada, na voz natural e na leve (a ElevenLabs continua com a Ceci).
+- Crie as suas próprias vozes com a skill [luke-voice-studio](https://github.com/lukeware-hub/luke-voice-studio): a partir de um arquivo `.wav`, ela cria uma voz com nome, idade e personalidade, guardada em `~/.luke-voice/voices/<id>/` (uma atualização nunca apaga) e listada em **Configurações** junto com Ceci, Luke e João. Uma pasta chamada `ceci`, `luke` ou `joao` troca o trecho dessa voz só neste computador.
 - O trecho foi deixado mais alegre (um pouco mais agudo, com mais melodia e 8% mais rápido), porque a leitura original soava sonolenta.
 - O dono comparou as candidatas de ouvido e escolheu esta.
 
