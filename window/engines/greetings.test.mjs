@@ -66,3 +66,11 @@ test('Luke and Nara greet in their own name', () => {
   for (const line of GREETINGS) assert.doesNotMatch(asName(line, 'Luke'), /Ceci|\ba Luke\b/, line)
   assert.match(pickGreeting({ name: 'Luke', storage: memory(), now: at(9) }), /^Bom dia! .*\bo Luke\b/)
 })
+
+test("a man's greeting is sober and names him with \"o\", whatever his name", () => {
+  for (const line of GREETINGS) {
+    const said = asName(line, 'Rafa', 'male')
+    assert.doesNotMatch(said, /Ceci|Que alegria|com toda a energia|\ba Rafa\b/, line)
+  }
+  assert.equal(asName('Aqui é a Ceci. Em que posso ajudar?', 'Bia', 'female'), 'Aqui é a Bia. Em que posso ajudar?')
+})

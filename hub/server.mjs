@@ -13,7 +13,7 @@ import { conversationToken, credits, ensureAgent, outOfCreditsMessage } from './
 import { PORT, isMainModule, stateDir, stateFile } from './paths.mjs'
 import { ASR_GLOSSARY, SERVICES, VOICE_SETTINGS, createEngine, maxFrames, prepareEngine, profileReady, readProfile } from './engine.mjs'
 import { pickMacVoice, sayWav } from './mac-voice.mjs'
-import { ASSISTANTS, asPersona, personaFor, personaInfo } from './persona.mjs'
+import { asPersona, personaFor, personaInfo, personasNow, voiceRegistry } from './persona.mjs'
 import { MODELS, ensureModel } from './models.mjs'
 import { createNotices } from './notices.mjs'
 import { COMMON_QUESTIONS, MAX_PICK_CHARS, createQuestionTakes, isYesNoQuestion } from './question-pick.mjs'
@@ -410,11 +410,13 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
   let assistant = (() => {
     try {
       const saved = JSON.parse(readFileSync(assistantFile, 'utf8')).assistant
-      return ASSISTANTS.includes(saved) ? saved : 'ceci'
+      return typeof saved === 'string' && saved ? saved : 'ceci'
     } catch {
       return 'ceci'
     }
   })()
+  // The saved voice, or Ceci when that voice is gone (a user voice whose folder was deleted).
+  const assistantNow = (registry = voiceRegistry()) => (registry[assistant] ? assistant : 'ceci')
   // Short hashes of every key this hub has used (never the keys), kept across restarts: a key seen
   // before comes from a Claude session started before the user changed it.
   const seenKeysFile = stateFile('keys-seen.json')
@@ -899,7 +901,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     },
     // The window's Configurações: who answers, Ceci, Luke or João, from the next call.
     'POST /assistant': (_none, body) => {
-      if (!ASSISTANTS.includes(body.assistant)) return [400, { ok: false, message: 'Unknown voice.' }]
+      if (typeof body.assistant !== 'string' || !voiceRegistry()[body.assistant]) return [400, { ok: false, message: 'Unknown voice.' }]
       if (body.assistant !== assistant) {
         assistant = body.assistant
         // The voice reference and the kept yes/no takes belong to one voice.
@@ -914,6 +916,11 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
         log(`assistant set to ${assistant}`)
       }
       return [200, { ok: true, persona: personaInfo(personaNow()) }]
+    },
+    // The voices the window offers in Configurações: the built-in ones, then the user's own.
+    'GET /voices': () => {
+      const registry = voiceRegistry()
+      return [200, { voices: Object.keys(registry).map(key => personaInfo(key, registry)), chosen: assistantNow(registry) }]
     },
     'GET /config': () => {
       const provider = voiceProvider()
@@ -937,6 +944,8 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
         sessions: roster(),
         focused,
         persona: personaNow(),
+        // The persona's rewriting of Ceci's prompt, for a user voice the mod's persona.json does not have.
+        replace: personaNow() === 'ceci' ? null : (personasNow()[personaNow()]?.replace ?? null),
         today: `${dayOf(clock())}, ${WEEKDAYS[new Date(clock()).getDay()]}, ${new Date(clock()).toTimeString().slice(0, 5)}`,
         memory: memoryBlock(['user', 'tool_result'].includes(body.kind) || !body.kind ? clip(body.text, 500) : ''),
       }
@@ -970,7 +979,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       const started = Date.now()
       const result = await routeUtterance(String(body.text ?? '').slice(0, 500), { ask, lastSaid: String(body.lastSaid ?? '').slice(-500) })
       // The router's lines are Ceci's: Luke and João say them in their own words (persona.json).
-      return [200, { ...result, say: typeof result.say === 'string' ? asPersona(result.say, personaNow()) : result.say, ms: Date.now() - started }]
+      return [200, { ...result, say: typeof result.say === 'string' ? asPersona(result.say, personaNow(), personasNow()) : result.say, ms: Date.now() - started }]
     },
     'GET /activity': (_none, _body, url) => {
       const name = url.searchParams.get('session')
@@ -1084,8 +1093,11 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
   // a missing file is looked for again on the next line instead of being remembered as missing.
   const loadVoiceRef = () => {
     if (voiceRefB64 && voiceRefText) return true
-    // The chosen voice's clip: agent/ceci-voice.wav, luke-voice.wav or joao-voice.wav.
-    const clip = voiceRef?.replace(/ceci-voice\.wav$/, `${assistant}-voice.wav`)
+    // The chosen voice's clip: a user voice's voice.wav (also one replacing a built-in voice's clip),
+    // or agent/ceci-voice.wav, luke-voice.wav or joao-voice.wav.
+    const registry = voiceRegistry()
+    const chosen = assistantNow(registry)
+    const clip = registry[chosen]?.dir ? join(registry[chosen].dir, 'voice.wav') : voiceRef?.replace(/ceci-voice\.wav$/, `${chosen}-voice.wav`)
     const transcript = clip?.replace(/\.wav$/, '.txt')
     voiceRefB64 = clip && existsSync(clip) ? readFileSync(clip).toString('base64') : null
     // The transcript of the reference: with it, llama.cpp clones Ceci from the reference codes (ICL).
@@ -1129,7 +1141,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
   const macVoiceNow = () => (profile()?.profile === 'gpu' ? null : macVoice() || null)
   // A Mac with no natural voice and no Premium voice yet: the window says where to download one.
   // Ceci, or Nara or Luke when the free voice speaks with the Mac's own voice (persona.mjs).
-  const personaNow = () => (voiceProvider() === 'local' ? (macVoiceNow() ? personaFor({ platform, voice: macVoiceNow(), gender: macVoiceGender(), siri: macVoiceSiri() }) : assistant) : 'ceci')
+  const personaNow = () => (voiceProvider() === 'local' ? (macVoiceNow() ? personaFor({ platform, voice: macVoiceNow(), gender: macVoiceGender(), siri: macVoiceSiri() }) : assistantNow()) : 'ceci')
   const macVoiceHint = () => platform === 'darwin' && profile()?.profile === 'light' && !macVoiceNow() && process.env.LUKE_VOICE_MAC_VOICE !== 'off'
   async function macTts(voice, req, res) {
     const body = await readBody(req)

@@ -44,8 +44,11 @@ export type BrainRequest = {
   turns: Array<{ role: 'user' | 'luke'; text: string }>
   sessions: Array<{ name: string; isBusy: boolean }>
   focused: string | null
-  // 'luke' or 'nara' when the Mac speaks with its own voice (hub/persona.mjs); Ceci otherwise.
+  // Who answers (hub/persona.mjs): 'ceci', 'luke', 'joao', 'nara' or a user voice's id.
   persona?: string
+  // That persona's rewriting of Ceci's prompt, sent by the hub, so a user voice persona.json does not
+  // list still speaks as itself. Null for Ceci.
+  replace?: Array<[string, string]> | null
   // What Ceci's permanent memory holds about this turn (hub/server.mjs memoryBlock), and today's date.
   memory?: string
   today?: string
@@ -156,13 +159,26 @@ export function asPersona(text: string, key: string | undefined, personas: Perso
   return out
 }
 
-async function promptFor($: EngineInterface, persona: string | undefined): Promise<string> {
-  const key = persona === 'luke' || persona === 'joao' || persona === 'nara' ? persona : 'ceci'
-  const known = brainPrompts.get(key)
+// The rewriting the hub sent, as [from, to] pairs of strings, or null.
+const pairsOf = (value: unknown): Array<[string, string]> | null =>
+  Array.isArray(value) && value.every(p => Array.isArray(p) && p.length === 2 && typeof p[0] === 'string' && typeof p[1] === 'string') ? (value as Array<[string, string]>) : null
+
+// The brain prompt for a persona: Ceci's own, or rewritten with the hub's pairs (a user voice) or
+// persona.json's. Kept per persona and rewriting, so a voice edited in the studio is read again.
+async function promptFor($: EngineInterface, persona: string | undefined, replace?: unknown): Promise<string> {
+  const pairs = pairsOf(replace)
+  const key = persona && /^[a-z0-9][a-z0-9-]{0,31}$/.test(persona) ? persona : 'ceci'
+  const cacheKey = pairs ? `${key}
+${JSON.stringify(pairs)}` : key
+  const known = brainPrompts.get(cacheKey)
   if (known) return known
   const base = await $.fs.read(`${$.plugin.root}/agent/brain-prompt.md`)
-  const prompt = key === 'ceci' ? base : asPersona(base, key, JSON.parse(await $.fs.read(`${$.plugin.root}/agent/persona.json`)) as Personas)
-  brainPrompts.set(key, prompt)
+  const prompt = pairs
+    ? asPersona(base, key, { [key]: { name: key, gender: '', replace: pairs } })
+    : key === 'ceci'
+      ? base
+      : asPersona(base, key, JSON.parse(await $.fs.read(`${$.plugin.root}/agent/persona.json`)) as Personas)
+  brainPrompts.set(cacheKey, prompt)
   return prompt
 }
 
@@ -170,7 +186,7 @@ async function promptFor($: EngineInterface, persona: string | undefined): Promi
 // between turns. An engine that cannot make the call (an older Claude Code) throws, and the
 // `claude -p` fallback answers instead, in the time left.
 async function askBrain($: EngineInterface, request: BrainRequest): Promise<BrainReply> {
-  const brainPrompt = await promptFor($, request.persona)
+  const brainPrompt = await promptFor($, request.persona, request.replace)
   const startedAt = await $.clock.now()
   let reply: Awaited<ReturnType<EngineInterface['model']['complete']>> | null = null
   let failure = ''
@@ -194,7 +210,7 @@ async function askBrain($: EngineInterface, request: BrainRequest): Promise<Brai
   // A slow or failed direct call (a timeout, say) leaves too little time for a second, paid call.
   const left = BRAIN_BUDGET_MS - ((await $.clock.now()) - startedAt)
   if (left < MIN_FALLBACK_MS) throw new Error(`the brain did not answer in time: ${failure || 'no reply'}`)
-  const out = await $.process.run(brainArgs($.plugin.root, request.persona === 'luke' || request.persona === 'joao' || request.persona === 'nara' ? brainPrompt : null), { timeoutMs: left, stdin: brainInput(request) })
+  const out = await $.process.run(brainArgs($.plugin.root, request.persona && request.persona !== 'ceci' ? brainPrompt : null), { timeoutMs: left, stdin: brainInput(request) })
   if (out.exitCode !== 0 && !out.stdout.trim()) throw new Error(out.stderr.trim() || `claude exited with ${out.exitCode}`)
   return parseBrain(out.stdout)
 }
@@ -664,8 +680,8 @@ function chosenProvider(options: Record<string, unknown>): VoiceProvider | '' {
   return PROVIDERS.includes(configured as VoiceProvider) ? (configured as VoiceProvider) : ''
 }
 
-// The free voice is Luke or Nara when the Mac speaks with its own voice (the hub's persona), Ceci otherwise.
-const personaName = (name: unknown) => (name === 'Luke' || name === 'João' || name === 'Nara' ? name : 'Ceci')
+// The free voice's name, as the hub's persona gives it (Ceci, Luke, João, Nara or a user voice).
+const personaName = (name: unknown) => (typeof name === 'string' && name.trim() ? name.trim().slice(0, 40) : 'Ceci')
 const voiceName = (provider: string, name: unknown = 'Ceci') => (provider === 'elevenlabs' ? 'ElevenLabs' : `gratuita (${personaName(name)}, no seu computador)`)
 
 async function apiKey($: EngineInterface, options: Record<string, unknown>) {
@@ -1116,8 +1132,9 @@ async function show($: EngineInterface, options: Record<string, unknown>, withCa
   // Nothing could open the window (no browser found): the address, to open by hand.
   if (res.json.isOpened === false) return `Não consegui abrir a janela da chamada. Abra este endereço no Chrome ou no Edge: ${String(res.json.url ?? '')}`
   const keyNote = l.reason === NO_KEY ? ' Falta a chave da ElevenLabs: salve com /plugin configure luke-voice@luke-voice, ou use /luke-voice voz local.' : ''
-  const who = withCall ? (await hubFetch($, 'GET', '/health', undefined, null).catch(() => null))?.json?.persona?.name : null
-  return `${withCall ? (who === 'Luke' || who === 'João' ? `Chamando o ${who}` : `Chamando a ${personaName(who)}`) : 'Janela da chamada'} na sessão "${l.name}".${res.json.isWindowOpen ? '' : ' A janela da chamada está abrindo.'}${keyNote}`
+  const persona = withCall ? (await hubFetch($, 'GET', '/health', undefined, null).catch(() => null))?.json?.persona : null
+  const who = personaName(persona?.name)
+  return `${withCall ? `Chamando ${persona?.gender === 'male' ? 'o' : 'a'} ${who}` : 'Janela da chamada'} na sessão "${l.name}".${res.json.isWindowOpen ? '' : ' A janela da chamada está abrindo.'}${keyNote}`
 }
 
 // /luke-voice voz [local|elevenlabs]: shows the voice, or switches it for the next call.

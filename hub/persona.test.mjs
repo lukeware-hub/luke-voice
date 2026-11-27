@@ -21,9 +21,9 @@ test('Luke only on a Mac with a male voice; Ceci everywhere else', () => {
   assert.equal(personaFor({ platform: 'darwin', voice: 'system', gender: 'male', siri: 'nando' }), 'luke')
   assert.equal(personaFor({ platform: 'win32', voice: 'system', gender: 'female', siri: 'sandra' }), 'ceci')
   assert.equal(personaFor({ platform: 'darwin', voice: null, gender: 'female', siri: 'sandra' }), 'ceci')
-  assert.deepEqual(personaInfo('nara'), { key: 'nara', name: 'Nara', gender: 'female' })
-  assert.deepEqual(personaInfo('luke'), { key: 'luke', name: 'Luke', gender: 'male' })
-  assert.deepEqual(personaInfo('ceci'), { key: 'ceci', name: 'Ceci', gender: 'female' })
+  assert.deepEqual(personaInfo('nara'), { key: 'nara', name: 'Nara', gender: 'female', light: 'pf_dora' })
+  assert.deepEqual(personaInfo('luke'), { key: 'luke', name: 'Luke', gender: 'male', light: 'pm_alex' })
+  assert.deepEqual(personaInfo('ceci'), { key: 'ceci', name: 'Ceci', gender: 'female', light: 'pf_dora' })
 })
 
 test("Ceci's texts stay byte for byte the same", async () => {
