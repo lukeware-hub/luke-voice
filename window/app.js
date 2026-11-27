@@ -61,14 +61,55 @@ function showAssistantChoice(key) {
   group.style.setProperty('--i', String(at))
   for (const option of options) option.setAttribute('aria-checked', String(option.dataset.assistantOption === assistantChosen))
 }
+// What every voice reads when it is picked, the same line for all, so the user can compare them.
+const WELCOME_LINE = 'Olá! Seja bem-vindo ao luke-voice. Pode contar comigo para conversar, tirar dúvidas e mandar o seu trabalho para o Claude Code.'
+// The welcome playing now: a newer pick stops it and its request.
+let welcomePlayback = null
+// The picked voice reads WELCOME_LINE through the natural voice (the hub's /tts, which speaks with
+// the voice just chosen). Not during a call: its sound would go over the conversation.
+// -> 'playing' | 'call' | 'unavailable' (no natural voice here) | 'replaced' (a newer pick won).
+async function sayWelcome() {
+  welcomePlayback?.abort.abort()
+  welcomePlayback?.audio?.pause()
+  welcomePlayback = null
+  if (conversation || callState !== 'idle') return 'call'
+  const playback = { abort: new AbortController(), audio: null }
+  welcomePlayback = playback
+  const res = await fetch('/tts', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-luke-key': KEY },
+    body: JSON.stringify({ text: WELCOME_LINE }),
+    signal: playback.abort.signal,
+  }).catch(() => null)
+  if (welcomePlayback !== playback) return 'replaced'
+  if (!res?.ok) return 'unavailable'
+  const blob = await res.blob().catch(() => null)
+  if (welcomePlayback !== playback) return 'replaced'
+  if (!blob) return 'unavailable'
+  const url = URL.createObjectURL(blob)
+  playback.audio = new Audio(url)
+  playback.audio.addEventListener('ended', () => URL.revokeObjectURL(url), { once: true })
+  await playback.audio.play().catch(() => null)
+  return 'playing'
+}
 async function chooseAssistant(key) {
   const out = await hub('POST', '/assistant', { assistant: key }).catch(error => ({ ok: false, message: error.message }))
   const hint = document.getElementById('assistantHint')
-  if (out.ok) {
-    applyPersona(out.persona)
-    void renderFacts()
+  if (!out.ok) {
+    if (hint) hint.textContent = `Não consegui trocar a voz: ${out.message ?? 'tente de novo'}.`
+    return
   }
-  if (hint) hint.textContent = out.ok ? ASSISTANT_HINT : `Não consegui trocar a voz: ${out.message ?? 'tente de novo'}.`
+  applyPersona(out.persona)
+  void renderFacts()
+  if (hint) hint.textContent = `Ouvindo ${out.persona?.gender === 'male' ? 'o' : 'a'} ${out.persona?.name ?? 'voz'}…`
+  const said = await sayWelcome()
+  if (said === 'replaced' || !hint) return
+  hint.textContent =
+    said === 'call'
+      ? `${ASSISTANT_HINT} Durante a chamada a amostra não toca: encerre a chamada para ouvir a voz.`
+      : said === 'unavailable'
+        ? `${ASSISTANT_HINT} A amostra precisa da voz natural (placa de vídeo), que não está rodando agora.`
+        : ASSISTANT_HINT
 }
 // One button per voice, in the hub's order. The page's own buttons (Ceci, Luke, João) stand in until
 // the list arrives.
