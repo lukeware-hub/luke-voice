@@ -1560,6 +1560,10 @@ button:disabled {
   font-size: 12.5px;
 }
 
+.mic-play {
+  margin-top: 12px;
+}
+
 .mic-hint {
   margin: 0 0 28px;
   padding: 0 16px;

@@ -15,7 +15,7 @@ import {
   taskKey,
 } from '/guard.js'
 import { inputOptions, micConstraints, saveMicrophone, savedMicrophone } from '/engines/microphone.js'
-import { analyzeRecording, meterLevel } from '/engines/mic-test.js'
+import { analyzeRecording, encodeWav, meterLevel } from '/engines/mic-test.js'
 
 // Appearance: follows the system unless the user picked light or dark in Configurações.
 // Runs before the key exchange below awaits, so the saved theme lands on the first frames.
@@ -74,7 +74,39 @@ const micMeter = document.getElementById('micMeter')
 const micResult = document.getElementById('micResult')
 const micBadge = document.getElementById('micBadge')
 const micTips = document.getElementById('micTips')
+const micPlayBtn = document.getElementById('micPlayBtn')
+const micPlayIcon = document.getElementById('micPlayIcon')
+const micPlayLabel = document.getElementById('micPlayLabel')
 let micTesting = false
+// The last test clip, kept only in memory so the user can judge it by ear.
+const micPlayback = new Audio()
+let micPlaybackUrl = ''
+
+function setPlaying(on) {
+  micPlayIcon.setAttribute('href', on ? '#i-stop' : '#i-play-fill')
+  micPlayLabel.textContent = on ? 'Parar' : 'Ouvir gravação'
+}
+micPlayback.addEventListener('play', () => setPlaying(true))
+micPlayback.addEventListener('pause', () => setPlaying(false))
+micPlayback.addEventListener('ended', () => setPlaying(false))
+
+function setPlaybackClip(audio) {
+  micPlayback.pause()
+  if (micPlaybackUrl) URL.revokeObjectURL(micPlaybackUrl)
+  micPlaybackUrl = audio ? URL.createObjectURL(new Blob([encodeWav(audio, TEST_RATE)], { type: 'audio/wav' })) : ''
+  micPlayback.src = micPlaybackUrl
+  micPlayBtn.hidden = !audio
+  setPlaying(false)
+}
+
+micPlayBtn?.addEventListener('click', () => {
+  if (!micPlayback.paused) {
+    micPlayback.pause()
+    return
+  }
+  micPlayback.currentTime = 0
+  void micPlayback.play().catch(() => setPlaying(false))
+})
 
 function showTestResult(quality, label, tips) {
   micResult.hidden = false
@@ -97,6 +129,7 @@ async function recordMicTest() {
     return
   }
   setMicTesting(true)
+  setPlaybackClip(null)
   micResult.hidden = true
   let stream
   let context
@@ -129,6 +162,7 @@ async function recordMicTest() {
     chunks.forEach((chunk, i) => audio.set(chunk, i * 512))
     const result = analyzeRecording(audio, TEST_RATE)
     showTestResult(result.quality, result.label, result.tips)
+    setPlaybackClip(audio)
   } catch (error) {
     const denied = error?.name === 'NotAllowedError' || error?.name === 'SecurityError'
     showTestResult('pessimo', 'Sem acesso', [
