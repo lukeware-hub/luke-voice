@@ -276,6 +276,40 @@ test('a prompt sent from the call starts a turn, framed as relayed, and is acked
   expect(calls.find(c => c.path === '/ack')?.body).toEqual({ id: 'c1', ok: true, message: 'Claude started a new turn with it.' })
 })
 
+test('while Claude is busy, a prompt added as a note and a queued one both carry plan mode', async ($, on) => {
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => (release = resolve))
+  let isBusyNow = false
+  const appended: string[] = []
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('session.append', (_, e, next) => {
+    const content = (e.message as { content: Array<{ text: string }> }).content
+    appended.push(content.map(c => c.text).join(''))
+    return next(e)
+  })
+  // The queued prompt goes 300 ms after the turn ends: the timer fires at once here.
+  on('clock.after', () => ({ value: undefined }))
+  const { calls, sent } = engine(on, [
+    async () => (await until(() => isBusyNow), { status: 200, body: { commands: [{ id: 'n1', type: 'send', prompt: 'olha os logs', when: 'now' }, { id: 'q1', type: 'send', prompt: 'depois roda os testes', when: 'after_current' }] } }),
+    async () => (await held, { status: 410, body: {} }),
+  ])
+
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/inbox'))
+  await $.turn.start({ text: 'trabalho em andamento', turnId: 'main-1' })
+  isBusyNow = true
+  await until(() => calls.filter(c => c.path === '/ack').length >= 2)
+  await $.turn.complete({ answer: 'feito', durationMs: 1, isAborted: false, turnId: 'main-1', reason: 'answer' })
+  await until(() => sent.length > 0)
+  await $.command.run(run('off'))
+  release()
+
+  expect(appended).toEqual([`The user asked luke-voice, their voice assistant, to pass this on:\n\nolha os logs\n\n${PLAN_FIRST}`])
+  expect(sent).toEqual([`The user asked luke-voice, their voice assistant, to pass this on:\n\ndepois roda os testes\n\n${PLAN_FIRST}`])
+  expect(calls.filter(c => c.path === '/ack').map(c => c.body.message)).toEqual(["Added as a note to Claude's running turn.", 'Queued. Claude gets it when the current turn ends.'])
+})
+
 test('a stored on reconnects at session start', async ($, on) => {
   storeGet = () => true
   const { calls } = engine(on)
