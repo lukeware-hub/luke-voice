@@ -23,6 +23,15 @@ export function micConstraints(id, base = {}, { strict = false } = {}) {
   return id ? { ...base, deviceId: strict ? { exact: id } : { ideal: id } } : base
 }
 
+// The microphone a call opens: the saved one while it is plugged in, else the system default (fellBack,
+// so the window can say so). Devices listed without ids (no permission yet) prove nothing: the saved id is kept.
+export function resolveMicrophone(savedId, devices = []) {
+  if (!savedId) return { inputDeviceId: '', fellBack: false }
+  const inputs = devices.filter(device => device.kind === 'audioinput' && device.deviceId)
+  if (!inputs.length || inputs.some(device => device.deviceId === savedId)) return { inputDeviceId: savedId, fellBack: false }
+  return { inputDeviceId: '', fellBack: true }
+}
+
 // Audio inputs only, named, one per piece of hardware. Dropped: the "default" and "communications" aliases
 // (the first option already is the default), entries with no id (the permission is not given yet),
 // and a second entry of a group (a Bluetooth headset shows up as Hands-Free and Stereo).

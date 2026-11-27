@@ -14,7 +14,7 @@ import {
   safeKind,
   taskKey,
 } from '/guard.js'
-import { inputOptions, micConstraints, saveMicrophone, savedMicrophone } from '/engines/microphone.js'
+import { inputOptions, micConstraints, resolveMicrophone, saveMicrophone, savedMicrophone } from '/engines/microphone.js'
 import { analyzeRecording, encodeWav, meterLevel } from '/engines/mic-test.js'
 
 // Appearance: follows the system unless the user picked light or dark in Configurações.
@@ -1073,7 +1073,10 @@ function memoryScope({ conversation, day, search, all } = {}) {
   return null
 }
 
-// The microphone, or a clear error instead of a call stuck at "connecting".
+const MIC_FALLBACK = 'O microfone escolhido em Configurações não está disponível. Nesta chamada, uso o microfone padrão do sistema.'
+
+// The microphone, or a clear error instead of a call stuck at "connecting". Returns the device the call
+// opens: the one saved in Configurações, or the system default when that one is not plugged in.
 async function microphone() {
   const timeout = new Promise((_, reject) =>
     setTimeout(() => reject(new Error('Microfone indisponível: libere o microfone nesta janela e toque em Chamar.')), MIC_TIMEOUT_MS),
@@ -1088,6 +1091,9 @@ async function microphone() {
   stop(stream)
   // Names only show once the permission is given.
   listMicrophones()
+  // With the permission given, the list holds real ids: is the saved microphone still there?
+  const devices = await navigator.mediaDevices.enumerateDevices().catch(() => [])
+  return resolveMicrophone(savedMicrophone(), devices)
 }
 
 // Who answers: Ceci, or Luke or Nara when the Mac speaks with its own voice (the hub's persona).
@@ -1124,7 +1130,15 @@ async function startCall() {
     const started = await voice.startSession({
       hub,
       windowKey: KEY,
-      prepare: microphone,
+      // The engine opens the device prepare returns, never a silent stand-in for the saved one.
+      prepare: async () => {
+        const mic = await microphone()
+        if (mic.fellBack && isCurrent()) {
+          setCaption(MIC_FALLBACK)
+          addLog('failed', MIC_FALLBACK)
+        }
+        return mic
+      },
       inputDeviceId: savedMicrophone() || undefined,
       clientTools,
       onNoticeCut: batch => {

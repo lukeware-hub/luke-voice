@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { inputOptions, micConstraints, saveMicrophone, savedMicrophone } from './microphone.js'
+import { inputOptions, micConstraints, resolveMicrophone, saveMicrophone, savedMicrophone } from './microphone.js'
 
 const memory = () => {
   const data = new Map()
@@ -62,6 +62,31 @@ test('the "communications" alias is dropped, the real device stays', () => {
     { kind: 'audioinput', deviceId: 'a', label: 'Headset', groupId: 'g1' },
   ])
   assert.deepEqual(list, [{ id: 'a', label: 'Headset' }])
+})
+
+test('a call opens the saved microphone while it is plugged in', () => {
+  const devices = [
+    { kind: 'audioinput', deviceId: 'default', label: 'Padrão' },
+    { kind: 'audioinput', deviceId: 'usb-1', label: 'USB' },
+  ]
+  assert.deepEqual(resolveMicrophone('usb-1', devices), { inputDeviceId: 'usb-1', fellBack: false })
+})
+
+test('an unplugged saved microphone falls back to the default, and says so', () => {
+  const devices = [
+    { kind: 'audioinput', deviceId: 'default', label: 'Padrão' },
+    { kind: 'audiooutput', deviceId: 'usb-1', label: 'USB (saída)' },
+  ]
+  assert.deepEqual(resolveMicrophone('usb-1', devices), { inputDeviceId: '', fellBack: true })
+})
+
+test('no saved choice is the default, with nothing to warn about', () => {
+  assert.deepEqual(resolveMicrophone('', [{ kind: 'audioinput', deviceId: 'a' }]), { inputDeviceId: '', fellBack: false })
+})
+
+test('devices without ids prove nothing: the saved microphone is kept', () => {
+  assert.deepEqual(resolveMicrophone('usb-1', [{ kind: 'audioinput', deviceId: '' }]), { inputDeviceId: 'usb-1', fellBack: false })
+  assert.deepEqual(resolveMicrophone('usb-1', []), { inputDeviceId: 'usb-1', fellBack: false })
 })
 
 test('the same hardware seen twice (same group) is listed once; unknown groups are kept', () => {
