@@ -997,12 +997,6 @@ function onActivity(session, events) {
 
 // The tools that act on the computer need the user's own voice since the last automatic notice.
 const clientTools = {
-  luke_run_task: async ({ task, session }) => {
-    if (!gate.allows()) return REFUSED
-    const out = await hub('POST', '/command', { type: 'task', task, session: session || undefined }).catch(error => ({ ok: false, message: error.message }))
-    addLog(out.ok ? 'task' : 'failed', task, { who: session || focused })
-    return out.message || (out.ok ? 'Started.' : 'It did not start.')
-  },
   luke_send_to_claude: async ({ prompt, when, session }) => {
     if (!gate.allows()) return REFUSED
     const out = await hub('POST', '/command', { type: 'send', prompt, when, session: session || undefined }).catch(error => ({ ok: false, message: error.message }))

@@ -33,7 +33,10 @@ test('the agent definition shipped in agent/ parses and builds a request body', 
   const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
   const { def, prompt, hash } = await readDefinition(root)
   assert.equal(def.name, 'luke-voice')
-  assert.ok(def.tools.some(tool => tool.name === 'luke_run_task'))
+  assert.ok(def.tools.some(tool => tool.name === 'luke_send_to_claude'))
+  // Every order on the computer goes to the main chat: Ceci has no tool that starts a subagent.
+  assert.ok(!def.tools.some(tool => tool.name === 'luke_run_task'))
+  assert.doesNotMatch(prompt, /luke_run_task/)
   assert.ok(prompt.length > 100)
   assert.match(hash, /^[0-9a-f]{16}$/)
 })

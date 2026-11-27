@@ -461,7 +461,7 @@ test('the brain turn goes to the focused session as a think command, and its JSO
   assert.equal(command.request.text, 'oi')
   assert.equal(command.request.context.length, 8)
   assert.ok(command.request.sessions.some(s => s.name === s1.name))
-  const pending = { name: 'luke_run_task', args: { task: 'rodar os testes' } }
+  const pending = { name: 'luke_send_to_claude', args: { prompt: 'rodar os testes' } }
   await call('POST', '/ack', { auth: s1.token, body: { id: command.id, ok: true, message: JSON.stringify({ say: 'Posso?', tool: null, pending }) } })
   // The pending action reaches the window, so a plain "sim" runs it with no second brain call.
   assert.deepEqual((await asked).body, { say: 'Posso?', tool: null, pending })

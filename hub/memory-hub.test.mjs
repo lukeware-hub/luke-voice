@@ -105,7 +105,7 @@ test('the brain reads the memory: old hits with their dates, the sessions\' word
   let seen = null
   await serve(session.token, command => {
     seen = command.request
-    return { message: JSON.stringify({ say: 'Passaram!', tool: null, pending: { name: 'luke_run_task', args: { task: 'x' } } }) }
+    return { message: JSON.stringify({ say: 'Passaram!', tool: null, pending: { name: 'luke_send_to_claude', args: { prompt: 'x' } } }) }
   })
   assert.equal((await asked).body.say, 'Passaram!')
   assert.match(seen.memory, /Primeira conversa: \d{4}-\d{2}-\d{2}\./)
@@ -113,7 +113,7 @@ test('the brain reads the memory: old hits with their dates, the sessions\' word
   assert.ok(seen.memory.includes(OPEN), seen.memory)
   // The brain's proposal is kept too.
   const now = (await call('GET', '/memory/conversation?id=last', { key: WINDOW })).body
-  assert.match(now.items.at(-1).text, /Perguntou antes de usar luke_run_task/)
+  assert.match(now.items.at(-1).text, /Perguntou antes de usar luke_send_to_claude/)
   await call('POST', '/call', { key: WINDOW, body: { state: 'idle' } })
   await call('POST', '/unsubscribe', { auth: session.token })
 })

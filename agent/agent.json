@@ -8,31 +8,8 @@
   "tools": [
     {
       "type": "client",
-      "name": "luke_run_task",
-      "description": "Runs a task on the user's computer in a Claude Code subagent (read code, search a repository, run a command, change files). Call it only after you said the task back in one sentence and the user clearly said yes. Returns at once; the result arrives later in a [news] update, on a 'task done:' line.",
-      "expects_response": true,
-      "response_timeout_secs": 20,
-      "parameters": {
-        "type": "object",
-        "required": [
-          "task"
-        ],
-        "properties": {
-          "task": {
-            "type": "string",
-            "description": "The full task for the subagent, clear and complete, in Portuguese: what to do, where (repository, folder or file) and what to report back."
-          },
-          "session": {
-            "type": "string",
-            "description": "The short name of the Claude session to run it in. Leave empty for the focused one."
-          }
-        }
-      }
-    },
-    {
-      "type": "client",
       "name": "luke_send_to_claude",
-      "description": "Sends a prompt to the main Claude Code chat instead of a subagent. Use it only when the user explicitly asks to send something to Claude's chat.",
+      "description": "Sends an order to the main Claude Code chat of the focused session. It is the only way to act on the user's computer (read code, search a repository, run a command, change files): never a subagent. Call it only after you said the order back in one sentence and the user clearly said yes. Before it reaches the chat, luke-voice refines the order with Prompt Master in a subagent and sends only the refined prompt; if the refinement fails nothing is sent and a [news] update says so. The result arrives later in a [news] update.",
       "expects_response": true,
       "response_timeout_secs": 20,
       "parameters": {
@@ -44,7 +21,7 @@
         "properties": {
           "prompt": {
             "type": "string",
-            "description": "The full prompt for Claude, in the user's language."
+            "description": "The user's order, cleaned up, in Portuguese: what to do, where (repository, folder or file) and what to report back. Never add requirements the user did not say."
           },
           "when": {
             "type": "string",
@@ -52,7 +29,7 @@
               "now",
               "after_current"
             ],
-            "description": "now: start it, or add it as a note to the running turn. after_current: queue it until Claude is done."
+            "description": "now: start it, or add it as a note to the running turn (the default). after_current: queue it until Claude is done."
           },
           "session": {
             "type": "string",
