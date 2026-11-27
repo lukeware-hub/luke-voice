@@ -13,6 +13,11 @@
 
 export const JOIN_WINDOW_MS = 2500
 const GAP_SAMPLES = 4800 // 0.3 s of silence between the joined parts, at 16 kHz
+// The longest turn that is still carried into the next one: 90 s at 16 kHz. One more part (the
+// detector ends a turn at ~30 s) keeps the joined turn near 2 minutes, under the hub's 4 MiB cap
+// for /stt (~131 s). A longer turn stands as it is and is answered, and the speech goes on as a
+// new turn, instead of the whole request being refused as too long.
+export const MAX_CARRY_SAMPLES = 90 * 16_000
 
 function join(first, second) {
   const out = new Float32Array(first.length + GAP_SAMPLES + second.length)
@@ -21,7 +26,7 @@ function join(first, second) {
   return out
 }
 
-export function createTurnJoiner({ now = () => Date.now(), windowMs = JOIN_WINDOW_MS } = {}) {
+export function createTurnJoiner({ now = () => Date.now(), windowMs = JOIN_WINDOW_MS, maxCarry = MAX_CARRY_SAMPLES } = {}) {
   let turn = 0
   let last = null // { audio, endedAt, turn, isCommitted }
   let carry = null
@@ -53,7 +58,7 @@ export function createTurnJoiner({ now = () => Date.now(), windowMs = JOIN_WINDO
     },
     // The user started talking again. True when the last turn is dropped and will be joined.
     resumed() {
-      if (!last || last.isCommitted || now() - last.endedAt > windowMs) return false
+      if (!last || last.isCommitted || now() - last.endedAt > windowMs || last.audio.length > maxCarry) return false
       carry = last.audio
       carryTurn = last.turn
       last = null
