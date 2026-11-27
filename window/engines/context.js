@@ -2,10 +2,11 @@ import { CLOSE, OPEN } from '../guard.js'
 
 // What the brain reads of the call on every turn: the newest entries, short, paid in tokens.
 const MAX_CONTEXT = 8
-const MAX_CONTEXT_CHARS = 3000
+// Two full entries (a task's result is up to MAX_ENTRY_CHARS) plus the newest activity fit at once.
+const MAX_CONTEXT_CHARS = 6000
 // The hub cuts each entry to this anyway (hub/server.mjs); cut here first, or one long entry
 // alone is over MAX_CONTEXT_CHARS and the loop below empties the whole context.
-const MAX_ENTRY_CHARS = 1500
+const MAX_ENTRY_CHARS = 2500
 
 // One entry as the context keeps it: cut to MAX_ENTRY_CHARS. An untrusted block the cut leaves open
 // is cut inside and closed again, so what follows it is never read as part of the quoted text.

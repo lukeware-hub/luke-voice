@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Args, On } from 'claude-code'
 
-import { asPersona, brainArgs, brainInput, classifyTask, NO_NODE, parseBrain, parseBrainText, parseSummary, memoryTarget, preview, withFull, summaryPrompt, TIERS } from './register'
+import { PLAN_FIRST, asPersona, brainArgs, brainInput, classifyTask, NO_NODE, parseBrain, parseBrainText, parseSummary, memoryTarget, preview, withFull, summaryPrompt, TIERS } from './register'
 import type { BrainRequest } from './register'
 
 const FOOTER = { plugin: 'luke-voice', component: 'SessionMode', props: { modes: [] } } as const
@@ -39,6 +39,14 @@ let existing: RegExp | null = null
 let showBody: Record<string, unknown> | null = null
 // What the hub answers to /subscribe instead of a token, as status and body. Reset by engine().
 let subscribeAnswer: { status: number; body: unknown } | null = null
+// What `claude plugin list --json` and `claude plugin marketplace list --json` print: no plugin by
+// default. Reset by engine().
+let pluginList: unknown[] = []
+let marketplaceList: unknown[] = []
+// How the listings end instead: 'fails' exits 1 (an old claude without --json), 'throws' cannot start claude.
+let listingEnd: 'ok' | 'fails' | 'throws' = 'ok'
+const LUKEWARE_PROMPT_MASTER = { name: 'prompt-master', source: 'github', repo: 'lukeware-hub/prompt-master' }
+const promptMasterInstall = (marketplace = 'prompt-master') => ({ id: `prompt-master@${marketplace}`, version: '0.9.29', scope: 'user', enabled: true })
 
 // Stands for the engine and the hub: records each hub request and each submitted prompt.
 function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unknown }>> = [], after = { status: 410, body: {} as unknown }, envKey?: string, health?: Record<string, unknown>) {
@@ -72,6 +80,12 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
   showBody = null
   const subscribed = subscribeAnswer
   subscribeAnswer = null
+  const listings = { plugins: pluginList, marketplaces: marketplaceList, end: listingEnd }
+  pluginList = []
+  marketplaceList = []
+  listingEnd = 'ok'
+  const commandsRun: string[] = []
+  on('command.run', { command: 'prompt-master' }, (_, e) => (commandsRun.push(e.command), { text: 'Prompt Master: on' }))
   on('fs.exists', (_, e) => ({ value: (marker !== null && /[\\/]first-call$/.test(String(e.path))) || (found !== null && found.test(String(e.path))) }))
   on('fs.write', (_, e) => (markerWrites.push({ path: String(e.path), text: String(e.text) }), { value: undefined }))
   on('ui.close', () => ({ value: undefined }))
@@ -85,6 +99,13 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
     return { value: brainComplete }
   })
   on('process.run', (_, e) => {
+    // The plugin listings that look for Prompt Master, answered apart and not counted as launches.
+    if (e.argv[0] === 'claude' && e.argv[1] === 'plugin' && e.argv.at(-1) === '--json') {
+      if (listings.end === 'throws') return { deny: 'spawn claude ENOENT' }
+      if (listings.end === 'fails') return { value: { exitCode: 1, stdout: '', stderr: "error: unknown option '--json'", isStdoutTruncated: false, isStderrTruncated: false } }
+      const rows = e.argv[2] === 'marketplace' ? listings.marketplaces : listings.plugins
+      return { value: { exitCode: 0, stdout: JSON.stringify(rows), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     launches.push(e)
     if (launch.throws && e.argv[0] !== 'claude') return { deny: launch.throws }
     const isClaude = e.argv[0] === 'claude'
@@ -113,7 +134,7 @@ function engine(on: On, inbox: Array<() => Promise<{ status: number; body: unkno
     return { value: { status, ok: status < 400, headers: {}, text: JSON.stringify(body) } }
   })
 
-  return { calls, sent, stored, launches, statuses, completes, sleeps }
+  return { calls, sent, stored, launches, statuses, completes, sleeps, commandsRun }
 }
 
 // The hooks answer in promise turns: yield until the check holds.
@@ -251,8 +272,42 @@ test('a prompt sent from the call starts a turn, framed as relayed, and is acked
   await $.command.run(run('off'))
   release()
 
-  expect(sent).toEqual(['The user asked luke-voice, their voice assistant, to pass this on:\n\nadd tests for auth'])
+  expect(sent).toEqual([`The user asked luke-voice, their voice assistant, to pass this on:\n\nadd tests for auth\n\n${PLAN_FIRST}`])
   expect(calls.find(c => c.path === '/ack')?.body).toEqual({ id: 'c1', ok: true, message: 'Claude started a new turn with it.' })
+})
+
+test('while Claude is busy, a prompt added as a note and a queued one both carry plan mode', async ($, on) => {
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => (release = resolve))
+  let isBusyNow = false
+  const appended: string[] = []
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('session.append', (_, e, next) => {
+    const content = (e.message as { content: Array<{ text: string }> }).content
+    appended.push(content.map(c => c.text).join(''))
+    return next(e)
+  })
+  // The queued prompt goes 300 ms after the turn ends: the timer fires at once here.
+  on('clock.after', () => ({ value: undefined }))
+  const { calls, sent } = engine(on, [
+    async () => (await until(() => isBusyNow), { status: 200, body: { commands: [{ id: 'n1', type: 'send', prompt: 'olha os logs', when: 'now' }, { id: 'q1', type: 'send', prompt: 'depois roda os testes', when: 'after_current' }] } }),
+    async () => (await held, { status: 410, body: {} }),
+  ])
+
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/inbox'))
+  await $.turn.start({ text: 'trabalho em andamento', turnId: 'main-1' })
+  isBusyNow = true
+  await until(() => calls.filter(c => c.path === '/ack').length >= 2)
+  await $.turn.complete({ answer: 'feito', durationMs: 1, isAborted: false, turnId: 'main-1', reason: 'answer' })
+  await until(() => sent.length > 0)
+  await $.command.run(run('off'))
+  release()
+
+  expect(appended).toEqual([`The user asked luke-voice, their voice assistant, to pass this on:\n\nolha os logs\n\n${PLAN_FIRST}`])
+  expect(sent).toEqual([`The user asked luke-voice, their voice assistant, to pass this on:\n\ndepois roda os testes\n\n${PLAN_FIRST}`])
+  expect(calls.filter(c => c.path === '/ack').map(c => c.body.message)).toEqual(["Added as a note to Claude's running turn.", 'Queued. Claude gets it when the current turn ends.'])
 })
 
 test('a stored on reconnects at session start', async ($, on) => {
@@ -336,6 +391,7 @@ test('a voice task runs in a Claude Code subagent, and its answer is reported as
   release()
 
   expect(spawned[0]).toContain('verifica o login no repo xpto')
+  expect(spawned[0]).toContain(PLAN_FIRST)
   expect(calls.find(c => c.path === '/ack')?.body).toEqual({ id: 't1', ok: true, message: 'Started. A Claude Code subagent is working on it; the result comes in a [news] update.' })
   const events = calls.filter(c => c.path === '/events').map(c => JSON.stringify(c.body))
   expect(events.filter(e => e.includes('task_done')).length).toBe(1)
@@ -1373,3 +1429,75 @@ test('a claude -p run stays off even when luke-voice is stored on, so it never s
 
   expect(calls.some(c => c.path === '/subscribe')).toBe(false)
 })
+
+// Prompt Master's on/off as the engine holds it: `false` when it was turned off, unset when it is
+// not loaded in this session.
+function promptMasterState(on: On, value: boolean | undefined) {
+  on('state.get', { plugin: 'prompt-master', key: 'isOn' }, () => ({ value: { value, version: 1 } }))
+}
+
+test('with the Lukeware Hub Prompt Master installed and off, turning luke-voice on turns it on', async ($, on) => {
+  pluginList = [promptMasterInstall()]
+  marketplaceList = [LUKEWARE_PROMPT_MASTER]
+  const { calls, commandsRun } = engine(on)
+  promptMasterState(on, false)
+
+  await $.command.run(run('on'))
+  await until(() => commandsRun.length > 0 && calls.some(c => c.path === '/subscribe'))
+  await $.command.run(run('off'))
+
+  expect(commandsRun).toEqual(['prompt-master'])
+})
+
+for (const [what, plugins, markets, value] of [
+  ['already on', [promptMasterInstall()], [LUKEWARE_PROMPT_MASTER], true],
+  ['not loaded in this session', [promptMasterInstall()], [LUKEWARE_PROMPT_MASTER], undefined],
+  ['not installed', [], [], false],
+] as const) {
+  test(`Prompt Master ${what}: luke-voice leaves it alone and starts normally`, async ($, on) => {
+    pluginList = [...plugins]
+    marketplaceList = [...markets]
+    const { calls, commandsRun } = engine(on)
+    promptMasterState(on, value)
+
+    await $.command.run(run('on'))
+    await until(() => calls.some(c => c.path === '/subscribe'))
+    for (let i = 0; i < 2000; i++) await Promise.resolve()
+    await $.command.run(run('off'))
+
+    expect(commandsRun).toEqual([])
+    expect(calls.some(c => c.path === '/subscribe')).toBe(true)
+  })
+}
+
+test('a plugin named prompt-master from another repository is not taken for the Lukeware Hub one', async ($, on) => {
+  pluginList = [promptMasterInstall('other')]
+  marketplaceList = [LUKEWARE_PROMPT_MASTER, { name: 'other', source: 'github', repo: 'someone/prompt-master' }]
+  const { calls, commandsRun } = engine(on)
+  promptMasterState(on, false)
+
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/subscribe'))
+  for (let i = 0; i < 2000; i++) await Promise.resolve()
+  await $.command.run(run('off'))
+
+  expect(commandsRun).toEqual([])
+})
+
+for (const end of ['fails', 'throws'] as const) {
+  test(`listings that ${end === 'fails' ? 'fail (an old claude)' : 'cannot start (no claude)'} mean no Prompt Master, and luke-voice still turns on`, async ($, on) => {
+    pluginList = [promptMasterInstall()]
+    marketplaceList = [LUKEWARE_PROMPT_MASTER]
+    listingEnd = end
+    const { calls, commandsRun } = engine(on)
+    promptMasterState(on, false)
+
+    await $.command.run(run('on'))
+    await until(() => calls.some(c => c.path === '/subscribe'))
+    for (let i = 0; i < 2000; i++) await Promise.resolve()
+    await $.command.run(run('off'))
+
+    expect(commandsRun).toEqual([])
+    expect(calls.some(c => c.path === '/subscribe')).toBe(true)
+  })
+}

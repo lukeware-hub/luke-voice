@@ -9,8 +9,10 @@ import {
   createQuietMode,
   createSpeechFilter,
   createVoiceGate,
+  queueSpeech,
   quoteUntrusted,
   safeKind,
+  taskKey,
 } from '/guard.js'
 import { inputOptions, micConstraints, saveMicrophone, savedMicrophone } from '/engines/microphone.js'
 
@@ -826,15 +828,16 @@ function onActivity(session, events) {
     if (id) heardNotices.add(id)
     const spoken = speech.shouldSpeak(session, kind, text, id)
     if (kind === 'task_done') {
-      if (spoken) {
-        pendingSpeech.push({ text: `task done: ${text}`, id })
+      // The same result already waiting (sent again with another id) is said once, with the first.
+      if (spoken && queueSpeech(pendingSpeech, { text: `task done: ${text}`, id, kind, session, task: taskKey(session, text) })) {
         callForNews()
       } else ackNotice(id)
       const parts = text.match(/^Task: ([\s\S]*?)\nResult: ([\s\S]*)$/)
       addLog('result', parts ? parts[1] : 'Tarefa concluída', { body: parts ? parts[2] : text, who: session })
     } else if (kind === 'task_progress') {
       // In silent mode a progress line is not worth even "Recebi uma notificação".
-      if (spoken && !quiet.on) pendingSpeech.push({ text: `task progress: ${text}`, id: null })
+      // Only the newest progress line of a task waits to be said, never a pile of them.
+      if (spoken && !quiet.on) queueSpeech(pendingSpeech, { text: `task progress: ${text}`, id: null, kind, session, task: taskKey(session, text) })
     } else if (spoken) {
       pendingSpeech.push({ text: line, id: null })
     } else {

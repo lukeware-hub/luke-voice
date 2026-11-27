@@ -6,18 +6,18 @@ import { contextEntry, trimContext } from './context.js'
 test('one long entry is cut to the hub limit instead of emptying the context', () => {
   const list = ['a', 'b']
   trimContext(list, 'x'.repeat(5000))
-  assert.deepEqual(list, ['a', 'b', 'x'.repeat(1500)])
+  assert.deepEqual(list, ['a', 'b', 'x'.repeat(2500)])
 })
 
 test('a long untrusted entry is cut inside its markers: the closing one stays', () => {
   const list = []
   trimContext(list, `[news]\n${quoteUntrusted('x'.repeat(5000))}`)
   const [entry] = list
-  assert.ok(entry.length <= 1500)
+  assert.ok(entry.length <= 2500)
   assert.ok(entry.startsWith(`[news]\n${OPEN}\n`))
   assert.ok(entry.endsWith(`\n${CLOSE}`))
   // A long entry with no open block is only cut.
-  assert.equal(contextEntry('y'.repeat(2000)), 'y'.repeat(1500))
+  assert.equal(contextEntry('y'.repeat(3000)), 'y'.repeat(2500))
 })
 
 test('news waiting to be read is not pushed out by activity; the oldest other entry goes first', () => {
@@ -39,6 +39,6 @@ test('the context keeps the newest entries within count and size', () => {
   for (let i = 0; i < 12; i++) trimContext(list, String(i))
   assert.deepEqual(list, ['4', '5', '6', '7', '8', '9', '10', '11'])
   const big = []
-  for (let i = 0; i < 4; i++) trimContext(big, String(i).repeat(1000))
-  assert.deepEqual(big.map(e => e[0]), ['2', '3'])
+  for (let i = 0; i < 8; i++) trimContext(big, String(i).repeat(1000))
+  assert.deepEqual(big.map(e => e[0]), ['3', '4', '5', '6', '7'])
 })

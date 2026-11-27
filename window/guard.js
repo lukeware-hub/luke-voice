@@ -143,5 +143,27 @@ export function createSpeechFilter() {
   }
 }
 
+// The task a progress line or a result is about, per session: its first line ("Task: ..."), or null.
+export function taskKey(session, text) {
+  const first = String(text ?? '').split('\n')[0]
+  return first.startsWith('Task: ') ? `${session}\n${first}` : null
+}
+
+// Puts a notice in what Ceci will say once the user is quiet (`pending`, changed in place), without
+// saying the same thing twice: a newer progress line takes the place of the older one of the same
+// task still waiting, a task's result takes its waiting progress lines out (it is no longer
+// running), and a result already waiting (the hub sent it again with another id) is not added.
+// `item`: { text, id, kind, session, task }. Returns false when it was not added.
+export function queueSpeech(pending, item) {
+  if (item.kind === 'task_done' && pending.some(p => p.kind === 'task_done' && p.session === item.session && p.text === item.text)) return false
+  if (item.task) {
+    for (let i = pending.length - 1; i >= 0; i--) {
+      if (pending[i].kind === 'task_progress' && pending[i].task === item.task) pending.splice(i, 1)
+    }
+  }
+  pending.push(item)
+  return true
+}
+
 export const REFUSED =
   'Refused: the user has not spoken since the last automatic update. Ask the user out loud and wait for a clear yes before calling this tool.'

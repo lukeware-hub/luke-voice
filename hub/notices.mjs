@@ -7,10 +7,15 @@ import { readFileSync, writeFileSync } from 'node:fs'
 // A result older than this is no longer news: it is dropped instead of said.
 export const NOTICE_MAX_AGE_MS = 6 * 60 * 60_000
 const MAX_NOTICES = 20
+// A result the window already handed to the voice, sent again this soon (the mod keeps a result it
+// could not confirm and sends it once more), is the same notice: it is not told a second time.
+export const NOTICE_REPEAT_MS = 2 * 60_000
 
-export function createNotices({ file = null, clock = Date.now, maxAgeMs = NOTICE_MAX_AGE_MS } = {}) {
+export function createNotices({ file = null, clock = Date.now, maxAgeMs = NOTICE_MAX_AGE_MS, repeatMs = NOTICE_REPEAT_MS } = {}) {
   let items = []
   let next = 1
+  // Acked notices, kept in memory for repeatMs only, so a copy sent again is recognized.
+  let heard = []
   if (file) {
     try {
       const saved = JSON.parse(readFileSync(file, 'utf8'))
@@ -44,6 +49,11 @@ export function createNotices({ file = null, clock = Date.now, maxAgeMs = NOTICE
     add(session, text) {
       const known = fresh().find(n => n.session === session && n.text === text)
       if (known) return known
+      // Already told a moment ago: the same notice again, marked so the hub does not tell it twice.
+      const since = clock() - repeatMs
+      heard = heard.filter(n => n.ackedAt >= since)
+      const told = heard.find(n => n.session === session && n.text === text)
+      if (told) return { id: told.id, session, text, at: told.at, isHeard: true }
       const notice = { id: `n${next++}`, session, text, at: clock() }
       items = [...items, notice].slice(-MAX_NOTICES)
       save()
@@ -52,6 +62,8 @@ export function createNotices({ file = null, clock = Date.now, maxAgeMs = NOTICE
     // The window handed it to the voice.
     ack(id) {
       const before = items.length
+      const acked = items.find(n => n.id === id)
+      if (acked) heard = [...heard, { ...acked, ackedAt: clock() }].slice(-MAX_NOTICES)
       items = items.filter(n => n.id !== id)
       if (items.length !== before) save()
       return items.length !== before
