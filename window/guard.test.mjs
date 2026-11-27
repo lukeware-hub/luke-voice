@@ -151,3 +151,20 @@ test('waiting news holds one progress line per task, and a result takes its prog
   // Text with no task line has no key: nothing is replaced.
   assert.equal(taskKey('a', 'Claude finished.'), null)
 })
+
+test('the Silenciar button sets silent mode by hand and it stays until pressed again', () => {
+  const quiet = createQuietMode()
+  assert.equal(quiet.toggle(true), 'on')
+  assert.equal(quiet.userSpoke('oi, tudo bem?'), null, 'speaking does not end a manual silence')
+  assert.equal(quiet.on, true)
+  assert.equal(quiet.toggle(false), 'off')
+  assert.equal(quiet.on, false)
+  assert.equal(quiet.toggle(false), null)
+})
+
+test('a spoken silence is not manual, and the button turns it off', () => {
+  const quiet = createQuietMode()
+  quiet.userSpoke('silenciar')
+  assert.equal(quiet.manual, false)
+  assert.equal(quiet.toggle(false), 'off')
+})

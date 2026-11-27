@@ -115,6 +115,9 @@ const ui = {
   mute: $('muteButton'),
   muteIcon: $('muteIcon'),
   muteLabel: $('muteLabel'),
+  mic: $('micButton'),
+  micIcon: $('micIcon'),
+  micLabel: $('micLabel'),
   recent: $('recentSessions'),
   all: $('allSessions'),
   log: $('log'),
@@ -352,9 +355,10 @@ function setOrb(next) {
 function setMuted(next) {
   isMuted = next
   conversation?.setMicMuted(isMuted)
-  ui.mute.setAttribute('aria-pressed', String(isMuted))
-  ui.muteLabel.textContent = isMuted ? 'Ativar som' : 'Silenciar'
-  swapIcon(ui.muteIcon, isMuted ? 'i-microphone' : 'i-microphone-slash')
+  // Mutar: only the speaker's microphone. Ceci's silent mode (Silenciar) is separate.
+  ui.mic.setAttribute('aria-pressed', String(isMuted))
+  ui.micLabel.textContent = isMuted ? 'Desmutar' : 'Mutar'
+  swapIcon(ui.micIcon, isMuted ? 'i-microphone' : 'i-microphone-slash')
   if (callState === 'live') setOrb(isMuted ? 'muted' : mode === 'speaking' ? 'speaking' : 'listening')
   // Back from mute the user usually talks first: news held meanwhile waits for a quiet moment again.
   if (!isMuted) silentSince = Date.now()
@@ -370,6 +374,7 @@ function setCall(state, caption) {
   // One phone icon: the stylesheet turns it down 135° to end, as on an iPhone.
   setText(ui.callLabel, isLive ? 'Encerrar' : 'Chamar')
   ui.mute.disabled = state !== 'live'
+  ui.mic.disabled = state !== 'live'
   ui.headline.textContent = STATES[state]?.headline ?? ''
   setCaption(caption ?? STATES[state]?.caption ?? '')
   if (state === 'live') setOrb(isMuted ? 'muted' : 'listening')
@@ -1043,6 +1048,9 @@ async function startCall() {
           if (change) {
             conversation?.sendContextualUpdate(change === 'on' ? QUIET_ON : QUIET_OFF)
             ui.headline.textContent = change === 'on' ? 'Modo silêncio' : STATES.live.headline
+            ui.mute.setAttribute('aria-pressed', String(quiet.on))
+            ui.muteLabel.textContent = quiet.on ? 'Reativar' : 'Silenciar'
+            swapIcon(ui.muteIcon, quiet.on ? 'i-play-fill' : 'i-waveform')
           }
         }
         if (source === 'ai') setCaption(message.replace(/\[[a-z ]+\]\s*/gi, ''), true)
@@ -1060,6 +1068,17 @@ async function startCall() {
   }
 }
 
+// Silenciar: Ceci's silent mode, set by hand. It never touches the microphone.
+function setSilent(next) {
+  const change = quiet.toggle(next)
+  ui.mute.setAttribute('aria-pressed', String(quiet.on))
+  ui.muteLabel.textContent = quiet.on ? 'Reativar' : 'Silenciar'
+  swapIcon(ui.muteIcon, quiet.on ? 'i-play-fill' : 'i-waveform')
+  if (!change) return
+  conversation?.sendContextualUpdate(change === 'on' ? QUIET_ON : QUIET_OFF)
+  if (callState === 'live' && mode !== 'speaking') ui.headline.textContent = quiet.on ? 'Modo silêncio' : STATES.live.headline
+}
+
 // What a call leaves behind when it ends, by the user or dropped by the voice.
 function clearCall() {
   pendingActivity = []
@@ -1067,6 +1086,7 @@ function clearCall() {
   pendingSpeech = pendingSpeech.filter(item => item.id)
   speech.clear()
   quiet.clear()
+  setSilent(false)
 }
 
 async function endCall() {
@@ -1149,7 +1169,8 @@ function toggleCompact() {
 /* ---------- Wiring ---------- */
 
 ui.call.addEventListener('click', () => void (conversation || callState === 'connecting' ? endCall() : startCall()))
-ui.mute.addEventListener('click', () => setMuted(!isMuted))
+ui.mute.addEventListener('click', () => setSilent(!quiet.on))
+ui.mic.addEventListener('click', () => setMuted(!isMuted))
 for (const control of document.querySelectorAll('[data-target]')) {
   control.addEventListener('click', () => showView(control.dataset.target))
 }
