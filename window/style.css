@@ -1472,7 +1472,8 @@ button:disabled {
   transform: scale(0.96);
 }
 
-.mic {
+/* div.mic: the orb's icon is an svg with the same class, and must not take this box's margin. */
+div.mic {
   display: grid;
   gap: 12px;
   max-width: 420px;
