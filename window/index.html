@@ -180,7 +180,20 @@
             <select id="micSelect" class="select" aria-describedby="micHint">
               <option value="">Padrão do sistema</option>
             </select>
-            <p id="micHint" class="mic-hint">A escolha vale na próxima chamada e fica salva.</p>
+            <div class="mic-test">
+              <div class="mic-test-row">
+                <button id="micTestBtn" class="ghost" type="button">
+                  <svg class="icon" aria-hidden="true"><use href="#i-microphone" /></svg>
+                  <span id="micTestLabel">Gravar teste</span>
+                </button>
+                <div class="meter" aria-hidden="true"><span id="micMeter" class="meter-fill"></span></div>
+              </div>
+              <div id="micResult" class="mic-result" data-quality="" role="status" aria-live="polite" hidden>
+                <span id="micBadge" class="quality-badge"></span>
+                <ul id="micTips" class="mic-tips"></ul>
+              </div>
+            </div>
+            <p id="micHint" class="mic-hint">A escolha vale na próxima chamada e fica salva. O teste grava 5 segundos: fale como numa chamada. O áudio fica neste computador e some ao terminar.</p>
             <div class="group-label">Estado</div>
             <dl id="facts" class="facts"></dl>
             <p class="note">A voz gratuita roda neste computador e é baixada na instalação: a voz natural com placa de vídeo de 6 GB ou mais, a voz leve sem ela. A voz ElevenLabs é opcional: troque com <code>/luke-voice voz</code>. A chave da ElevenLabs só é usada se você escolher essa voz; ela é configurada no Claude Code, com <code>/plugin configure luke-voice@luke-voice</code>, e nunca chega a esta janela.</p>
