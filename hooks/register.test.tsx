@@ -298,7 +298,47 @@ test('an order from the call is refined by one direct model call first, and only
   expect(sent[0]).not.toMatch(/<\/?user-speech>/)
   const ack = calls.find(c => c.path === '/ack')?.body as { ok: boolean; message: string }
   expect(ack.ok).toBe(true)
-  expect(ack.message).toMatch(/^Refined with Prompt Master in \d+\.\d s and sent to Claude's chat\.$/)
+  expect(ack.message).toBe("Sent: the order was refined with Prompt Master and sent to Claude's chat.")
+  expect(ack.message).not.toMatch(/\d\s*s\b/)
+})
+
+test('an order with plan: true is planned, saved as a markdown file, and the main chat gets only the file path', async ($, on) => {
+  refinerAnswers(`${refinedOf('Adicione testes.')}
+<plan-markdown>
+# Plano: testes
+## Passos
+1. Escrever.
+</plan-markdown>`)
+  const { calls, sent, completes } = engine(on, [
+    async () => ({ status: 200, body: { commands: [{ id: 'c1', type: 'send', prompt: 'add tests', when: 'now', plan: true }] } }),
+    async () => ({ status: 410, body: {} }),
+  ])
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/ack'))
+  await $.command.run(run('off'))
+
+  expect(completes).toHaveLength(2)
+  expect((completes[1] as { prompt: string }).prompt).toContain('plan mode')
+  const written = markerWrites.find(w => /luke-voice-plans[\\/]plano-.*\.md$/.test(w.path))
+  expect(written?.text).toContain('## Passos')
+  expect(sent).toHaveLength(1)
+  expect(sent[0]).toContain(written!.path.replace(/\\/g, '/').replace(/^[A-Za-z]:/, ''))
+  expect(sent[0]).not.toContain('## Passos')
+  const ack = calls.find(c => c.path === '/ack')?.body as { ok: boolean }
+  expect(ack.ok).toBe(true)
+})
+
+test('a plan the model does not give sends nothing to Claude', async ($, on) => {
+  refinerAnswers(refinedOf('Adicione testes.'))
+  const { calls, sent } = engine(on, [
+    async () => ({ status: 200, body: { commands: [{ id: 'c1', type: 'send', prompt: 'add tests', when: 'now', plan: true }] } }),
+    async () => ({ status: 410, body: {} }),
+  ])
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/ack'))
+  await $.command.run(run('off'))
+  expect(sent).toEqual([])
+  expect((calls.find(c => c.path === '/ack')?.body as { ok: boolean }).ok).toBe(false)
 })
 
 test('while Claude is busy, a refined order added as a note and a queued one both carry plan mode', async ($, on) => {

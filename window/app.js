@@ -997,9 +997,9 @@ function onActivity(session, events) {
 
 // The tools that act on the computer need the user's own voice since the last automatic notice.
 const clientTools = {
-  luke_send_to_claude: async ({ prompt, when, session }) => {
+  luke_send_to_claude: async ({ prompt, when, session, plan }) => {
     if (!gate.allows()) return REFUSED
-    const out = await hub('POST', '/command', { type: 'send', prompt, when, session: session || undefined }).catch(error => ({ ok: false, message: error.message }))
+    const out = await hub('POST', '/command', { type: 'send', prompt, when, plan: plan === true, session: session || undefined }).catch(error => ({ ok: false, message: error.message }))
     if (out.ok) speech.expectReply(session || focused)
     addLog(out.ok ? 'sent' : 'failed', prompt, { who: session || focused })
     return out.message || (out.ok ? 'Sent.' : 'It did not go through.')

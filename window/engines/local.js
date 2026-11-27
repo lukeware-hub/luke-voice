@@ -2,7 +2,7 @@
 // voice detector, Whisper writes down what the user said, the brain decides what to do and say,
 // and Kokoro speaks it. Only the brain leaves the machine (through the hub, to Claude).
 // It gives the window the same session the ElevenLabs engine does.
-import { REPEAT, askedAgain, decide, liveAction, unsureAnswer } from '/engines/confirm.js'
+import { PLAN_ASK, REPEAT, askedAgain, decide, liveAction, needsPlanAsk, planAsked, unsureAnswer, withPlan } from '/engines/confirm.js'
 import { ACKS, pickAck } from '/engines/acks.js'
 import { pickGreeting } from '/engines/greetings.js'
 import { isConfirm, isDeny, stopTarget } from '/engines/fast-path.js'
@@ -23,7 +23,7 @@ const STOPPED = 'Parei o Claude.'
 const NOT_STOPPED = 'O Claude não está trabalhando agora.'
 // Said when a tool worked but the brain gave no words.
 const DONE_SAY = {
-  luke_send_to_claude: 'Estou refinando a ordem e já mando para o Claude.',
+  luke_send_to_claude: 'Refinei a ordem e mandei para o Claude Code.',
   luke_stop_claude: STOPPED,
   luke_memory_delete: 'Apaguei da memória.',
 }
@@ -657,6 +657,10 @@ export async function startSession({
 
   // A line made ahead of time (an acknowledgement, or "Comecei..." for a yes), said with no wait.
   // False when it is not made yet, or Ceci is talking: the caller says it the usual way.
+  // The order to Claude is refined first and said only after it was sent ("Refinei a ordem e mandei..."): no early
+  // line for it. Other tools say theirs at once.
+  const announce = name => (name === 'luke_send_to_claude' ? false : sayMade(DONE_SAY[name]))
+
   function sayMade(text) {
     const made = ackAudio.get(text)
     if (!made || isEnded || isStale() || mode === 'speaking' || saying !== 0) return false
@@ -877,6 +881,11 @@ export async function startSession({
     // two voices, or a word lost in the noise), neither runs nor drops the action: Ceci asks again.
     const asked = action ? askAgain({ text }) : null
     if (asked) return asked
+    if (action?.planAsked && isDeny(text)) {
+      // "Não" to "planejo antes?": the order goes as it is, with no plan.
+      timing('fast path', 0, 'no to "plan first?"')
+      return runTool(withPlan(action, false), '', announce(action.tool.name))
+    }
     if (action && isDeny(text)) {
       timing('fast path', 0, 'no to "ok?"')
       return say(DENIED)
@@ -890,11 +899,19 @@ export async function startSession({
       return timing('fast path', 0, 'stop: Ceci only')
     }
     if (stop === 'claude') return stopNow()
+    if (action && needsPlanAsk(action) && isConfirm(text, recentSaid.join(' '))) {
+      // The order is confirmed; before it goes, Ceci asks whether to plan first. The action waits again.
+      timing('fast path', 0, 'yes to "ok?": asking plan first')
+      commitTurn()
+      pendingAction = planAsked(action, Date.now())
+      return say(PLAN_ASK)
+    }
     if (action && isConfirm(text, recentSaid.join(' '))) {
       timing('fast path', 0, `yes to "ok?": ${action.tool.name}`)
+      if (action.planAsked) return runTool(withPlan(action, true), '', announce(action.tool.name))
       // "Comecei..." plays at once, made ahead of time, while the tool starts; a failure is still
       // explained after it.
-      return runTool(action.tool, '', sayMade(DONE_SAY[action.tool.name]))
+      return runTool(action.tool, '', announce(action.tool.name))
     }
     // An answer to "ok?" the fast path did not take: written to the log, so a missed short yes
     // can be found and added.

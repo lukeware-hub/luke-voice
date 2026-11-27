@@ -28,7 +28,7 @@ const MAX_LINE_TEXT = 8000
 const MAX_TOOL_TEXT = 2000
 
 type Command =
-  | { id: string; type: 'send'; prompt: string; when: 'now' | 'after_current' }
+  | { id: string; type: 'send'; prompt: string; when: 'now' | 'after_current'; plan?: boolean }
   | { id: string; type: 'stop' }
   | { id: string; type: 'task'; task: string }
   | { id: string; type: 'think'; request: BrainRequest }
@@ -437,6 +437,47 @@ export function refinePrompt(speech: string) {
     'Rules: keep the meaning of the order exactly as spoken. Never invent facts, files, paths or requirements. Fix transcription mistakes only when the meaning is clear. Keep code, paths, names, commands and English technical words as spoken. A short order gets a short Goal. Do not do the work, do not use any tool and do not ask questions.',
     `Answer with only the refined prompt between ${REFINED_OPEN} and ${REFINED_CLOSE}, and nothing else.`,
   ].join('\n')
+}
+
+// With "plan first" (Ceci asked the user and heard a yes), the refined prompt is planned before it goes:
+// one more model call writes the plan the way Claude Code's plan mode does (the steps, the files, the
+// risks), it is saved as a markdown file, and the main chat receives only that file's path. The engine
+// cannot start the native plan skill, so the prompt carries its shape.
+export const PLAN_TIMEOUT_MS = 60_000
+export const PLAN_MAX_TOKENS = 2500
+export const PLAN_DIR = '.claude/luke-voice-plans'
+
+export function planPrompt(refined: string) {
+  return [
+    'You are in plan mode, as the native Claude Code plan skill works: you only plan, you never do the work and you use no tool. Below is a refined order for the main Claude Code chat. Write the implementation plan for it as a markdown document, in Brazilian Portuguese with correct accents.',
+    '',
+    'Order:',
+    refined,
+    '',
+    'The document has: a title (# Plano: ...), "## Contexto", "## Passos" (numbered, each short and concrete), "## Arquivos" (the files likely touched, only ones the order or the repository name; never invent paths: say "a descobrir" when unknown), "## Riscos" and "## Verificação" (how to check it works). Keep the meaning of the order exactly. Never invent facts.',
+    `Answer with only the markdown between ${PLAN_OPEN} and ${PLAN_CLOSE}, and nothing else.`,
+  ].join('\n')
+}
+export const PLAN_OPEN = '<plan-markdown>'
+export const PLAN_CLOSE = '</plan-markdown>'
+
+// The plan's markdown in the model's answer, or null when it is missing or has no steps.
+export function parsePlan(answer: string): string | null {
+  const text = answer.match(/<plan-markdown>([\s\S]*?)<\/plan-markdown>/i)?.[1]?.trim() ?? ''
+  return /##\s*Passos/i.test(text) ? text : null
+}
+
+// Where the plan is saved: a file named by the time, inside the session's folder.
+export const planFile = (cwd: string, at: number) => `${cwd.replace(/[\\/]+$/, '')}/${PLAN_DIR}/plano-${new Date(at).toISOString().replace(/[:.]/g, '-')}.md`
+
+// What the main chat receives with a plan: the refined prompt and the plan file's path.
+function framePlanned(refined: string, path: string) {
+  return `The user asked luke-voice, their voice assistant, to pass this on. It was refined from their speech with Prompt Master, planned with plan mode, and confirmed by them:
+
+${refined}
+
+The plan is already written, as a markdown file at: ${path}
+Read that file first, then carry out the plan. Report if you had to leave it.`
 }
 
 // The refined prompt in a refine subagent's answer, or null when it is missing or has no Goal.
@@ -852,15 +893,38 @@ async function refineAndSend($: EngineInterface, command: Send) {
       await failRefine($, command, reply.isAnswered ? 'a resposta veio sem o prompt refinado' : `o modelo não respondeu (${reply.reason})`)
       return ack($, command.id, false, 'The refinement failed, so nothing was sent to Claude.')
     }
-    await deliver($, command, refined)
+    let planPath: string | null = null
+    if (command.plan) {
+      const planned = await savePlan($, refined)
+      if (typeof planned !== 'string') {
+        await failRefine($, command, planned.why)
+        return ack($, command.id, false, `The plan failed, so nothing was sent to Claude: ${planned.why}`)
+      }
+      planPath = planned
+    }
+    await deliver($, command, refined, planPath)
     const t3 = await $.clock.now()
     const seconds = (ms: number) => (ms / 1000).toFixed(1)
     await addLine($, { kind: 'info', text: `Ordem refinada em ${seconds(t2 - t0)} s (prompt ${seconds(t1 - t0)} s, modelo ${seconds(t2 - t1)} s, entrega ${seconds(t3 - t2)} s).` })
-    return ack($, command.id, true, `Refined with Prompt Master in ${seconds(t2 - t0)} s and sent to Claude's chat.`)
+    return ack($, command.id, true, `Sent: the order was refined with Prompt Master and sent to Claude's chat${planPath ? ', with its plan file' : ''}.`)
   } catch (error) {
     const why = error instanceof Error ? error.message : String(error)
     await failRefine($, command, why)
     return ack($, command.id, false, `Could not refine the order, so nothing was sent: ${why}`)
+  }
+}
+
+// Plans the refined prompt with one model call and saves it as markdown. The path, or why it failed.
+async function savePlan($: EngineInterface, refined: string): Promise<string | { why: string }> {
+  const reply = await $.model.complete({ model: SUMMARY_MODEL, prompt: planPrompt(refined), effort: 'low', maxTokens: PLAN_MAX_TOKENS, timeoutMs: PLAN_TIMEOUT_MS })
+  const plan = reply.isAnswered ? parsePlan(reply.text) : null
+  if (!plan) return { why: reply.isAnswered ? 'a resposta veio sem o plano' : `o modelo não respondeu ao plano (${reply.reason})` }
+  try {
+    const path = planFile(await $.session.cwd(), await $.clock.now())
+    await $.fs.write(path, `${plan}\n`)
+    return path
+  } catch (error) {
+    return { why: `não consegui salvar o plano: ${error instanceof Error ? error.message : String(error)}` }
   }
 }
 
@@ -873,8 +937,8 @@ async function failRefine($: EngineInterface, command: Send, why: string) {
 
 // The refined order goes to the main chat of the session: a new turn, a note on the running one, or
 // the queue, as the call asked.
-async function deliver($: EngineInterface, command: Send, refined: string) {
-  const text = frame(refined)
+async function deliver($: EngineInterface, command: Send, refined: string, planPath: string | null = null) {
+  const text = planPath ? framePlanned(refined, planPath) : frame(refined)
   if (!isBusy) {
     submitTurn($, text)
     return addLine($, { kind: 'sent', text: refined })

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { MAX_REPEATS, PENDING_TTL_MS, REPEAT, askedAgain, decide, liveAction, unsureAnswer } from './confirm.js'
+import { MAX_REPEATS, PENDING_TTL_MS, REPEAT, askedAgain, decide, liveAction, unsureAnswer, PLAN_ASK, needsPlanAsk, planAsked, withPlan } from './confirm.js'
 
 const task = { name: 'luke_send_to_claude', args: { prompt: 'roda os testes' } }
 const send = { name: 'luke_send_to_claude', args: { prompt: 'faz o commit' } }
@@ -130,4 +130,16 @@ test('asking again keeps the same action, fresh, and stops after a few times so 
     assert.equal(liveAction(pending, 1000 * i + 1), pending, 'still answerable by the repeated "sim"')
   }
   assert.equal(unsureAnswer(pending, { noSpeech: true }), null)
+})
+
+test('an order to Claude asks "plan first?" once; its answer sets plan on the tool', () => {
+  const action = { tool: task, at: 1 }
+  assert.equal(needsPlanAsk(action), true)
+  assert.equal(needsPlanAsk({ tool: stop, at: 1 }), false)
+  assert.match(PLAN_ASK, /ok\?$/)
+  const asked = planAsked(action, 5)
+  assert.equal(needsPlanAsk(asked), false)
+  assert.equal(asked.planAsked, true)
+  assert.deepEqual(withPlan(asked, true).args, { prompt: 'roda os testes', plan: true })
+  assert.deepEqual(withPlan(asked, false).args, { prompt: 'roda os testes', plan: false })
 })

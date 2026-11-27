@@ -872,8 +872,8 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
         const prompt = String(body.prompt ?? '').trim()
         if (!prompt) return [400, { ok: false, message: 'The prompt is empty.' }]
         const when = body.when === 'after_current' ? 'after_current' : 'now'
-        remember({ kind: 'task', text: `Mandar ao Claude: ${prompt}`, session: session.name, meta: { type: 'send', when } })
-        return [200, recorded(await enqueue(session, { type: 'send', prompt: prompt.slice(0, 8000), when }), session)]
+        remember({ kind: 'task', text: `Mandar ao Claude: ${prompt}`, session: session.name, meta: { type: 'send', when, plan: body.plan === true } })
+        return [200, recorded(await enqueue(session, { type: 'send', prompt: prompt.slice(0, 8000), when, plan: body.plan === true }), session)]
       }
       if (body.type === 'task') {
         const task = String(body.task ?? '').trim()

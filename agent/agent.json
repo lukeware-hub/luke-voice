@@ -34,6 +34,10 @@
           "session": {
             "type": "string",
             "description": "The short name of the session to send to. Leave empty for the focused one."
+          },
+          "plan": {
+            "type": "boolean",
+            "description": "Never set it yourself: luke-voice asks the user 'plan first?' after the yes and fills it in. true: plan with the native plan flow, save the plan as a markdown file and send Claude its path."
           }
         }
       }
