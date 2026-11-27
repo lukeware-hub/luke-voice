@@ -62,7 +62,7 @@ If you see **A instalação parou**, read the **O que fazer** line under it, fix
 1. Close Claude Code completely and open it again. If the installer installed Node.js or Git, open it from a new terminal window.
 2. That's it: the first time, luke-voice turns on by itself, the call window opens and Ceci greets you, for example "Oi! Eu sou a Ceci. O que vamos fazer hoje?" (the words change each call). Talk in Portuguese.
 
-Later, `/luke-voice call` starts a call, and **✦ luke-voice: on/off** above the prompt turns it on and off. If something is missing, type `/luke-voice help`: it checks your setup and says what to fix.
+Later, `/luke-voice call` starts a call, and **✦ luke-voice: on/off** (above the prompt on Desktop, in the prompt footer in the terminal) turns it on and off. If something is missing, type `/luke-voice help`: it checks your setup and says what to fix.
 
 ## For AI agents
 

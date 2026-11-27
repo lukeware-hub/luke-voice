@@ -1376,8 +1376,29 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  // Footer row: what the engine and other mods draw there, then the toggle.
+  // Footer row: what the engine and other mods draw there, then the toggle. On desktop the footer shows only one
+  // mod button and a mod may only draw its own, so there the toggle lives above the prompt (below).
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
+    if (e.surface === 'desktop') return next(e)
+    const { Box, Button } = $.ui.resolve(e)
+    const active = await read($, isOn)
+
+    return (
+      <Box>
+        {await next(e)}
+        <Button
+          key="luke-voice-toggle"
+          label={active ? '✦ luke-voice: on' : '✦ luke-voice: off'}
+          variant={active ? 'primary' : 'secondary'}
+          onPress={() => toggle($, opts)}
+        />
+      </Box>
+    )
+  })
+
+  // Desktop: the toggle in its own row directly above the prompt; a survey there takes the place.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.surface !== 'desktop' || e.props.hasSurvey) return next(e)
     const { Box, Button } = $.ui.resolve(e)
     const active = await read($, isOn)
 
