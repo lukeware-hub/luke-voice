@@ -177,28 +177,31 @@
               <button type="button" role="radio" data-theme-option="dark" aria-checked="false">Escuro</button>
             </div>
             <label class="group-label" for="micSelect">Microfone</label>
-            <select id="micSelect" class="select" aria-describedby="micHint">
-              <option value="">Padrão do sistema</option>
-            </select>
-            <div class="mic-test">
+            <div class="mic">
+              <select id="micSelect" class="select" aria-describedby="micHint">
+                <option value="">Padrão do sistema</option>
+              </select>
               <div class="mic-test-row">
-                <button id="micTestBtn" class="ghost" type="button">
+                <button id="micTestBtn" class="ghost mic-btn" type="button">
                   <svg class="icon" aria-hidden="true"><use href="#i-microphone" /></svg>
                   <span id="micTestLabel">Gravar teste</span>
                 </button>
                 <div class="meter" aria-hidden="true"><span id="micMeter" class="meter-fill"></span></div>
               </div>
               <div id="micResult" class="mic-result" data-quality="" role="status" aria-live="polite" hidden>
-                <span id="micBadge" class="quality-badge"></span>
+                <div class="mic-result-head">
+                  <span id="micBadge" class="quality-badge"></span>
+                  <button id="micPlayBtn" class="ghost mic-btn" type="button" hidden>
+                    <svg class="icon" aria-hidden="true"><use id="micPlayIcon" href="#i-play-fill" /></svg>
+                    <span id="micPlayLabel">Ouvir gravação</span>
+                  </button>
+                </div>
                 <ul id="micTips" class="mic-tips"></ul>
-                <button id="micPlayBtn" class="ghost mic-play" type="button" hidden>
-                  <svg class="icon" aria-hidden="true"><use id="micPlayIcon" href="#i-play-fill" /></svg>
-                  <span id="micPlayLabel">Ouvir gravação</span>
-                </button>
+                <p id="micDevice" class="mic-device" hidden></p>
               </div>
+              <p id="micInCallNote" class="mic-hint mic-in-call" role="status" hidden>Encerre a chamada para testar o microfone: os dois não podem usá-lo ao mesmo tempo.</p>
+              <p id="micHint" class="mic-hint">Vale na próxima chamada e fica salvo. O teste grava 5 segundos: fale como numa chamada e ouça depois. O áudio fica só neste computador e some ao gravar de novo ou fechar a janela.</p>
             </div>
-            <p id="micInCallNote" class="mic-hint mic-in-call" role="status" hidden>Encerre a chamada para testar o microfone: os dois não podem usá-lo ao mesmo tempo.</p>
-            <p id="micHint" class="mic-hint">A escolha vale na próxima chamada e fica salva. O teste grava 5 segundos: fale como numa chamada. Depois, ouça a gravação para julgar. O áudio fica só neste computador e some ao gravar de novo ou fechar a janela.</p>
             <div class="group-label">Estado</div>
             <dl id="facts" class="facts"></dl>
             <p class="note">A voz gratuita roda neste computador e é baixada na instalação: a voz natural com placa de vídeo de 6 GB ou mais, a voz leve sem ela. A voz ElevenLabs é opcional: troque com <code>/luke-voice voz</code>. A chave da ElevenLabs só é usada se você escolher essa voz; ela é configurada no Claude Code, com <code>/plugin configure luke-voice@luke-voice</code>, e nunca chega a esta janela.</p>

@@ -50,10 +50,12 @@ for (const option of document.querySelectorAll('[data-theme-option]')) {
 
 // Microphone: lists the system's audio inputs and keeps the chosen one for every call.
 const micSelect = document.getElementById('micSelect')
+let micListed = false
 async function listMicrophones() {
   if (!micSelect || !navigator.mediaDevices?.enumerateDevices) return
   const saved = savedMicrophone()
   const options = inputOptions(await navigator.mediaDevices.enumerateDevices().catch(() => []))
+  micListed = options.length > 0
   micSelect.replaceChildren(
     new Option('Padrão do sistema', ''),
     ...options.map(({ id, label }) => new Option(label, id)),
@@ -61,7 +63,21 @@ async function listMicrophones() {
   // A saved microphone that is unplugged shows as the default; the choice itself stays saved.
   micSelect.value = options.some(option => option.id === saved) ? saved : ''
 }
+// Before the first permission the browser hides every device id, so the list would be empty.
+// One short open of the microphone, when the user reaches for the list, makes the real devices show.
+async function revealMicrophones() {
+  if (micListed || callState === 'live' || callState === 'connecting' || micTesting) return
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    stream.getTracks().forEach(track => track.stop())
+  } catch {
+    return
+  }
+  await listMicrophones()
+}
 micSelect?.addEventListener('change', () => saveMicrophone(micSelect.value))
+micSelect?.addEventListener('pointerdown', () => void revealMicrophones())
+micSelect?.addEventListener('focus', () => void revealMicrophones())
 navigator.mediaDevices?.addEventListener?.('devicechange', listMicrophones)
 listMicrophones()
 
@@ -78,6 +94,7 @@ const micInCallNote = document.getElementById('micInCallNote')
 const micPlayBtn = document.getElementById('micPlayBtn')
 const micPlayIcon = document.getElementById('micPlayIcon')
 const micPlayLabel = document.getElementById('micPlayLabel')
+const micDevice = document.getElementById('micDevice')
 let micTesting = false
 // The last test clip, kept only in memory so the user can judge it by ear.
 const micPlayback = new Audio()
@@ -109,8 +126,10 @@ micPlayBtn?.addEventListener('click', () => {
   void micPlayback.play().catch(() => setPlaying(false))
 })
 
-function showTestResult(quality, label, tips) {
+function showTestResult(quality, label, tips, device = '') {
   micResult.hidden = false
+  micDevice.textContent = device ? `Gravado com: ${device}` : ''
+  micDevice.hidden = !device
   micResult.dataset.quality = quality
   micBadge.textContent = label
   micTips.replaceChildren(...tips.map(tip => Object.assign(document.createElement('li'), { textContent: tip })))
@@ -137,8 +156,9 @@ async function recordMicTest() {
   try {
     // The same constraints the call uses, so the test hears what Ceci would hear.
     micTestLabel.textContent = 'Aguardando permissão...'
+    // What the list shows is what is tested; an exact request fails instead of silently using another device.
     const request = navigator.mediaDevices.getUserMedia({
-      audio: micConstraints(savedMicrophone(), { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: false }),
+      audio: micConstraints(micSelect?.value ?? savedMicrophone(), { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: false }, { strict: true }),
     })
     const timeout = new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error('timeout'), { name: 'NotAllowedError' })), 15000))
     // A stream that arrives after the timeout is stopped too, or the mic stays on.
@@ -162,12 +182,17 @@ async function recordMicTest() {
     const audio = new Float32Array(chunks.length * 512)
     chunks.forEach((chunk, i) => audio.set(chunk, i * 512))
     const result = analyzeRecording(audio, TEST_RATE)
-    showTestResult(result.quality, result.label, result.tips)
+    showTestResult(result.quality, result.label, result.tips, stream.getAudioTracks()[0]?.label)
     setPlaybackClip(audio)
   } catch (error) {
     const denied = error?.name === 'NotAllowedError' || error?.name === 'SecurityError'
+    const gone = error?.name === 'OverconstrainedError' || error?.name === 'NotFoundError'
     showTestResult('pessimo', 'Sem acesso', [
-      denied ? 'Libere o microfone nesta janela e tente de novo.' : 'Não consegui abrir este microfone. Escolha outro e tente de novo.',
+      denied
+        ? 'Libere o microfone nesta janela e tente de novo.'
+        : gone
+          ? 'Esse microfone não está disponível agora. Confira se está ligado ou escolha outro.'
+          : 'Não consegui abrir este microfone. Escolha outro e tente de novo.',
     ])
   } finally {
     stream?.getTracks().forEach(track => track.stop())

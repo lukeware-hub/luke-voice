@@ -1472,12 +1472,18 @@ button:disabled {
   transform: scale(0.96);
 }
 
+.mic {
+  display: grid;
+  gap: 12px;
+  max-width: 420px;
+  margin-bottom: 28px;
+}
+
 .select {
   display: block;
   width: 100%;
-  max-width: 420px;
-  min-height: 40px;
-  margin: 0 0 6px;
+  min-height: 44px;
+  margin: 0;
   padding: 0 12px;
   border: 0;
   border-radius: 10px;
@@ -1487,15 +1493,20 @@ button:disabled {
   font-size: 13.5px;
 }
 
-.mic-test {
-  margin: 8px 0 6px;
-}
-
 .mic-test-row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  max-width: 420px;
+  gap: 14px;
+}
+
+/* Same height as the select above, so the column reads as one stack. */
+.mic-btn {
+  flex: none;
+  min-width: 0;
+  height: 44px;
+  padding: 0 18px;
+  font-size: 14px;
+  gap: 8px;
 }
 
 .meter {
@@ -1519,16 +1530,30 @@ button:disabled {
 }
 
 .mic-result {
-  max-width: 420px;
-  margin-top: 12px;
-  padding: 12px 16px;
+  padding: 14px 16px;
   border-radius: 10px;
   background: var(--fill);
 }
 
+.mic-result[hidden] {
+  display: none;
+}
+
+.mic-result-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* On the card's own fill the button needs its own step of contrast. */
+.mic-result .mic-btn {
+  background: var(--fill-strong);
+}
+
 .quality-badge {
   display: inline-block;
-  padding: 2px 10px;
+  padding: 3px 10px;
   border-radius: 999px;
   font-size: 13px;
   font-weight: 600;
@@ -1554,14 +1579,23 @@ button:disabled {
 }
 
 .mic-tips {
-  margin: 8px 0 0;
+  margin: 10px 0 0;
   padding-left: 18px;
   color: var(--muted);
   font-size: 12.5px;
 }
 
+.mic-device {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.mic-device[hidden] {
+  display: none;
+}
+
 .mic-in-call {
-  margin-bottom: 8px;
   color: var(--text);
 }
 
@@ -1569,13 +1603,8 @@ button:disabled {
   display: none;
 }
 
-.mic-play {
-  margin-top: 12px;
-}
-
 .mic-hint {
-  margin: 0 0 28px;
-  padding: 0 16px;
+  margin: 0;
   color: var(--muted);
   font-size: 12.5px;
 }
