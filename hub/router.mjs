@@ -152,7 +152,7 @@ export async function route(text, { ask, lastSaid = '' }) {
   if (intent === 'goodbye' && !BYE.test(t) && /\bboa noite\b/.test(plain(lastSaid))) intent = 'greeting'
   if (intent !== 'claude' && !confirmed(intent, text)) intent = 'claude'
   // A question anywhere ("Posso rodar? Me confirma.") or a "confirma/posso/pode" asks for an answer.
-  if (intent === 'ack' && (/\?/.test(lastSaid) || /\b(confirma|posso|pode)\b/i.test(lastSaid))) intent = 'claude'
+  if (intent === 'ack' && (/\?/.test(lastSaid) || /\b(confirma|posso|pode|ok)\b/i.test(lastSaid))) intent = 'claude'
   const say = replyFor(intent)
   // A "bom dia" is answered with a "Bom dia!" instead of the line's own hello.
   const hello = intent === 'greeting' && t.match(HELLO_OF_DAY)?.[0]

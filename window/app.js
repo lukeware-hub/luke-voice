@@ -876,7 +876,7 @@ const clientTools = {
     const out = await hub('GET', `/activity?session=${encodeURIComponent(session || '')}`).catch(error => ({ text: error.message }))
     return quoteUntrusted(out.text)
   },
-  // Ceci's permanent memory. Reading needs no "posso?"; what the sessions wrote comes back quoted.
+  // Ceci's permanent memory. Reading needs no "ok?"; what the sessions wrote comes back quoted.
   luke_memory_search: async ({ query, from, to }) => {
     const params = new URLSearchParams({ q: String(query ?? ''), limit: '8' })
     if (from) params.set('from', String(from))

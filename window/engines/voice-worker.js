@@ -331,7 +331,7 @@ self.onmessage = async ({ data }) => {
     if (type === 'transcribe') {
       const started = performance.now()
       // Noise with no speech in it (a fan, typing) never reaches Whisper, which would invent words.
-      // `isAnswer`: a "posso?" waits, and a soft short "sim" passes a lower bar (speech-check.js).
+      // `isAnswer`: a "ok?" waits, and a soft short "sim" passes a lower bar (speech-check.js).
       if (turn) {
         const options = { isAnswer: Boolean(data.isAnswer) }
         const counts = await speechFrames(data.audio, c => hasSpeech(c, options))

@@ -562,7 +562,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     sendRoster()
   }
 
-  // Before Ceci asks "posso?" about deleting from the memory, the user hears how much it is; a
+  // Before Ceci asks "ok?" about deleting from the memory, the user hears how much it is; a
   // delete that matches nothing is not asked about at all.
   const withDeleteCount = (say, pending) => {
     if (pending?.name !== 'luke_memory_delete' || !memory?.isAvailable) return { say, pending }
@@ -627,7 +627,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       return [200, memory.preview(body.scope ?? {})]
     },
     // Deleting is for good. The window and the commands confirm before they ask; the voice only
-    // asks after the user's yes to "posso?" (the brain's luke_memory_delete is a pending tool).
+    // asks after the user's yes to "ok?" (the brain's luke_memory_delete is a pending tool).
     'POST /memory/delete': (_none, body) => {
       if (!memory) return [503, { error: 'The memory is not available.' }]
       const scope = body.scope ?? {}

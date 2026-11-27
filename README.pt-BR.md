@@ -2,7 +2,7 @@
 
 **Read in English: [README.md](README.md)**
 
-A Ceci, uma assistente de voz ao lado do Claude Code, em português do Brasil. Você fala o que quer, ela repete e pergunta "posso?", e depois do seu "sim" um subagente do Claude Code faz a tarefa no seu computador. Quando termina, ela conta o resultado em voz alta, sem esperar você falar: se não houver chamada, ela abre uma, e um resultado que chega com a janela fechada fica guardado até ela contar.
+A Ceci, uma assistente de voz ao lado do Claude Code, em português do Brasil. Você fala o que quer, ela repete e pergunta "ok?", e depois do seu "sim" um subagente do Claude Code faz a tarefa no seu computador. Quando termina, ela conta o resultado em voz alta, sem esperar você falar: se não houver chamada, ela abre uma, e um resultado que chega com a janela fechada fica guardado até ela contar.
 
 A Ceci tem duas vozes:
 
@@ -96,7 +96,7 @@ Para instalar sem perguntas, defina `LUKE_VOICE_NO_PROMPT=1` antes de rodar; acr
 ## Como usar
 
 Fale normalmente, em português. Exemplo: *"Verifica no repositório luke-voice onde o botão de ligar é desenhado."*
-1. A Ceci repete e pergunta "posso?". Diga "sim".
+1. A Ceci repete e pergunta "ok?". Diga "sim".
 2. O pedido aparece em **Histórico**, na janela.
 3. Ela conta a resposta quando o subagente terminar. O chat principal fica livre.
 
@@ -126,7 +126,7 @@ O cérebro (Ceci, Luke ou Nara) é o Claude Sonnet 5.5, chamado direto pelo `$.m
 
 Algumas coisas não precisam de chamada ao modelo:
 - "pare" ou "para" para o Claude, com ou sem o nome dela e quantas vezes você disser ("Para, Ceci, para!", "chega, Ceci").
-- Quando a Ceci pergunta "posso?", um "sim" simples roda a ação pendente na hora, e um "não" simples cancela.
+- Quando a Ceci pergunta "ok?", um "sim" simples roda a ação pendente na hora, e um "não" simples cancela.
 - Quando o cérebro demora mais de 600 ms, a Ceci diz um reconhecimento curto: um "Entendi." rápido depois de uma frase curta, e uma frase de escuta como "Deixa eu entender o que você está falando." depois de uma longa, nunca a mesma duas vezes seguidas (`window/engines/acks.js`). Eles são gerados uma vez por janela, só enquanto ninguém fala, então nunca atrasam a primeira resposta dela.
 - No perfil gpu, um roteador local responde conversa rápida (cumprimentos, agradecimentos, despedidas, "quem é você", a idade dela, quem a criou) em cerca de 0,3 s, com frases escritas em `hub/router.mjs`, então ele nunca inventa nada. Todo o resto, e qualquer pedido, vai para o Claude Sonnet. Uma checagem de palavras por cima do modelo pequeno garante que um pedido nunca seja respondido localmente (0 de 49 pedidos de teste foram).
 
@@ -140,7 +140,7 @@ Medido numa RTX 3060 Ti, perfil gpu:
 - primeiro áudio de uma resposta: 0,74 a 0,94 s;
 - transcrição: cerca de 0,25 s;
 - fim do turno: cerca de 0,18 s;
-- "sim" depois de "posso?" até "Comecei": cerca de 0,7 s.
+- "sim" depois de "ok?" até "Comecei": cerca de 0,7 s.
 
 A Ceci fala uma resposta frase por frase, cortada em cada vírgula. Ela começa assim que a primeira frase fica pronta, e a frase seguinte é feita enquanto ela fala; ela não espera mais o áudio pronto cobrir a resposta inteira, o que levava até 17 s numa resposta longa. O silêncio da própria voz em volta de cada trecho é cortado, e a janela põe uma pausa fixa depois dele: 0,15 s depois de uma vírgula, 0,3 s depois do fim de uma frase (. ! ?) e 0,4 s depois de "…". O silêncio da própria voz no fim de uma frase era de 0,42 s em média e chegava a cerca de 1 s.
 
@@ -181,7 +181,7 @@ Se o [Prompt Master](https://github.com/lukeware-hub/prompt-master), o plugin da
 
 O luke-voice pergunta ao Claude Code o que está instalado, como o `/plugin` faz: `claude plugin list --json` e `claude plugin marketplace list --json`. Só conta o plugin chamado exatamente `prompt-master`, ativado, instalado para o usuário (ou para este projeto), vindo de um marketplace que aponta para o repositório `lukeware-hub/prompt-master` no GitHub. Um plugin com nome igual ou parecido vindo de qualquer outro lugar, ou uma cópia cuja origem não dá para saber (a biblioteca da organização), não conta. `/luke-voice status` mostra o resultado.
 
-O Prompt Master reescreve o que você digita no prompt. Os prompts que o luke-voice manda por você são enviados por um plugin, e o Prompt Master os deixa como estão.
+O Prompt Master também reescreve o que você diz à Ceci, em todo prompt que o luke-voice manda por você: o subagente de uma tarefa de voz, uma nota acrescentada ao turno do Claude em andamento e um prompt que começa um turno. O luke-voice põe as suas palavras entre `<user-speech>` e `</user-speech>`, e o Prompt Master reescreve só essas palavras: as linhas do próprio luke-voice em volta delas (planejar antes, onde trabalhar, a resposta em português) ficam como estão. O Prompt Master sempre tira as marcas, também quando está desligado ou a reescrita falha, e aí as suas palavras vão como foram ditas. Sem o Prompt Master, as marcas chegam ao Claude como estão, uma tag dizendo que as palavras dentro são suas. Nenhum prompt pede ao Claude para rodar o Prompt Master: o `/prompt-master` é só o seu botão de ligar e desligar.
 
 ### A memória da Ceci
 
@@ -189,7 +189,7 @@ A Ceci nunca esquece uma conversa. Toda chamada fica guardada inteira numa memó
 
 - **Lembrar:** a cada fala, a Ceci lê um resumo de tudo desde a primeira conversa, as últimas conversas e o que combina com o que você acabou de dizer. Pergunte "lembra da primeira conversa?" ou "o que a gente falou semana passada?" e ela busca na memória.
 - **Revisar:** a aba **Memória** da janela da chamada lista todas as conversas por dia, com busca, em páginas de 10, 50 ou 100 (10 por padrão; só a página na tela é carregada); no Claude Code, `/luke-voice memoria` e `/luke-voice memoria buscar <texto>`.
-- **Apagar (o único jeito de algo sair):** peça à Ceci ("apaga a conversa de ontem"; ela pergunta "posso?" antes), use os botões **Apagar** da aba Memória, ou `/luke-voice memoria apagar <#conversa | AAAA-MM-DD | AAAA-MM | palavras | tudo>`. Apagar também refaz os resumos que falavam daquilo e compacta o arquivo, para as palavras sumirem do disco. Ao desinstalar, ele pergunta se a memória também deve ser apagada.
+- **Apagar (o único jeito de algo sair):** peça à Ceci ("apaga a conversa de ontem"; ela pergunta "ok?" antes), use os botões **Apagar** da aba Memória, ou `/luke-voice memoria apagar <#conversa | AAAA-MM-DD | AAAA-MM | palavras | tudo>`. Apagar também refaz os resumos que falavam daquilo e compacta o arquivo, para as palavras sumirem do disco. Ao desinstalar, ele pergunta se a memória também deve ser apagada.
 - Os resumos são escritos pelo Claude Haiku, na sua conta do Claude, quando não há chamada. As lembranças vão para o cérebro a cada fala, como a conversa já vai.
 - **Grafo de conhecimento:** um minuto depois do fim de uma chamada (junto com os resumos), o hub atualiza o grafo do [Graphify](https://github.com/Graphify-Labs/graphify) em segundo plano, no máximo uma vez a cada 10 minutos e nunca durante uma chamada. Ele abre a memória só para leitura, escreve uma transcrição por chamada nova ou que cresceu em `~/.ceci/graph/corpus/` e roda `graphify extract` de forma incremental, então só essas transcrições são lidas de novo; o grafo fica em `~/.ceci/graph/graphify-out/` (`graph.json`, `GRAPH_REPORT.md`, `graph.html`), nunca dentro do banco. Uma chamada apagada da memória sai do corpus na próxima atualização. Precisa do `graphify` no PATH (`pip install graphifyy`) e usa o Claude Code na sua conta (Haiku) por padrão. Ajustes: `CECI_GRAPH=0` desliga, `CECI_GRAPH_MODEL`, `CECI_GRAPH_BACKEND`, `CECI_GRAPHIFY` (o comando), `CECI_GRAPH_HOME` (a pasta). `node hub/graph.mjs` roda uma atualização na mão; `~/.ceci/graph/graph.log` e `state.json` dizem como foi a última.
 

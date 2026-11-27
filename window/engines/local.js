@@ -340,7 +340,7 @@ export async function startSession({
   let playing = new Set()
   let playhead = 0
   let busy = Promise.resolve()
-  // The action Ceci asked "posso?" about: a plain yes runs it with no brain call.
+  // The action Ceci asked "ok?" about: a plain yes runs it with no brain call.
   let pendingAction = null
   // Speech that resumes right after a turn closed is joined with it (turn-join.js). `turnNow` is
   // the user turn the running job answers, or null for jobs that are not a user turn.
@@ -395,7 +395,7 @@ export async function startSession({
   }
 
   // Speech to text on the native engine, after Silero (in the worker) confirms there is speech.
-  // `isAnswer`: a "posso?" waits, and a soft short "sim" passes a lower bar (speech-check.js).
+  // `isAnswer`: a "ok?" waits, and a soft short "sim" passes a lower bar (speech-check.js).
   async function nativeTranscribe(audio, isAnswer) {
     const check = await ask('check', { audio, isAnswer })
     if (!check.isSpeech) return { text: '', noSpeech: true, ms: check.ms }
@@ -418,7 +418,7 @@ export async function startSession({
   const synth = text => (isNative ? nativeSynth(text) : isMacVoice ? macSynth(text) : ask('speak', { text }))
   // A soft voice is raised to a steady level first (gain.js), for Silero and the ears alike: on
   // recorded turns at a very low level it halved the word errors, and left normal turns as they were.
-  // While a "posso?" waits for its answer, the speech check lets a soft short "sim" through.
+  // While a "ok?" waits for its answer, the speech check lets a soft short "sim" through.
   const transcribe = audio => {
     const { audio: level, gain } = normalizeSpeech(audio)
     if (gain > 1) console.info(`[luke-voice] quiet speech raised ${gain.toFixed(1)}x for the ears`)
@@ -705,7 +705,7 @@ export async function startSession({
   }
 
   // The user turn being answered stands from here on: it can no longer be joined, its words enter
-  // the history and the "posso?" it answered is let go (turn-join.js).
+  // the history and the "ok?" it answered is let go (turn-join.js).
   function commitTurn() {
     if (turnNow !== null) joiner.commit(turnNow)
     turns.commit()
@@ -735,7 +735,7 @@ export async function startSession({
 
   // One turn with the brain: what to say, what to run now, and what to run on a "sim".
   // `asked` is the brain's answer when it was asked already (beside the router).
-  // `answering` is the live "posso?" this user turn answers, if any (confirm.js).
+  // `answering` is the live "ok?" this user turn answers, if any (confirm.js).
   // `batch`: for a notice, the window's news batch it tells (see onNoticeCut).
   async function think(request, asked = null, answering = null, batch = null) {
     // On a request, "Entendi." plays if the brain is slow, so the user knows Ceci heard.
@@ -758,15 +758,15 @@ export async function startSession({
     return runTool(next.tool, next.say)
   }
 
-  // The answer to "posso?" could not be heard for sure (confirm.js, unsureAnswer): Ceci says "Pode
-  // repetir para mim, por favor?" and the "posso?" stays open, so the repeated "sim" still runs it.
-  // Null when the answer was clear enough, there is no "posso?", or she already asked enough.
+  // The answer to "ok?" could not be heard for sure (confirm.js, unsureAnswer): Ceci says "Pode
+  // repetir para mim, por favor?" and the "ok?" stays open, so the repeated "sim" still runs it.
+  // Null when the answer was clear enough, there is no "ok?", or she already asked enough.
   function askAgain(heard) {
     const action = liveAction(pendingAction, Date.now())
     const why = unsureAnswer(action, heard)
     if (!why || isEnded || isStale()) return null
     timing('ask again', 0, why)
-    // What was heard does not enter the history, and does not let the "posso?" go.
+    // What was heard does not enter the history, and does not let the "ok?" go.
     turns.drop()
     pendingAction = askedAgain(action, Date.now())
     return say(REPEAT)
@@ -847,7 +847,7 @@ export async function startSession({
       // A part carried for joining comes back when what followed was no speech.
       const back = joiner.dropped()
       if (cut || back) return onTurnEnd(back)
-      // A sound right after "posso?" that the speech check could not hear as words: the answer
+      // A sound right after "ok?" that the speech check could not hear as words: the answer
       // may have been lost in it, so Ceci asks for it again instead of staying silent.
       return askAgain({ noSpeech: true })
     }
@@ -855,14 +855,14 @@ export async function startSession({
     if (isEnded || isStale()) return
     if (!text || isNotSpeech(text)) {
       // No words, or words the ears made up from noise: as with a sound with no speech, the reply
-      // it cut off is said again, before any "Pode repetir?" (that reply may be the "posso?" itself).
+      // it cut off is said again, before any "Pode repetir?" (that reply may be the "ok?" itself).
       if (cut) return speak(cut)
       return askAgain({ text })
     }
     // The window's voice gate and quiet mode hear the user now, before the brain is asked: a notice
     // that arrives while the brain thinks must not pass for the user's word.
     onMessage({ source: 'user', message: text })
-    // Any words answer the last "posso?": a plain yes runs it, a plain no drops it, anything else
+    // Any words answer the last "ok?": a plain yes runs it, a plain no drops it, anything else
     // goes to the brain, which may ask again. It is let go only once this turn stands: a turn
     // joined with what the user says next ("é..." then "sim, pode") still answers it.
     const action = liveAction(pendingAction, Date.now())
@@ -874,7 +874,7 @@ export async function startSession({
     const asked = action ? askAgain({ text }) : null
     if (asked) return asked
     if (action && isDeny(text)) {
-      timing('fast path', 0, 'no to "posso?"')
+      timing('fast path', 0, 'no to "ok?"')
       return say(DENIED)
     }
     // A bare "para" or "cancela" is for Ceci (she already stopped, or was quiet). Claude's work is
@@ -887,14 +887,14 @@ export async function startSession({
     }
     if (stop === 'claude') return stopNow()
     if (action && isConfirm(text, recentSaid.join(' '))) {
-      timing('fast path', 0, `yes to "posso?": ${action.tool.name}`)
+      timing('fast path', 0, `yes to "ok?": ${action.tool.name}`)
       // "Comecei..." plays at once, made ahead of time, while the tool starts; a failure is still
       // explained after it.
       return runTool(action.tool, '', sayMade(DONE_SAY[action.tool.name]))
     }
-    // An answer to "posso?" the fast path did not take: written to the log, so a missed short yes
+    // An answer to "ok?" the fast path did not take: written to the log, so a missed short yes
     // can be found and added.
-    if (action) timing('no fast path', 0, `answer to "posso?": "${text.slice(0, 80)}"`)
+    if (action) timing('no fast path', 0, `answer to "ok?": "${text.slice(0, 80)}"`)
     if (isNative && router) {
       // The brain is asked at once, beside the router: when the router passes, its answer is
       // already on the way instead of starting only now. A reply the router gave makes the
@@ -948,7 +948,7 @@ export async function startSession({
       const share = Math.min(level / outPeak, echoShare * 1.5 + 0.01)
       echoShare = Math.min(ECHO_MAX, Math.max(0.02, echoShare + (share - echoShare) * 0.02))
     }
-    // While a "posso?" waits, a soft short answer starts a turn more easily (vad.js).
+    // While a "ok?" waits, a soft short answer starts a turn more easily (vad.js).
     const isAnswer = !isSpeaking && Boolean(liveAction(pendingAction, Date.now()))
     const event = vad.push(frame, { isSpeaking, echo: echoShare * outPeak * ECHO_MARGIN, isAnswer })
     // ?voice-debug=1: the mic level and the learned room level twice a second, to tune the detector.

@@ -13,6 +13,19 @@
 export const PROMPT_MASTER = 'prompt-master'
 export const PROMPT_MASTER_REPO = 'lukeware-hub/prompt-master'
 
+// Where the user's spoken words start and end in each prompt luke-voice sends to Claude. Prompt Master
+// rewrites only what is between them, keeps luke-voice's own lines around them as written, and always
+// takes the marks out, also when it is off or its rewrite fails (prompt-master's hooks/register.tsx
+// writes the same pair, so a change here goes there too). The marks are added whether or not Prompt
+// Master is installed: finding it runs `claude` twice and can fail, and with no Prompt Master the model
+// reads them as what they are, a tag saying the words inside are what the user said.
+export const SPEECH_OPEN = '<user-speech>'
+export const SPEECH_CLOSE = '</user-speech>'
+
+// The user's words between the marks, each mark on a line of its own. A mark inside the words is taken
+// out first, so the words always end at the closing one.
+export const markSpeech = (speech: string) => `${SPEECH_OPEN}\n${speech.split(SPEECH_OPEN).join('').split(SPEECH_CLOSE).join('')}\n${SPEECH_CLOSE}`
+
 // The two listings, in the order they are read.
 export const PLUGIN_LISTINGS = [
   ['plugin', 'list', '--json'],

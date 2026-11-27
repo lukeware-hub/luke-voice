@@ -107,7 +107,7 @@ export const MAX_TURNS = 12
 // The call as the brain reads it. The user's words of a turn are held until that turn is committed
 // (Ceci answers it, or a tool starts for it): a turn that is joined with what the user said next
 // is dropped instead, so the brain never reads the first part twice, and what it was waiting on
-// (the "posso?" a "sim" answers) is only let go once the turn stands. history() includes the held
+// (the "ok?" a "sim" answers) is only let go once the turn stands. history() includes the held
 // words, so the brain reading the turn it answers sees them, as before.
 export function createTurnLog({ max = MAX_TURNS } = {}) {
   const turns = []

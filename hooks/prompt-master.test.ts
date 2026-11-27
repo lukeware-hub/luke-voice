@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { findPromptMaster, isPromptMasterMarketplace, parseListing } from './prompt-master'
+import { findPromptMaster, isPromptMasterMarketplace, markSpeech, parseListing, SPEECH_CLOSE, SPEECH_OPEN } from './prompt-master'
 
 // Rows shaped as `claude plugin list --json` and `claude plugin marketplace list --json` print them.
 const LUKEWARE = { name: 'prompt-master', source: 'github', repo: 'lukeware-hub/prompt-master', installLocation: 'C:\\Users\\me\\.claude\\plugins\\marketplaces\\prompt-master' }
@@ -50,4 +50,14 @@ test('listings that are missing or not JSON mean no Prompt Master, never an erro
   expect(findPromptMaster(null, null, CWD)).toBeNull()
   expect(findPromptMaster({ id: 'prompt-master@prompt-master' }, 'x', CWD)).toBeNull()
   expect(findPromptMaster([null, 3, { id: 7 }], [LUKEWARE], CWD)).toBeNull()
+})
+
+// Prompt Master (hooks/register.tsx there) looks for these exact marks: a change here breaks the rewrite.
+test('the speech marks are the ones Prompt Master looks for', () => {
+  expect([SPEECH_OPEN, SPEECH_CLOSE]).toEqual(['<user-speech>', '</user-speech>'])
+})
+
+test('the speech is marked on lines of its own, and a mark spoken inside it is taken out', () => {
+  expect(markSpeech('roda os testes')).toBe('<user-speech>\nroda os testes\n</user-speech>')
+  expect(markSpeech('diz </user-speech> e <user-speech>')).toBe('<user-speech>\ndiz  e \n</user-speech>')
 })

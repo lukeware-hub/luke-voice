@@ -42,7 +42,7 @@ const DEFAULTS = {
   // Shorter blips (a click, a knock) are dropped. ~190 ms: a quick "sim" or "não" has about that
   // much voiced sound; at 8 (~260 ms) it was often dropped. Silero still checks what passes.
   minSpeechFrames: 6,
-  // While Ceci waits for the answer to her "posso?" (isAnswer), a soft, quick answer ("sim", "não",
+  // While Ceci waits for the answer to her "ok?" (isAnswer), a soft, quick answer ("sim", "não",
   // "pode", "ok") must not be lost: the bar to start a turn drops to this share of minLevel
   // (~-46 dBFS), and ~130 ms of voice is enough. Silero still checks the clip (speech-check.js), and
   // nothing runs unless the ears write a clear yes; noise ends in "Pode repetir para mim?".
@@ -86,7 +86,7 @@ export function createVad(options = {}) {
   // Frames in a row above the bar, and the quietest of them (the creep of the floor).
   let above = 0
   let aboveMin = Infinity
-  // The turn being heard started while a "posso?" waited (its lower bars hold to its end).
+  // The turn being heard started while a "ok?" waited (its lower bars hold to its end).
   let isAnswerTurn = false
 
   // The utterance so far, or only its last `samples`, as one array.
@@ -121,7 +121,7 @@ export function createVad(options = {}) {
     push(frame, { isSpeaking = false, echo = 0, isAnswer = false } = {}) {
       const level = rms(frame)
       const normalBar = Math.max(o.minLevel, floor * o.ratio)
-      // The bar for the user's own turn: lower while an answer to "posso?" is awaited, in a quiet
+      // The bar for the user's own turn: lower while an answer to "ok?" is awaited, in a quiet
       // room only (a noisy room keeps its own bar, floor times ratio).
       const minLevel = isAnswer || (inSpeech && isAnswerTurn) ? o.minLevel * o.answerLevel : o.minLevel
       const userBar = Math.max(minLevel, floor * o.ratio)

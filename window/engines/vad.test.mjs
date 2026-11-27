@@ -291,7 +291,7 @@ test('the turn model is asked again as the pause goes on, so a later "done" ends
   assert.notEqual(ids[0], ids[1])
 })
 
-test('while a "posso?" waits, a soft, quick answer is a turn; the same sound otherwise is dropped', () => {
+test('while a "ok?" waits, a soft, quick answer is a turn; the same sound otherwise is dropped', () => {
   // A soft "sim": ~130 ms at 0.006, under the usual bar (0.008) and shorter than the usual minimum.
   const soft = () => [...Array(40).fill(0).map(silence), ...Array(4).fill(0).map(() => tone(0.006)), ...Array(45).fill(0).map(silence)]
   const answer = feed(createVad(), soft(), { isAnswer: true })

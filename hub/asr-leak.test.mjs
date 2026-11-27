@@ -28,7 +28,7 @@ test("the user's own words stay, even when they repeat a few of Ceci's or the gl
 
 test("the ears' language tag is never the user's words, with or without words after it", () => {
   assert.equal(asrWords('language Portuguese<asr_text>Sim, pode.'), 'Sim, pode.')
-  // No words in the audio: the tag alone, as heard after "posso?" on the real engine.
+  // No words in the audio: the tag alone, as heard after "ok?" on the real engine.
   for (const heard of ['(language: pt)', 'language Portuguese', ' (language: pt). ', 'language pt-BR', '']) assert.equal(asrWords(heard), '', heard)
   assert.equal(asrWords('(language: pt) Sim.'), 'Sim.')
   // Words that only look like it stay.

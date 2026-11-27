@@ -15,7 +15,7 @@ test('"para" inside a request is a preposition, not a stop', () => {
   }
 })
 
-test('a short yes to "posso?" is a confirmation, as people say it and as Whisper writes it', () => {
+test('a short yes to "ok?" is a confirmation, as people say it and as Whisper writes it', () => {
   for (const said of ['Sim.', 'sim, pode', 'Pode.', 'Pode sim!', 'Manda ver.', 'Claro, pode fazer.', 'Sim, pode-se.', 'Sim, pode-ya!', 'Ok', 'Beleza, pode ir', 'Isso.', 'Bora!', 'Ceci, pode sim', 'Com certeza.']) {
     assert.equal(isConfirm(said), true, said)
     assert.equal(isDeny(said), false, said)
