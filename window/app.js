@@ -74,6 +74,7 @@ const micMeter = document.getElementById('micMeter')
 const micResult = document.getElementById('micResult')
 const micBadge = document.getElementById('micBadge')
 const micTips = document.getElementById('micTips')
+const micInCallNote = document.getElementById('micInCallNote')
 const micPlayBtn = document.getElementById('micPlayBtn')
 const micPlayIcon = document.getElementById('micPlayIcon')
 const micPlayLabel = document.getElementById('micPlayLabel')
@@ -489,6 +490,8 @@ function setCall(state, caption) {
   ui.mic.disabled = state !== 'live'
   // The test and the call would fight over the microphone.
   if (micTestBtn) micTestBtn.disabled = isLive || micTesting
+  // A greyed button with no reason looks broken: say why while a call runs.
+  if (micInCallNote) micInCallNote.hidden = !isLive
   ui.headline.textContent = STATES[state]?.headline ?? ''
   setCaption(caption ?? STATES[state]?.caption ?? '')
   if (state === 'live') setOrb(isMuted ? 'muted' : 'listening')

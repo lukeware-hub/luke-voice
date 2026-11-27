@@ -1560,6 +1560,15 @@ button:disabled {
   font-size: 12.5px;
 }
 
+.mic-in-call {
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.mic-in-call[hidden] {
+  display: none;
+}
+
 .mic-play {
   margin-top: 12px;
 }
