@@ -69,3 +69,11 @@ export function unsureAnswer(action, { noSpeech = false, text = '' } = {}) {
 
 // The same "ok?", fresh again, after Ceci asked to hear its answer once more.
 export const askedAgain = (action, now) => ({ ...action, at: now, repeats: (action.repeats ?? 0) + 1 })
+
+// Before an order goes to Claude, Ceci asks a second question: plan first? A "sim" to the order's "ok?"
+// is not the end: she asks this one (planAsk) and keeps the same action waiting, marked as asked. Its
+// "sim" sends the order with plan: true, its "não" sends it with plan: false (the usual flow).
+export const PLAN_ASK = 'Antes de mandar, quer que eu planeje primeiro, ok?'
+export const needsPlanAsk = action => action?.tool?.name === 'luke_send_to_claude' && !action.planAsked
+export const planAsked = (action, now) => ({ ...action, at: now, planAsked: true, repeats: 0 })
+export const withPlan = (action, plan) => ({ ...action.tool, args: { ...(action.tool.args ?? {}), plan } })
