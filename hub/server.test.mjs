@@ -694,6 +694,63 @@ test('the ears writing their own prompt down is not taken for the user: the leak
   }
 })
 
+test('long speech is heard in pieces the ears can hold, and the words come back as one turn', async () => {
+  // The ears' context holds ~75 s of speech: a longer request was refused, and the turn got no answer.
+  const sizes = []
+  const answers = ['language Portuguese<asr_text>Primeira parte do pedido,', '(language: pt)', 'language Portuguese<asr_text>e a última parte.']
+  const fake = createHttpServer(async (req, res) => {
+    const chunks = []
+    for await (const c of req) chunks.push(c)
+    const body = Buffer.concat(chunks)
+    const at = body.indexOf('RIFF')
+    sizes.push(body.readUInt32LE(at + 40))
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ text: answers[sizes.length - 1] ?? '' }))
+  })
+  await new Promise(resolve => fake.listen(0, '127.0.0.1', resolve))
+  const base = `http://127.0.0.1:${fake.address().port}`
+  const engine = { url: () => base, status: () => ({ tts: true, asr: true, router: false }) }
+  const hub2 = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {}, engine, profile: () => ({ profile: 'gpu' }) })
+  await new Promise(resolve => hub2.listen(0, '127.0.0.1', resolve))
+  const p = hub2.address().port
+  // 80 s of 16 kHz mono PCM16, as the window sends a turn joined across pauses.
+  const n = 80 * 16_000
+  const wav = Buffer.alloc(44 + n * 2)
+  wav.write('RIFF', 0, 'latin1')
+  wav.writeUInt32LE(36 + n * 2, 4)
+  wav.write('WAVEfmt ', 8, 'latin1')
+  wav.writeUInt32LE(16, 16)
+  wav.writeUInt16LE(1, 20)
+  wav.writeUInt16LE(1, 22)
+  wav.writeUInt32LE(16_000, 24)
+  wav.writeUInt32LE(32_000, 28)
+  wav.writeUInt16LE(2, 32)
+  wav.writeUInt16LE(16, 34)
+  wav.write('data', 36, 'latin1')
+  wav.writeUInt32LE(n * 2, 40)
+  try {
+    const body = await new Promise((resolve, reject) => {
+      const req = request({ host: '127.0.0.1', port: p, method: 'POST', path: '/stt', headers: { host: `127.0.0.1:${p}`, 'content-type': 'audio/wav', 'x-luke-key': WINDOW } }, res => {
+        const got = []
+        res.on('data', c => got.push(c))
+        res.on('end', () => resolve({ status: res.statusCode, text: Buffer.concat(got).toString('utf8') }))
+      })
+      req.on('error', reject)
+      req.end(wav)
+    })
+    assert.equal(body.status, 200)
+    // Three pieces of at most 30 s, every sample sent once; a piece with no words adds none.
+    assert.equal(sizes.length, 3)
+    for (const size of sizes) assert.ok(size <= 30 * 16_000 * 2, String(size))
+    assert.equal(sizes.reduce((a, b) => a + b, 0), n * 2)
+    assert.equal(JSON.parse(body.text).text, 'Primeira parte do pedido, e a última parte.')
+  } finally {
+    hub2.closeAllConnections()
+    hub2.close()
+    fake.close()
+  }
+})
+
 test('a yes/no question gets more takes only while the line before still plays, and its natural take is kept', async () => {
   const { take, wav } = await import('./test-audio.mjs')
   // Ceci's seed (7) and the first extra seed end flat; the next one rises +6 semitones.

@@ -46,6 +46,26 @@ test('speech after the join window is a new turn', () => {
   assert.equal(j.resumed(), false)
 })
 
+test('a turn already near the hub cap is not carried: it stands, and the speech goes on as a new turn', () => {
+  const now = clock()
+  const j = createTurnJoiner({ now })
+  // Joined parts grow: 89 s is still carried, the joined ~119 s turn is not.
+  const first = j.ended(audio(89 * 16_000, 1))
+  now.advance(500)
+  assert.equal(j.resumed(), true)
+  const joined = j.ended(audio(30 * 16_000, 2))
+  assert.equal(joined.isJoined, true)
+  now.advance(500)
+  assert.equal(j.resumed(), false)
+  assert.equal(j.isCurrent(joined.turn), true)
+  assert.equal(j.ended(audio(5, 3)).isJoined, false)
+  assert.ok(first.turn < joined.turn)
+  // The cap is the joiner's option too.
+  const small = createTurnJoiner({ now, maxCarry: 10 })
+  small.ended(audio(11, 1))
+  assert.equal(small.resumed(), false)
+})
+
 test('a cough after the pause gives the first part back, so the request is not lost', () => {
   const now = clock()
   const j = createTurnJoiner({ now })

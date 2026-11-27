@@ -28,6 +28,21 @@ const wordsOf = text =>
     .map(normalize)
     .filter(Boolean)
 
+// Qwen3-ASR starts its text with "language Portuguese<asr_text>". With no words in the audio it can
+// hand back its language tag alone, with no <asr_text> after it ("(language: pt)", heard as the
+// answer to a "posso?"): nothing the user said. A long turn heard in pieces (asr-split.mjs) must
+// not get the tag of one quiet piece in the middle of the user's words either.
+const LANGUAGE_TAG = /^\s*\(?\s*language\s*:?\s*(?:pt|portuguese)(?:[\s_-]*br)?\s*\)?[\s.]*/i
+const ASR_TEXT = '<asr_text>'
+
+// The words of one Qwen3-ASR answer: what follows its last <asr_text>, or the text with a leading
+// language tag removed.
+export function asrWords(raw) {
+  const text = String(raw ?? '')
+  const tagged = text.lastIndexOf(ASR_TEXT)
+  return (tagged >= 0 ? text.slice(tagged + ASR_TEXT.length) : text.replace(LANGUAGE_TAG, '')).trim()
+}
+
 export function withoutPromptLeak(text, prompt) {
   const tokens = String(text ?? '')
     .split(/\s+/)

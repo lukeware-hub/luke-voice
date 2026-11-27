@@ -18,7 +18,8 @@ import { MODELS, ensureModel } from './models.mjs'
 import { createNotices } from './notices.mjs'
 import { COMMON_QUESTIONS, MAX_PICK_CHARS, createQuestionTakes, isYesNoQuestion } from './question-pick.mjs'
 import { route as routeUtterance } from './router.mjs'
-import { withoutPromptLeak } from './asr-leak.mjs'
+import { asrWords, withoutPromptLeak } from './asr-leak.mjs'
+import { splitWav } from './asr-split.mjs'
 import { dayOf, openMemory, rangeOf, scopeFromArgs } from './memory.mjs'
 import { createGraphUpdater } from './graph.mjs'
 import { quoteUntrusted } from '../window/guard.js'
@@ -1000,12 +1001,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     const url = engine?.url('asr')
     if (!url) return send(res, 503, { error: 'The native speech engine is not running.' })
     const wav = await readRaw(req, MAX_AUDIO)
-    const form = new FormData()
-    form.append('file', new Blob([wav], { type: 'audio/wav' }), 'speech.wav')
-    form.append('model', 'qwen3-asr')
-    form.append('language', 'pt')
     const prompt = asrPrompt()
-    form.append('prompt', prompt)
     const started = Date.now()
     // The window gone (it hung up, or gave up waiting) or a hung engine: stop the transcription,
     // so the engine's single slot is free for the next turn. The request closes once its body is
@@ -1013,20 +1009,29 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     const stop = new AbortController()
     res.on('close', () => stop.abort())
     const signal = AbortSignal.any([stop.signal, AbortSignal.timeout(sttWaitMs)])
-    let text = ''
+    // Long speech (parts joined across pauses) is heard in pieces of at most 30 s, one after the
+    // other: whole, it outgrew the engine's context and came back cut short or not at all (asr-split.mjs).
+    const heard = []
     try {
-      const answer = await fetch(`${url}/v1/audio/transcriptions`, { method: 'POST', body: form, signal })
-      if (!answer.ok) return send(res, 502, { error: `speech engine ${answer.status}` })
-      ;({ text = '' } = await answer.json())
+      for (const piece of splitWav(wav)) {
+        const form = new FormData()
+        form.append('file', new Blob([piece], { type: 'audio/wav' }), 'speech.wav')
+        form.append('model', 'qwen3-asr')
+        form.append('language', 'pt')
+        form.append('prompt', prompt)
+        const answer = await fetch(`${url}/v1/audio/transcriptions`, { method: 'POST', body: form, signal })
+        if (!answer.ok) return send(res, 502, { error: `speech engine ${answer.status}` })
+        const { text = '' } = await answer.json()
+        // Only the words after the ears' language tag; on silence or soft noise they can also write
+        // their own prompt down, and that part is not the user (asr-leak.mjs).
+        heard.push(withoutPromptLeak(asrWords(text), prompt))
+      }
     } catch (error) {
       if (stop.signal.aborted) return res.end()
       if (error?.name === 'TimeoutError') return send(res, 504, { error: 'The speech engine did not answer in time.' })
       throw error
     }
-    // Qwen3-ASR starts its text with "language Portuguese<asr_text>". On silence or soft noise it can
-    // also write its own prompt down; that part is not the user (asr-leak.mjs).
-    const heard = withoutPromptLeak(String(text).replace(/^[\s\S]*<asr_text>/, ''), prompt)
-    return send(res, 200, { text: heard, ms: Date.now() - started })
+    return send(res, 200, { text: heard.filter(Boolean).join(' '), ms: Date.now() - started })
   }
 
   // Ceci's voice on the native engine (Qwen3-TTS), streamed as WAV while it is made. A short yes/no
