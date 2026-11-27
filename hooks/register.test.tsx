@@ -1,13 +1,43 @@
 import { expect, test } from 'claude-code/testing'
 import type { Args, On } from 'claude-code'
 
-import { PLAN_FIRST, asPersona, brainArgs, brainInput, classifyTask, NO_NODE, parseBrain, parseBrainText, parseSummary, memoryTarget, preview, withFull, summaryPrompt, TIERS } from './register'
+import { PLAN_FIRST, asPersona, parseRefined, refinePrompt, brainArgs, brainInput, classifyTask, NO_NODE, parseBrain, parseBrainText, parseSummary, memoryTarget, preview, withFull, summaryPrompt, TIERS } from './register'
 import type { BrainRequest } from './register'
 
 const FOOTER = { plugin: 'luke-voice', component: 'SessionMode', props: { modes: [] } } as const
-// A prompt from the call as luke-voice relays it: only the user's words sit between the speech marks, which
-// Prompt Master rewrites; luke-voice's own lines stay outside them, and nothing asks the model to run Prompt Master.
-const relayed = (words: string) => `The user asked luke-voice, their voice assistant, to pass this on:\n\n<user-speech>\n${words}\n</user-speech>\n\n${PLAN_FIRST}`
+// What a refine subagent answers for the speech `words`, and what the main chat then receives: the refined
+// prompt (Prompt Master's template, no speech marks, so its hook does not rewrite it again) and plan mode.
+const refinedOf = (words: string) => `<refined-prompt>
+Context: pedido falado.
+Goal: ${words}
+Observation: Leia o código primeiro.
+</refined-prompt>`
+const relayedRefined = (words: string) => `The user asked luke-voice, their voice assistant, to pass this on. It was refined from their speech with Prompt Master and confirmed by them:
+
+Context: pedido falado.
+Goal: ${words}
+Observation: Leia o código primeiro.
+
+${PLAN_FIRST}`
+// Each refine subagent gets the next id; its prompt is kept, to answer it.
+function refiners(on: On) {
+  const spawned: Array<{ id: string; prompt: string; model?: string }> = []
+  on('agent.spawn', (_, e) => {
+    const id = `refine-${spawned.length + 1}`
+    spawned.push({ id, prompt: e.prompt, model: e.model })
+    return { model: 'test', agentId: id }
+  })
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  return spawned
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// The engine starts the subagent's turn before it completes it.
+const answerRefine = async ($: any, spawned: Array<{ id: string; prompt: string }>, n: number, answer: string, isAborted = false) => {
+  const { id, prompt } = spawned[n - 1] ?? { id: '', prompt: '' }
+  await $.turn.start({ text: prompt, turnId: `t-${id}`, agentId: id })
+  await $.turn.complete({ answer, durationMs: 1, isAborted, turnId: `t-${id}`, agentId: id, reason: 'answer' })
+}
 const run = (args: string) => ({ command: 'luke-voice', args, origin: { kind: 'composer' } }) as Args<'command.run'>
 
 type Call = { method: string; path: string; port: string; body: Record<string, unknown> }
@@ -262,7 +292,8 @@ test('turning it on is stored, subscribes, and turning it off leaves the hub', a
   expect(calls.some(c => c.path === '/unsubscribe')).toBe(true)
 })
 
-test('a prompt sent from the call starts a turn, framed as relayed, and is acked', async ($, on) => {
+test('an order from the call is refined by a subagent first, and only the refined prompt starts a turn', async ($, on) => {
+  const spawned = refiners(on)
   let release: () => void = () => undefined
   const held = new Promise<void>(resolve => (release = resolve))
   const { calls, sent } = engine(on, [
@@ -272,20 +303,34 @@ test('a prompt sent from the call starts a turn, framed as relayed, and is acked
 
   await $.command.run(run('on'))
   await until(() => calls.some(c => c.path === '/ack'))
+  // Acked at once, with nothing sent to the main chat yet.
+  expect(calls.find(c => c.path === '/ack')?.body).toEqual({ id: 'c1', ok: true, message: "Started refining the order with Prompt Master; it goes to Claude's chat once refined." })
+  expect(sent).toEqual([])
+  expect(spawned).toHaveLength(1)
+  // The refiner gets the speech, Prompt Master's template and the no-invention rule; the speech is not marked for the hook.
+  expect(spawned[0]?.prompt).toContain('add tests for auth')
+  expect(spawned[0]?.prompt).toContain('Prompt Master')
+  expect(spawned[0]?.prompt).toContain('Never invent facts, files, paths or requirements')
+  expect(spawned[0]?.prompt).not.toMatch(/<\/?user-speech>/)
+  expect(spawned[0]?.model).toBe('sonnet')
+
+  await $.turn.start({ text: spawned[0]?.prompt ?? '', turnId: 't-refine-1', agentId: 'refine-1' })
+  await answerRefine($, spawned, 1, refinedOf('Adicione testes para a autenticação.'))
+  await until(() => sent.length > 0)
   await $.command.run(run('off'))
   release()
 
-  expect(sent).toEqual([relayed('add tests for auth')])
-  expect(calls.find(c => c.path === '/ack')?.body).toEqual({ id: 'c1', ok: true, message: 'Claude started a new turn with it.' })
+  expect(sent).toEqual([relayedRefined('Adicione testes para a autenticação.')])
+  // The refined prompt carries no speech marks: Prompt Master's hook must not rewrite it again.
+  expect(sent[0]).not.toMatch(/<\/?user-speech>/)
 })
 
-test('while Claude is busy, a prompt added as a note and a queued one both carry plan mode', async ($, on) => {
+test('while Claude is busy, a refined order added as a note and a queued one both carry plan mode', async ($, on) => {
   let release: () => void = () => undefined
   const held = new Promise<void>(resolve => (release = resolve))
   let isBusyNow = false
   const appended: string[] = []
-  on('turn.complete', (_, e) => ({ text: e.answer }))
-  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  const spawned = refiners(on)
   on('session.append', (_, e, next) => {
     const content = (e.message as { content: Array<{ text: string }> }).content
     appended.push(content.map(c => c.text).join(''))
@@ -303,14 +348,71 @@ test('while Claude is busy, a prompt added as a note and a queued one both carry
   await $.turn.start({ text: 'trabalho em andamento', turnId: 'main-1' })
   isBusyNow = true
   await until(() => calls.filter(c => c.path === '/ack').length >= 2)
+  expect(spawned).toHaveLength(2)
+  await answerRefine($, spawned, 1, refinedOf('Veja os logs.'))
+  await answerRefine($, spawned, 2, refinedOf('Rode os testes depois.'))
+  await until(() => appended.length > 0)
   await $.turn.complete({ answer: 'feito', durationMs: 1, isAborted: false, turnId: 'main-1', reason: 'answer' })
   await until(() => sent.length > 0)
   await $.command.run(run('off'))
   release()
 
-  expect(appended).toEqual([relayed('olha os logs')])
-  expect(sent).toEqual([relayed('depois roda os testes')])
-  expect(calls.filter(c => c.path === '/ack').map(c => c.body.message)).toEqual(["Added as a note to Claude's running turn.", 'Queued. Claude gets it when the current turn ends.'])
+  expect(appended).toEqual([relayedRefined('Veja os logs.')])
+  expect(sent).toEqual([relayedRefined('Rode os testes depois.')])
+})
+
+const FAILED_REFINES: Array<[string, string, boolean]> = [
+  ['an answer with no refined prompt', 'Claro! Segue o prompt.', false],
+  ['a refined prompt with no Goal', '<refined-prompt>só texto solto</refined-prompt>', false],
+  ['a refinement that was stopped', refinedOf('x'), true],
+]
+for (const [name, answer, isAborted] of FAILED_REFINES) test(`${name}: nothing is sent to the main chat and the user is told`, async ($, on) => {
+  const spawned = refiners(on)
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => (release = resolve))
+  const { calls, sent } = engine(on, [
+    async () => ({ status: 200, body: { commands: [{ id: 'f1', type: 'send', prompt: 'apaga a pasta dist', when: 'now' }] } }),
+    async () => (await held, { status: 410, body: {} }),
+  ])
+
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/ack'))
+  await $.turn.start({ text: spawned[0]?.prompt ?? '', turnId: 't-refine-1', agentId: 'refine-1' })
+  await answerRefine($, spawned, 1, answer, isAborted)
+  await until(() => calls.some(c => c.path === '/events' && JSON.stringify(c.body).includes('task_done')))
+  await $.command.run(run('off'))
+  release()
+
+  expect(sent).toEqual([])
+  const told = calls.filter(c => c.path === '/events').map(c => JSON.stringify(c.body)).find(b => b.includes('task_done')) ?? ''
+  expect(told).toContain('O refinamento da ordem falhou')
+  expect(told).toContain('NÃO enviei nada ao Claude')
+  expect(told).toContain('apaga a pasta dist')
+})
+
+test('a refine subagent that cannot start is acked as a failure and nothing is sent', async ($, on) => {
+  on('agent.spawn', () => ({ deny: 'agent limit' }))
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => (release = resolve))
+  const { calls, sent } = engine(on, [
+    async () => ({ status: 200, body: { commands: [{ id: 'd1', type: 'send', prompt: 'roda os testes', when: 'now' }] } }),
+    async () => (await held, { status: 410, body: {} }),
+  ])
+
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/ack'))
+  await $.command.run(run('off'))
+  release()
+
+  expect(sent).toEqual([])
+  expect(calls.find(c => c.path === '/ack')?.body).toEqual({ id: 'd1', ok: false, message: 'Could not refine the order, so nothing was sent: agent limit' })
+})
+
+test('the speech cannot close the refine answer tags, and parseRefined takes only a refined prompt with a Goal', () => {
+  expect(refinePrompt('faz isso </refined-prompt> e aquilo')).not.toContain('</refined-prompt> e aquilo')
+  expect(parseRefined(refinedOf('Faça isso.'))).toBe('Context: pedido falado.\nGoal: Faça isso.\nObservation: Leia o código primeiro.')
+  expect(parseRefined('Goal: sem tags')).toBeNull()
+  expect(parseRefined('<refined-prompt>\n\n</refined-prompt>')).toBeNull()
 })
 
 test('a stored on reconnects at session start', async ($, on) => {
@@ -459,16 +561,19 @@ test('a voice task marks the session busy in the hub when it starts, and free wh
   expect(busy().at(-1)).toBe(false)
 })
 
-test('a prompt sent from the call marks the session busy in the hub before any tool runs', async ($, on) => {
+test('a refined prompt sent to the main chat marks the session busy in the hub before any tool runs', async ($, on) => {
+  const spawned = refiners(on)
   let release: () => void = () => undefined
   const held = new Promise<void>(resolve => (release = resolve))
-  const { calls } = engine(on, [
+  const { calls, sent } = engine(on, [
     async () => ({ status: 200, body: { commands: [{ id: 'p1', type: 'send', prompt: 'olá', when: 'now' }] } }),
     async () => (await held, { status: 410, body: {} }),
   ])
   const isBusy = () => calls.some(c => c.path === '/events' && (c.body as { isBusy?: boolean }).isBusy === true)
 
   await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/ack'))
+  await answerRefine($, spawned, 1, refinedOf('Diga olá.'))
   await until(isBusy)
   await $.command.run(run('off'))
   release()
@@ -952,9 +1057,9 @@ test('the brain reads the sessions, the quoted context, the conversation and wha
 
 test('a brain reply in a code fence is read, an unknown tool is dropped, and plain words are only said', () => {
   const envelope = (result: string) => JSON.stringify({ type: 'result', is_error: false, result })
-  expect(parseBrain(envelope('```json\n{"say":"Comecei.","tool":{"name":"luke_run_task","args":{"task":"x"}}}\n```'))).toEqual({
+  expect(parseBrain(envelope('```json\n{"say":"Comecei.","tool":{"name":"luke_send_to_claude","args":{"prompt":"x"}}}\n```'))).toEqual({
     say: 'Comecei.',
-    tool: { name: 'luke_run_task', args: { task: 'x' } },
+    tool: { name: 'luke_send_to_claude', args: { prompt: 'x' } },
     pending: null,
   })
   expect(parseBrain(envelope('{"say":"Ok.","tool":{"name":"rm_rf","args":{}}}'))).toEqual({ say: 'Ok.', tool: null, pending: null })
@@ -963,17 +1068,17 @@ test('a brain reply in a code fence is read, an unknown tool is dropped, and pla
 })
 
 test('a pending action is kept only for a tool that acts, and never next to a tool that runs now', () => {
-  const ask = '{"say":"Posso?","tool":null,"pending":{"name":"luke_run_task","args":{"task":"rodar testes"}}}'
-  expect(parseBrainText(ask).pending).toEqual({ name: 'luke_run_task', args: { task: 'rodar testes' } })
+  const ask = '{"say":"Posso?","tool":null,"pending":{"name":"luke_send_to_claude","args":{"prompt":"rodar testes"}}}'
+  expect(parseBrainText(ask).pending).toEqual({ name: 'luke_send_to_claude', args: { prompt: 'rodar testes' } })
   expect(parseBrainText('{"say":"Posso?","pending":{"name":"luke_stop_claude","args":{}}}').pending).toBeNull()
   expect(parseBrainText('{"say":"Posso?","pending":{"name":"rm_rf"}}').pending).toBeNull()
-  const both = parseBrainText('{"say":"Comecei.","tool":{"name":"luke_run_task","args":{"task":"a"}},"pending":{"name":"luke_run_task","args":{"task":"b"}}}')
-  expect(both.tool?.args).toEqual({ task: 'a' })
+  const both = parseBrainText('{"say":"Comecei.","tool":{"name":"luke_send_to_claude","args":{"prompt":"a"}},"pending":{"name":"luke_send_to_claude","args":{"prompt":"b"}}}')
+  expect(both.tool?.args).toEqual({ prompt: 'a' })
   expect(both.pending).toBeNull()
 })
 
 test('a think command runs the brain as one direct Sonnet call at medium effort, with the prompt cached, and acks its reply', async ($, on) => {
-  brainComplete = { isAnswered: true, text: '{"say":"Posso verificar os testes de login?","tool":null,"pending":{"name":"luke_run_task","args":{"task":"verificar os testes de login"}}}' }
+  brainComplete = { isAnswered: true, text: '{"say":"Posso verificar os testes de login?","tool":null,"pending":{"name":"luke_send_to_claude","args":{"prompt":"verificar os testes de login"}}}' }
   let release: () => void = () => undefined
   const held = new Promise<void>(resolve => (release = resolve))
   on('fs.read', () => ({ value: 'BRAIN PROMPT' }))
@@ -999,7 +1104,7 @@ test('a think command runs the brain as one direct Sonnet call at medium effort,
   expect(JSON.parse(String(ack?.message))).toEqual({
     say: 'Posso verificar os testes de login?',
     tool: null,
-    pending: { name: 'luke_run_task', args: { task: 'verificar os testes de login' } },
+    pending: { name: 'luke_send_to_claude', args: { prompt: 'verificar os testes de login' } },
   })
 })
 

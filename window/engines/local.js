@@ -23,8 +23,7 @@ const STOPPED = 'Parei o Claude.'
 const NOT_STOPPED = 'O Claude não está trabalhando agora.'
 // Said when a tool worked but the brain gave no words.
 const DONE_SAY = {
-  luke_run_task: 'Comecei, te aviso quando terminar.',
-  luke_send_to_claude: 'Mandei para o Claude.',
+  luke_send_to_claude: 'Estou refinando a ordem e já mando para o Claude.',
   luke_stop_claude: STOPPED,
   luke_memory_delete: 'Apaguei da memória.',
 }

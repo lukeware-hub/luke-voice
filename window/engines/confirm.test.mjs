@@ -3,7 +3,7 @@ import { test } from 'node:test'
 
 import { MAX_REPEATS, PENDING_TTL_MS, REPEAT, askedAgain, decide, liveAction, unsureAnswer } from './confirm.js'
 
-const task = { name: 'luke_run_task', args: { task: 'roda os testes' } }
+const task = { name: 'luke_send_to_claude', args: { prompt: 'roda os testes' } }
 const send = { name: 'luke_send_to_claude', args: { prompt: 'faz o commit' } }
 const stop = { name: 'luke_stop_claude', args: {} }
 const activity = { name: 'luke_session_activity', args: {} }
@@ -50,9 +50,9 @@ test('a "sim" runs the waiting tool only while it is fresh; an old one after a n
 test('a yes the fast path missed, read as a yes by the brain, runs the action Ceci asked about, with no second "ok?"', () => {
   const asked = { tool: task, at: 1 }
   // What runs is what Ceci asked about: the same arguments, or none from the brain.
-  const out = decide({ kind: 'user', reply: { say: 'Comecei!', tool: { name: 'luke_run_task', args: { task: 'roda os testes' } }, pending: null }, now: 2, answering: asked })
+  const out = decide({ kind: 'user', reply: { say: 'Comecei!', tool: { name: 'luke_send_to_claude', args: { prompt: 'roda os testes' } }, pending: null }, now: 2, answering: asked })
   assert.deepEqual(out, { action: 'run', say: 'Comecei!', tool: task, pending: null })
-  assert.deepEqual(decide({ kind: 'user', reply: { say: '', tool: { name: 'luke_run_task' }, pending: null }, now: 2, answering: asked }).tool, task)
+  assert.deepEqual(decide({ kind: 'user', reply: { say: '', tool: { name: 'luke_send_to_claude' }, pending: null }, now: 2, answering: asked }).tool, task)
   // Another acting tool than the one asked about still only asks.
   assert.equal(decide({ kind: 'user', reply: { say: '', tool: send, pending: null }, now: 2, answering: asked }).action, 'pend')
   // With no "ok?" waiting, it still only asks.
@@ -60,13 +60,13 @@ test('a yes the fast path missed, read as a yes by the brain, runs the action Ce
   // A notice never runs it, whatever it answers.
   assert.equal(decide({ kind: 'notice', reply: { say: '', tool: task, pending: null }, now: 2, answering: asked }).action, 'say')
   // A change asked with the yes goes back to "ok?" with the new arguments.
-  const changed = { name: 'luke_run_task', args: { task: 'só na pasta site' } }
+  const changed = { name: 'luke_send_to_claude', args: { prompt: 'só na pasta site' } }
   assert.deepEqual(decide({ kind: 'user', reply: { say: 'Só na pasta site, ok?', tool: null, pending: changed }, now: 3, answering: asked }).pending, { tool: changed, at: 3 })
 })
 
 test('a yes the brain turns into the same tool with other arguments is a new request: it asks again, and the old action does not run', () => {
   const asked = { tool: task, at: 1 }
-  const changed = { name: 'luke_run_task', args: { task: 'apaga a pasta dist' } }
+  const changed = { name: 'luke_send_to_claude', args: { prompt: 'apaga a pasta dist' } }
   const out = decide({ kind: 'user', reply: { say: 'Comecei!', tool: changed, pending: null }, now: 2, answering: asked })
   assert.equal(out.action, 'pend')
   assert.deepEqual(out.pending, { tool: changed, at: 2 })

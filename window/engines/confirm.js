@@ -6,11 +6,10 @@ import { isMixed } from './fast-path.js'
 import { isNotSpeech } from './transcript.js'
 
 // Tools that act on the computer or delete from the memory: only these can wait for a "sim" (PENDABLE_TOOLS in hooks/register.tsx).
-const PENDABLE = ['luke_run_task', 'luke_send_to_claude', 'luke_memory_delete']
+const PENDABLE = ['luke_send_to_claude', 'luke_memory_delete']
 // Said instead of the brain's words when it called an acting tool at once: it did not run yet.
 const ASK = {
-  luke_run_task: 'Rodo essa tarefa, ok?',
-  luke_send_to_claude: 'Mando isso para o Claude, ok?',
+  luke_send_to_claude: 'Refino e mando isso para o Claude, ok?',
   luke_memory_delete: 'Apago isso da memória, ok?',
 }
 // A "ok?" waits this long for its "sim".
