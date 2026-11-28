@@ -6,7 +6,7 @@ import { mkdtempSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { bestTake, createQuestionTakes, endRise, isNaturalRise, isYesNoQuestion, wavSamples } from './question-pick.mjs'
+import { bestTake, createQuestionTakes, endRise, isNaturalRise, isYesNoQuestion, medianPitch, voiceShift, wavSamples } from './question-pick.mjs'
 
 test('yes/no questions are picked; questions with a question word and statements are not', () => {
   for (const t of ['Posso começar?', 'Faço o commit agora?', 'Pronto, terminei. Quer que eu faça mais alguma coisa?', 'Você quer que eu abra o pull request?', 'Tudo bem?']) {
@@ -31,6 +31,32 @@ test('the end rise is read off the voice: flat near 0, a glide up near its size'
 test('with no natural take, the one nearest +6 semitones is kept, never a squeak', () => {
   assert.equal(bestTake([{ rise: 1 }, { rise: 3 }, { rise: 14 }]).rise, 3)
   assert.equal(bestTake([{ rise: null }, { rise: 12 }]).rise, null)
+})
+
+test('a take in another register than the cloned voice is off the voice, and never kept as the best', () => {
+  assert.ok(Math.abs(medianPitch(take(1.5, 0), FS) - 220) < 5)
+  assert.ok(Math.abs(voiceShift(take(1.5, 0, 220 * 2 ** (6 / 12)), FS, 220) - 6) < 0.5)
+  assert.ok(Math.abs(voiceShift(take(1.5, 0), FS, 220)) < 0.5)
+  assert.equal(voiceShift(take(1.5, 0, 330), FS, null), 0) // no reference pitch: nothing to compare
+  // Off the voice: never picked, even with the best rise; with nothing else, no take at all.
+  assert.equal(bestTake([{ seed: 1, rise: 6, shift: 5.7 }, { seed: 2, rise: 1, shift: 0.4 }]).seed, 2)
+  assert.equal(bestTake([{ seed: 1, rise: 6, shift: -4 }]), null)
+})
+
+test("a question is never served in another voice: Luke's take that jumped up a register is said live instead", async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'luke-voice-takes-'))
+  const luke = 125
+  // Seed 101 jumps 5.7 semitones up (as Luke's kept "Tudo bem?" did), with a fine rise; 102 stays in his voice.
+  const made = { 101: take(1.5, 6, luke * 2 ** (5.7 / 12)), 102: take(1.5, 6, luke) }
+  const takes = createQuestionTakes({ say: async (_text, seed) => wav(made[seed]), dir, voiceKey: 'v', voicePitch: luke, idleMs: 60_000 })
+  const served = await takes.take('Tudo bem?', { budget: 60_000 })
+  assert.ok(served, 'the take in his own voice is served')
+  assert.ok(Math.abs(voiceShift(wavSamples(served).samples, FS, luke)) < 1)
+  // Every take off the voice: nothing is served, and the line is said live.
+  const other = createQuestionTakes({ say: async () => wav(made[101]), dir: mkdtempSync(join(tmpdir(), 'luke-voice-takes-')), voiceKey: 'v', voicePitch: luke, idleMs: 60_000 })
+  assert.equal(await other.take('Tudo bem?', { budget: 60_000 }), null)
+  takes.stop()
+  other.stop()
 })
 
 test('the samples of a streamed WAV are read even when its size is unknown', () => {

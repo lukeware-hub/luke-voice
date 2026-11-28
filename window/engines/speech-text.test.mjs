@@ -60,7 +60,7 @@ test('the native voice gets its own spelling for the tech words it says in Portu
 })
 
 test('the native voice gets luke-voice and Claude Code in the spelling it says in English', () => {
-  assert.deepEqual(speechChunks('Seja bem-vindo ao luke-voice. Mande para o Claude Code.', { isNative: true }), ['Seja bem-vindo ao Luke Vóiss.', 'Mande para o Clód Code.'])
+  assert.deepEqual(speechChunks('Seja bem-vindo ao luke-voice. Mande para o Claude Code.', { isNative: true }), ['Seja bem-vindo ao Luke Vóiss. Mande para o Clód Code.'])
   // Mid-sentence the comma stays, so "Code" does not run into the next word; before a mark it goes.
   assert.equal(respellNative('Abri o Claude Code e o Luke Voice.'), 'Abri o Clód Code, e o Luke Vóiss.')
   assert.equal(respellNative('O claude  CODE, depois; "Claude Code"'), 'O Clód Code, depois; "Clód Code"')
@@ -72,7 +72,7 @@ test('the native voice gets luke-voice and Claude Code in the spelling it says i
 
 test('the native voice gets a sentence-opening "Claro" in the spelling it says right', () => {
   assert.deepEqual(speechChunks('Claro.', { isNative: true }), ['claro.'])
-  assert.deepEqual(speechChunks('Entendi. Claro!', { isNative: true }), ['Entendi.', 'claro!'])
+  assert.deepEqual(speechChunks('Entendi. Claro!', { isNative: true }), ['Entendi. claro!'])
   assert.deepEqual(speechChunks('Claro que sim, pode deixar comigo.', { isNative: true }), ['Claro que sim, pode deixar comigo.'.replace('Claro', 'Claaro')])
   // Mid-sentence, with a comma, or as another word: untouched. The browser voices are untouched too.
   assert.deepEqual(speechChunks('Claro, posso fazer isso.', { isNative: true }), ['Claaro, posso fazer isso.'])
@@ -81,7 +81,7 @@ test('the native voice gets a sentence-opening "Claro" in the spelling it says r
 })
 
 test('the native voice says "Bom dia!" with a double mark, so it does not come out as "bem dia"', () => {
-  assert.deepEqual(speechChunks('Bom dia! Eu sou a Ceci.', { isNative: true }), ['Bom dia!!', 'Eu sou a Ceci.'])
+  assert.deepEqual(speechChunks('Bom dia! Eu sou a Ceci.', { isNative: true }), ['Bom dia!! Eu sou a Ceci.'])
   assert.equal(respellNative('Olá, bom dia!'), 'Olá, bom dia!!')
   for (const text of ['Bom dia!!', 'Bom dia, Diego.', 'Tenha um bom dia.']) assert.equal(respellNative(text), text)
   assert.deepEqual(speechChunks('Bom dia! Eu sou a Ceci.'), ['Bom dia!', 'Eu sou a Ceci.'])
@@ -95,18 +95,27 @@ test('the native spelling touches whole words only, and leaves the rest of the s
   assert.equal(respellNative('O hook e o reviewer.'), 'O ruk e o reviewer.')
 })
 
-test('the native voice starts on one short clause, so the first audio comes sooner', () => {
-  // Cut at the comma...
-  assert.deepEqual(speechChunks('Certo, vou verificar os testes de login no repositório api agora.', { isNative: true }), ['Certo,', 'vou verificar os testes de login no repositório api agora.'])
-  // ...but never mid-phrase: without a comma close by, the sentence goes whole.
-  assert.deepEqual(speechChunks('Você quer que eu verifique os testes de login no repositório api? Posso?', { isNative: true }), ['Você quer que eu verifique os testes de login no repositório api?', 'Posso?'])
+test('the native voice packs short sentences into one chunk, so a line is said in one voice', () => {
+  // The greeting that changed voice three times, once per sentence: now one chunk, one voice.
+  assert.deepEqual(speechChunks('Boa noite! Tudo bem? Eu sou o Luke. O que a gente vai fazer hoje?', { isNative: true }), ['Boa noite! Tudo bem? Eu sou o Luke. O que a gente vai fazer hoje?'])
+  assert.deepEqual(speechChunks('Você quer que eu verifique os testes de login no repositório api? Posso?', { isNative: true }), ['Você quer que eu verifique os testes de login no repositório api? Posso?'])
+  // A short first clause is never said on its own ("Certo," alone came out in another voice).
+  assert.deepEqual(speechChunks('Certo, vou verificar os testes de login no repositório api agora.', { isNative: true }), ['Certo, vou verificar os testes de login no repositório api agora.'])
+  // After the first chunk (at most 90 characters), sentences pack up to 220.
+  const long = 'Terminei a tarefa no projeto de autenticação do serviço de pagamentos, e todos os testes passaram sem nenhum erro. Pode seguir. Quer que eu faça mais alguma coisa?'
+  assert.deepEqual(speechChunks(long, { isNative: true }), ['Terminei a tarefa no projeto de autenticação do serviço de pagamentos,', 'e todos os testes passaram sem nenhum erro. Pode seguir. Quer que eu faça mais alguma coisa?'])
+  // Nothing is lost or added, apart from the spaces between the chunks.
+  const many = Array.from({ length: 12 }, (_, i) => `Esta é a frase número ${i + 1} da resposta.`).join(' ')
+  const out = speechChunks(many, { isNative: true })
+  assert.equal(out.join(' '), many)
+  assert.ok(out[0].length <= 90 && out.every(chunk => chunk.length <= 220), JSON.stringify(out))
 })
 
 test('a question is never cut early, so the voice sees its "?" and rises at the end', () => {
   assert.deepEqual(speechChunks('Certo, quer que eu rode os testes de login no repositório api agora?', { isNative: true }), ['Certo, quer que eu rode os testes de login no repositório api agora?'])
 })
 
-test('ordinary sentences are cut and spelled exactly as before the 0.10.3 reading fixes, on both voices', () => {
+test('ordinary sentences are cut and spelled as the snapshot says, on both voices (the native voice packs them into chunks since 0.23.3)', () => {
   assert.ok(CORPUS.length >= 40)
   assert.deepEqual(SNAPSHOT.map(s => s.text), CORPUS)
   for (const { text, native, browser } of SNAPSHOT) {
@@ -189,5 +198,5 @@ test('markup leftovers: snake_case, arithmetic, domains, emoji and list items', 
   assert.equal(plainText('Acesse www.site.com.br ou exemplo.org, não o app.js.'), 'Acesse site ponto com ponto bê erre ou exemplo ponto org, não o app.js.')
   assert.equal(plainText('Pronto! \u{1F389} Tudo certo \u{2705}. Valeu \u{1F44D}\u{1F3FD}'), 'Pronto! Tudo certo. Valeu')
   assert.equal(plainText('Fiz três coisas:\n- Revisei\n- Testei\n\n1. Primeiro\n2. Segundo'), 'Fiz três coisas: Revisei. Testei. Primeiro. Segundo')
-  assert.deepEqual(speechChunks('Fiz três coisas:\n- Revisei o código\n- Rodei os testes', { isNative: true }), ['Fiz três coisas: Revisei o código.', 'Rodei os testes'])
+  assert.deepEqual(speechChunks('Fiz três coisas:\n- Revisei o código\n- Rodei os testes', { isNative: true }), ['Fiz três coisas: Revisei o código. Rodei os testes'])
 })
