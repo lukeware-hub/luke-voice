@@ -6,7 +6,7 @@ import { PLAN_ASK, REPEAT, askedAgain, decide, liveAction, needsPlanAsk, planAsk
 import { ACKS, pickAck } from '/engines/acks.js'
 import { pickGreeting } from '/engines/greetings.js'
 import { isConfirm, isDeny, stopTarget } from '/engines/fast-path.js'
-import { phrases, speechChunks } from '/engines/speech-text.js'
+import { speechChunks } from '/engines/speech-text.js'
 import { isReadyToStart, pauseAfter, sentenceLeft, trimEdges } from '/engines/phrase-audio.js'
 import { contextEntry, trimContext } from '/engines/context.js'
 import { createCutReply, createTurnJoiner, createTurnLog } from '/engines/turn-join.js'
@@ -498,11 +498,13 @@ export async function startSession({
     return node
   }
 
-  // The native voice says a reply phrase by phrase. The engine sends a phrase's audio in one burst at
-  // its end (measured: streaming brought it no sooner), so each phrase is read whole.
+  // The native voice says a reply chunk by chunk: a whole sentence at a time (speech-text.js). The
+  // engine sends a chunk's audio in one burst at its end (measured: streaming brought it no sooner),
+  // so each chunk is read whole. Cut at every comma instead, each piece came back with
+  // the falling end of a sentence and a fixed pause after it, and the owner heard Ceci as robotic;
+  // said whole, the melody carries through the commas as a person's does.
   async function speakNative(text) {
-    // Phrase by phrase, so each comma gets its pause (speech-text.js, phrase-audio.js).
-    const parts = speechChunks(text, { isNative: true }).flatMap(chunk => phrases(chunk))
+    const parts = speechChunks(text, { isNative: true })
     if (parts.length === 0) return
     const mine = ++speech
     saying = mine

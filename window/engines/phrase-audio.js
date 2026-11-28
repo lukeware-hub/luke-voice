@@ -1,8 +1,8 @@
-// The pauses between the parts Ceci says. The natural voice says a reply phrase by phrase
-// (speech-text.js, phrases), and each phrase comes back with its own silence before and after it:
-// 0 to 860 ms, measured on Qwen3-TTS with Ceci's voice. Back to back, that made a comma last 0.3 to
-// 0.6 s and a sentence end up to 1.4 s, longer than a person pauses there. So the silence is cut from
-// both sides of every phrase, and the page puts one steady pause of its own after it.
+// The pauses between the parts Ceci says. The natural voice says a reply chunk by chunk (a sentence,
+// or a long sentence's first clause: speech-text.js, chunks), and each chunk comes back with its own
+// silence before and after it: 0 to 860 ms, measured on Qwen3-TTS with Ceci's voice. Back to back,
+// that made a sentence end up to 1.4 s, longer than a person pauses there. So the silence is cut from
+// both sides of every chunk, and the page puts one steady pause of its own after it.
 
 // A short, natural pause inside a sentence in pt-BR.
 export const COMMA_PAUSE_S = 0.12
