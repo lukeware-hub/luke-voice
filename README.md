@@ -34,7 +34,7 @@ On the gpu profile, the hub downloads llama.cpp's official release build b12556 
 
 ## Requirements
 
-- **Claude Code**, installed and signed in with a Claude account (the only thing you install yourself). Current version of luke-voice: v0.30.0.
+- **Claude Code**, installed and signed in with a Claude account (the only thing you install yourself). Current version of luke-voice: v0.31.0.
 - **Windows, macOS or Linux.** On a Mac with Apple silicon you get the natural voice; an Intel Mac gets the light voice.
 - **Node.js 20 or newer and Git** (Windows) are brought by the installer when missing, for your user only.
 - **Disk space:** about 3.3 GB for the natural voice, about 360 MB for the light voice (the installer checks first).
@@ -388,4 +388,4 @@ The free voice downloads third-party parts at install time; none of them is in t
 
 Ceci's reference voice clip `agent/ceci-voice.wav` was supplied by the project owner (ceci-nova.wav, 13.7 s, used whole at its own pitch).
 
-Luke's reference voice clip `agent/luke-voice.wav` is an MIT-licensed recording picked by the project owner, cut at a pause to 7.9 s and lowered 1 semitone. Its transcript is punctuated as he speaks it, and Luke speaks with seed 23: in by-ear rounds the owner rated 8 of 8 new statements good on that recipe, against about 1 in 3 with the unpunctuated transcript and seed 7. João's, `agent/joao-voice.wav`, was supplied by the project owner, trimmed, at his own pitch, and sped up to 122% (17.4 characters a second). On the light voice, Luke and João speak with Kokoro's `pm_alex` and `pm_santa`.
+Luke's reference voice clip `agent/luke-voice.wav` is an MIT-licensed recording picked by the project owner, cut at a pause to 7.9 s and lowered 1 semitone. Its transcript is punctuated as he speaks it, and Luke speaks with seed 23: in by-ear rounds the owner rated 8 of 8 new statements good on that recipe, against about 1 in 3 with the unpunctuated transcript and seed 7. João's, `agent/joao-voice.wav`, was supplied by the project owner, trimmed, at his own pitch, and sped up to 122% (17.4 characters a second). João asks every question with seed 11 (his other lines keep seed 7): in by-ear rounds the owner rated 10 of 11 new questions 10/10 with it, while none of his seed-7 questions was good. On the light voice, Luke and João speak with Kokoro's `pm_alex` and `pm_santa`.

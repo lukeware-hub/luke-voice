@@ -92,7 +92,14 @@ export const VOICE_SETTINGS = { temperature: 0.9, top_p: 0.9, seed: 7 }
 // rated 12 of 39 seed-23 takes good, 8 of seed 11 and only 3 of seed 7. With his transcript punctuated
 // (Fala, galera. ...), seed 23 gave 6 good takes of 11, questions among them (9/10 for "Quer que eu
 // monte um plano?"); before, he had no punctuation at all and his questions ended flat.
-export const PERSONA_VOICE_SETTINGS = { luke: { lang: 'pt-BR', seed: 23 }, ceci: { lang: 'pt-BR' }, joao: { lang: 'pt-BR' } }
+// `questionSeed`: the seed a voice asks every question with (a line ending in "?"), said live, never
+// picked from takes. João's: 11. By ear (5 yes/no questions x seeds 7, 11 and 23, 2026-11-28), none
+// of his seed-7 questions was good; seed 11 gave 3 of 5 at 10/10 and the only good question with a
+// question word ("O que você quer fazer agora?", 8/10). Validated on 11 new questions with seed 11
+// (8 yes/no, 3 with a question word): 10 rated 10/10, one 0/10 ("Posso apagar essa branch antiga?").
+// The take picker cannot help him: his raspy
+// clip reads up to 480 Hz on the pitch track, so it would have thrown out 3 of his 6 best takes.
+export const PERSONA_VOICE_SETTINGS = { luke: { lang: 'pt-BR', seed: 23 }, ceci: { lang: 'pt-BR' }, joao: { lang: 'pt-BR', questionSeed: 11 } }
 export const voiceSettings = persona => ({ ...VOICE_SETTINGS, ...(PERSONA_VOICE_SETTINGS[persona] ?? {}) })
 // The language field the engine gets. Qwen3-TTS knows Portuguese only as a whole ('pt'); 'pt-BR'
 // makes llama-server fail ("unknown language"). So 'pt-BR' is sent as no language at all: the
