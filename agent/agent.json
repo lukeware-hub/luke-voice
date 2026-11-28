@@ -37,7 +37,7 @@
           },
           "plan": {
             "type": "boolean",
-            "description": "Never set it yourself: luke-voice asks the user 'plan first?' after the yes and fills it in. true: plan with the native plan flow, save the plan as a markdown file and send Claude its path."
+            "description": "Never set it yourself: luke-voice sends every order without it, right after the yes. true: plan with the native plan flow, save the plan as a markdown file and send Claude its path."
           }
         }
       }

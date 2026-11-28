@@ -2,7 +2,7 @@
 // voice detector, Whisper writes down what the user said, the brain decides what to do and say,
 // and Kokoro speaks it. Only the brain leaves the machine (through the hub, to Claude).
 // It gives the window the same session the ElevenLabs engine does.
-import { PLAN_ASK, PLAN_START, REPEAT, askedAgain, decide, liveAction, needsPlanAsk, planAsked, unsureAnswer, withPlan } from '/engines/confirm.js'
+import { REPEAT, askedAgain, decide, liveAction, unsureAnswer } from '/engines/confirm.js'
 import { ACKS, pickAck } from '/engines/acks.js'
 import { pickGreeting } from '/engines/greetings.js'
 import { isConfirm, isDeny, stopTarget } from '/engines/fast-path.js'
@@ -643,7 +643,7 @@ export async function startSession({
     if (isWarming) return
     isWarming = true
     try {
-      for (const text of [...ACKS, ...Object.values(DONE_SAY), PLAN_START]) {
+      for (const text of [...ACKS, ...Object.values(DONE_SAY)]) {
         if (ackAudio.has(text)) continue
         if (!isIdle()) return
         const stop = new AbortController()
@@ -891,11 +891,6 @@ export async function startSession({
     // two voices, or a word lost in the noise), neither runs nor drops the action: Ceci asks again.
     const asked = action ? askAgain({ text }) : null
     if (asked) return asked
-    if (action?.planAsked && isDeny(text)) {
-      // "Não" to "planejo antes?": the order goes as it is, with no plan.
-      timing('fast path', 0, 'no to "plan first?"')
-      return runTool(withPlan(action, false), '', announce(action.tool.name))
-    }
     if (action && isDeny(text)) {
       timing('fast path', 0, 'no to "ok?"')
       return say(DENIED)
@@ -909,21 +904,8 @@ export async function startSession({
       return timing('fast path', 0, 'stop: Ceci only')
     }
     if (stop === 'claude') return stopNow()
-    if (action && needsPlanAsk(action) && isConfirm(text, recentSaid.join(' '))) {
-      // The order is confirmed; before it goes, Ceci asks whether to plan first. The action waits again.
-      timing('fast path', 0, 'yes to "ok?": asking plan first')
-      commitTurn()
-      pendingAction = planAsked(action, Date.now())
-      return say(PLAN_ASK)
-    }
     if (action && isConfirm(text, recentSaid.join(' '))) {
       timing('fast path', 0, `yes to "ok?": ${action.tool.name}`)
-      if (action.planAsked) {
-        // "Combinado, vou planejar primeiro." plays while the order is refined and planned
-        // (made ahead of time when it can be), so the wait does not sound like a hang.
-        if (!sayMade(PLAN_START)) void say(PLAN_START)
-        return runTool(withPlan(action, true), '', announce(action.tool.name))
-      }
       // "Comecei..." plays at once, made ahead of time, while the tool starts; a failure is still
       // explained after it.
       return runTool(action.tool, '', announce(action.tool.name))
