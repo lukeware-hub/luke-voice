@@ -82,11 +82,20 @@ export const SERVICES = {
 // 0.9 gives her melody back (6.2 of 10, panel 7.6 to 8.8). The fixed seed makes the same sentence
 // always sound the same.
 export const VOICE_SETTINGS = { temperature: 0.9, top_p: 0.9, seed: 7 }
-// What a voice changes in that sampling: none does now. Luke had 0.75/0.8 for a steadier accent
-// (0.24.0); the owner rated João 10/10 on the shared 0.9/0.9 and picked Luke on João's recipe, his
-// clip slowed to João's pace with the shared sampling, over keeping 0.75/0.8.
-export const PERSONA_VOICE_SETTINGS = {}
+// What a voice changes in that sampling. Luke had 0.75/0.8 for a steadier accent (0.24.0); the
+// owner rated João 10/10 on the shared 0.9/0.9 and picked Luke on João's recipe, his clip slowed
+// with the shared sampling. Slowed to João's pace (76%) the accent and timbre were 10/10 but too
+// slow; 94% (17.6 characters a second) was picked by ear.
+// `lang`: the language a voice speaks, 'pt' unless set. Luke speaks 'pt-BR' (the owner still heard
+// Portugal in him); see engineLang for what the engine is sent.
+export const PERSONA_VOICE_SETTINGS = { luke: { lang: 'pt-BR' } }
 export const voiceSettings = persona => ({ ...VOICE_SETTINGS, ...(PERSONA_VOICE_SETTINGS[persona] ?? {}) })
+// The language field the engine gets. Qwen3-TTS knows Portuguese only as a whole ('pt'); 'pt-BR'
+// makes llama-server fail ("unknown language"). So 'pt-BR' is sent as no language at all: the
+// voice then follows the reference clip, a Brazilian speaker, instead of a Portuguese leaning out of
+// its training. Measured on Luke (12 lines of a pt-BR conversation x 2 seeds, read back by the
+// ears): 9 word errors of 488 with no language, 12 with 'pt'. The owner picked it.
+export const engineLang = (lang = 'pt') => (lang === 'pt-BR' ? undefined : lang)
 
 // What Qwen3-ASR is told, so English tech words, Ceci's name and session names come out right.
 // The same prompt warms the engine up, so the first real transcription is not a cold one. The model

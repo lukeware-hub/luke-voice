@@ -556,7 +556,7 @@ test("Ceci's, Luke's and João's voices come with every install: the same clips,
   // both. Changing either changes that voice on every machine, so this test must be updated on purpose.
   assert.equal(sha('agent/ceci-voice.wav'), 'd4009e2a9855e8f511c65b27736896488ede82c3fcf65a22ef0f688547a3dca5')
   assert.equal(sha('agent/ceci-voice.txt'), '37f91de2f871d60e54eb1652f46b13498f2032a7e6dc9f1de504a2689ae95927')
-  assert.equal(sha('agent/luke-voice.wav'), 'd542ecf1e92c8c18ff6ae08de2f785ce9606f36abb9f5a343d1e229357a1ada6')
+  assert.equal(sha('agent/luke-voice.wav'), '613fe3a2752687488749836fa439dd022308cc3369311f1ab3a202f80a60d6c3')
   assert.equal(sha('agent/luke-voice.txt'), '1d0bec3d6efd6a822af792fc2ccb6c260b8e06f04035e992f8508e5d7326a1f8')
   assert.equal(sha('agent/joao-voice.wav'), '10671df6532f6df4cca2af76bcc25f5ca86c0853d380b457e0712fcf61d1b76c')
   assert.equal(sha('agent/joao-voice.txt'), '2c9d1ae5c3977aaab360a6684df8e61395f24a4929870768f5b6853c110e4800')
@@ -572,9 +572,13 @@ test("Ceci's, Luke's and João's voices come with every install: the same clips,
   assert.match(MODELS['native/qwen3-tts-1.7b-base-q5_k_m.gguf'].url, /^https:\/\/github\.com\/lukeware-hub\/luke-voice\/releases\/download\//)
   // Her sampling: the fixed seed makes the same sentence sound the same everywhere.
   assert.deepEqual(VOICE_SETTINGS, { temperature: 0.9, top_p: 0.9, seed: 7 })
-  // Luke is made like João, 10/10 for the owner: the shared sampling, as every built-in voice.
-  const { voiceSettings } = await import('./engine.mjs')
-  assert.deepEqual(voiceSettings('luke'), VOICE_SETTINGS)
+  // Luke is made like João, 10/10 for the owner: the shared sampling, as every built-in voice, in pt-BR.
+  const { voiceSettings, engineLang } = await import('./engine.mjs')
+  assert.deepEqual(voiceSettings('luke'), { ...VOICE_SETTINGS, lang: 'pt-BR' })
+  // The engine knows only 'pt': pt-BR goes as no language, so the Brazilian clip leads.
+  assert.equal(engineLang('pt-BR'), undefined)
+  assert.equal(engineLang(), 'pt')
+  assert.equal(engineLang('pt'), 'pt')
   for (const persona of ['ceci', 'joao', 'minha-voz']) assert.deepEqual(voiceSettings(persona), VOICE_SETTINGS)
 })
 
