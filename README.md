@@ -369,4 +369,4 @@ The free voice downloads third-party parts at install time; none of them is in t
 
 Ceci's reference voice clip `agent/ceci-voice.wav` was supplied by the project owner (ceci-nova.wav, 13.7 s, used whole at its own pitch).
 
-Luke's reference voice clip `agent/luke-voice.wav` was supplied by the project owner, whole and at his own pitch, slowed to 94% speed (17.6 characters a second), between João's pace and its own. João's, `agent/joao-voice.wav`, was supplied by the project owner, trimmed, at his own pitch, and sped up to 122% (17.4 characters a second). On the light voice, Luke and João speak with Kokoro's `pm_alex` and `pm_santa`.
+Luke's reference voice clip `agent/luke-voice.wav` was supplied by the project owner, whole, raised 1 semitone with its formants kept, and slowed to 94% speed (17.6 characters a second). João's, `agent/joao-voice.wav`, was supplied by the project owner, trimmed, at his own pitch, and sped up to 122% (17.4 characters a second). On the light voice, Luke and João speak with Kokoro's `pm_alex` and `pm_santa`.

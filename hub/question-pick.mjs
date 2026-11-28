@@ -139,7 +139,7 @@ export function wavSamples(buffer) {
 }
 
 // Questions Ceci asks often, improved in the background once the engine is up.
-export const COMMON_QUESTIONS = ['Refino e mando isso para o Claude?', 'Quer que eu planeje antes de mandar?', 'Apago isso da memória?', 'Quer que eu faça mais alguma coisa?', 'Mais alguma coisa?', 'Tudo bem?', 'Pode ser?', 'Quer que eu continue?']
+export const COMMON_QUESTIONS = ['Refino e mando isso para o Claude?', 'Apago isso da memória?', 'Quer que eu faça mais alguma coisa?', 'Mais alguma coisa?', 'Tudo bem?', 'Pode ser?', 'Quer que eu continue?']
 // Part of every kept take's key: 2 since takes in another voice are never served (voiceShift).
 const TAKES_VERSION = 2
 // Seeds tried for a question, after Ceci's own (the take said live).

@@ -70,13 +70,5 @@ export function unsureAnswer(action, { noSpeech = false, text = '' } = {}) {
 // The same "ok?", fresh again, after Ceci asked to hear its answer once more.
 export const askedAgain = (action, now) => ({ ...action, at: now, repeats: (action.repeats ?? 0) + 1 })
 
-// Before an order goes to Claude, Ceci asks a second question: plan first? A "sim" to the order's "ok?"
-// is not the end: she asks this one (planAsk) and keeps the same action waiting, marked as asked. Its
-// "sim" sends the order with plan: true, its "não" sends it with plan: false (the usual flow).
-export const PLAN_ASK = 'Quer que eu planeje antes de mandar?'
-// Said at once on the "sim" to PLAN_ASK, before the order is refined and planned: that takes a while,
-// and in silence the user took it for a hang.
-export const PLAN_START = 'Combinado, vou planejar primeiro.'
-export const needsPlanAsk = action => action?.tool?.name === 'luke_send_to_claude' && !action.planAsked
-export const planAsked = (action, now) => ({ ...action, at: now, planAsked: true, repeats: 0 })
-export const withPlan = (action, plan) => ({ ...action.tool, args: { ...(action.tool.args ?? {}), plan } })
+// There is no second question about planning: a "sim" to the order's question sends it at once. The
+// "plan first?" question (0.20.0 to 0.26.1) held the flow up, and the owner had it removed.

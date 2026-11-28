@@ -455,7 +455,8 @@ export function refinePrompt(speech: string) {
   ].join('\n')
 }
 
-// With "plan first" (Ceci asked the user and heard a yes), the refined prompt is planned before it goes:
+// With plan: true on a send, the refined prompt is planned before it goes (the call no longer asks
+// "plan first?" since 0.26.2 and sends without it, so only a caller that sets the flag gets this):
 // one more model call writes the plan the way Claude Code's plan mode does (the steps, the files, the
 // risks), it is saved as a markdown file, and the main chat receives only that file's path. The engine
 // cannot start the native plan skill, so the prompt carries its shape.
