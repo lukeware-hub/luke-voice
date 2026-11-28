@@ -568,7 +568,8 @@ test('speech goes to the native engine: /stt sends the WAV with the glossary, /t
     assert.equal(tts.type, 'audio/wav')
     assert.equal(tts.body.length, 16)
     assert.equal(seen.tts.input, 'Comecei, te aviso quando terminar.')
-    assert.equal(seen.tts.lang, 'pt')
+    // Ceci speaks pt-BR, sent as no language (engineLang): the engine fails on "pt-BR".
+    assert.equal('lang' in seen.tts, false)
     assert.equal(seen.tts.stream, true)
     assert.equal(Buffer.from(seen.tts.speaker_ref_b64, 'base64').toString(), 'CECIVOICE')
     // Cloned with the reference transcript (Brazilian accent), Ceci's sampling, and a cap against loops.
@@ -1334,12 +1335,13 @@ test('the /tts body is the same JSON as before, with the reference fragment made
     assert.equal(ttsBody(text, seed, fragment), before)
   }
   // The voice's settings go in its bodies (engine.mjs, voiceSettings): Luke's sampling is the shared
-  // one, as João's, and his pt-BR goes as no language (the engine fails on "pt-BR"); Ceci and João keep 'pt'.
+  // one, as João's, and Luke's and Ceci's pt-BR goes as no language (the engine fails on "pt-BR"); João keeps 'pt'.
   const { voiceSettings } = await import('./engine.mjs')
   const luke = JSON.parse(ttsBody('Oi.', undefined, fragment, voiceSettings('luke')))
   assert.equal(luke.temperature, VOICE_SETTINGS.temperature)
   assert.equal('lang' in luke, false)
-  for (const persona of ['ceci', 'joao']) assert.equal(JSON.parse(ttsBody('Oi.', undefined, fragment, voiceSettings(persona))).lang, 'pt')
+  assert.equal('lang' in JSON.parse(ttsBody('Oi.', undefined, fragment, voiceSettings('ceci'))), false)
+  assert.equal(JSON.parse(ttsBody('Oi.', undefined, fragment, voiceSettings('joao'))).lang, 'pt')
 })
 
 test('a kept question take belongs to the voice model files by content, not only by name', async () => {
