@@ -135,7 +135,8 @@ export function containerOptions(env = process.env) {
 }
 
 export function ttsBody(text, seed, refJson, settings = VOICE_SETTINGS) {
-  const { lang, ...sampling } = settings
+  // questionSeed is the hub's choice of seed (nativeTts), not a field the engine knows.
+  const { lang, questionSeed, ...sampling } = settings
   const sent = engineLang(lang)
   const head = JSON.stringify({ input: text, ...(sent ? { lang: sent } : {}), stream: true, response_format: 'wav', ...sampling, ...(seed === undefined ? {} : { seed }), n_predict: maxFrames(text) })
   return `${head.slice(0, -1)},${refJson}}`
@@ -1248,7 +1249,9 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       stop.abort()
       done()
     })
-    const isQuestion = body.pick !== false && isYesNoQuestion(text) && text.length <= MAX_PICK_CHARS
+    // A voice with its own question seed (engine.mjs, João) asks every question live with it.
+    const asked = voiceSampling.questionSeed !== undefined && /\?$/.test(text) ? voiceSampling.questionSeed : undefined
+    const isQuestion = asked === undefined && body.pick !== false && isYesNoQuestion(text) && text.length <= MAX_PICK_CHARS
     if (isQuestion) {
       const wav = await questionTakes().take(text, { budget: Math.max(0, Number(body.budget) || 0), signal: stop.signal })
       if (stop.signal.aborted) return res.end()
@@ -1257,7 +1260,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
         return res.end(wav)
       }
     }
-    const upstream = await speak(url, text, stop.signal)
+    const upstream = await speak(url, text, stop.signal, asked)
     if (!upstream?.ok || !upstream.body) return send(res, 502, { error: `voice engine ${upstream?.status ?? 'unreachable'}` })
     res.writeHead(200, { 'content-type': 'audio/wav', 'cache-control': 'no-store' })
     const said = []

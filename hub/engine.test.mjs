@@ -581,7 +581,8 @@ test("Ceci's, Luke's and João's voices come with every install: the same clips,
   assert.equal(engineLang(), 'pt')
   assert.equal(engineLang('pt'), 'pt')
   assert.deepEqual(voiceSettings('ceci'), { ...VOICE_SETTINGS, lang: 'pt-BR' })
-  assert.deepEqual(voiceSettings('joao'), { ...VOICE_SETTINGS, lang: 'pt-BR' })
+  // João asks his questions with seed 11, the one the owner rated best for them by ear.
+  assert.deepEqual(voiceSettings('joao'), { ...VOICE_SETTINGS, lang: 'pt-BR', questionSeed: 11 })
   assert.deepEqual(voiceSettings('minha-voz'), VOICE_SETTINGS)
 })
 

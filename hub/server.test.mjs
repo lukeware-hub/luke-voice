@@ -890,6 +890,62 @@ test('a yes/no question gets more takes only while the line before still plays, 
   }
 })
 
+test("João asks every question with his question seed, live: his kept takes cannot be picked by pitch", async () => {
+  // His raspy clip reads up to 480 Hz on the pitch track, so a take's rise and voice shift say
+  // nothing: by ear, 3 of his 6 best questions would have been thrown out as another voice.
+  const seeds = []
+  const fake = createHttpServer(async (req, res) => {
+    const chunks = []
+    for await (const c of req) chunks.push(c)
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+    seeds.push(body.seed)
+    assert.equal('questionSeed' in body, false, 'the engine is never sent the question seed setting')
+    res.writeHead(200, { 'content-type': 'audio/wav' })
+    res.end(Buffer.from('RIFF'))
+  })
+  await new Promise(resolve => fake.listen(0, '127.0.0.1', resolve))
+  const base = `http://127.0.0.1:${fake.address().port}`
+  const engine = { url: () => base, status: () => ({ tts: true, asr: true, router: false }) }
+  const refs = mkdtempSync(join(tmpdir(), 'luke-voice-ref-'))
+  for (const voice of ['ceci', 'joao']) {
+    writeFileSync(join(refs, `${voice}-voice.wav`), `${voice.toUpperCase()}VOICE`)
+    writeFileSync(join(refs, `${voice}-voice.txt`), `Oi, eu sou ${voice}.`)
+  }
+  const questionsDir = mkdtempSync(join(tmpdir(), 'luke-voice-questions-'))
+  const hub2 = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {}, engine, voiceRef: join(refs, 'ceci-voice.wav'), profile: () => ({ profile: 'gpu' }), platform: 'win32', questionsDir })
+  await new Promise(resolve => hub2.listen(0, '127.0.0.1', resolve))
+  const p = hub2.address().port
+  const post = (path, body) =>
+    new Promise((resolve, reject) => {
+      const req = request({ host: '127.0.0.1', port: p, method: 'POST', path, headers: { host: `127.0.0.1:${p}`, 'content-type': 'application/json', 'x-luke-key': WINDOW, 'sec-fetch-site': 'same-origin' } }, res => {
+        res.resume()
+        res.on('end', resolve)
+      })
+      req.on('error', reject)
+      req.end(JSON.stringify(body))
+    })
+  try {
+    await post('/assistant', { assistant: 'joao' })
+    // A yes/no question: seed 11 only, no other takes even with time for them.
+    await post('/tts', { text: 'Posso abrir o pull request agora?', budget: 5000 })
+    assert.deepEqual(seeds.splice(0), [11])
+    // A question with a question word: seed 11 too (8/10 by ear; seed 7 was rated bad).
+    await post('/tts', { text: 'O que você quer fazer agora?', budget: 5000 })
+    assert.deepEqual(seeds.splice(0), [11])
+    await post('/tts', { text: 'Tudo bem?', budget: 5000, pick: false })
+    assert.deepEqual(seeds.splice(0), [11])
+    // A statement keeps his seed (7).
+    await post('/tts', { text: 'O deploy foi concluído com sucesso.' })
+    assert.deepEqual(seeds.splice(0), [7])
+  } finally {
+    // The temp home is shared by the other tests: back to Ceci.
+    await post('/assistant', { assistant: 'ceci' })
+    hub2.closeAllConnections()
+    hub2.close()
+    fake.close()
+  }
+})
+
 test('when the window hangs up mid-sentence (barge-in), the generation on the engine is stopped', async () => {
   let isUpstreamClosed = false
   let onUpstreamClosed
