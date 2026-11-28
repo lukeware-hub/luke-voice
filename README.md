@@ -34,7 +34,7 @@ On the gpu profile, the hub downloads llama.cpp's official release build b12556 
 
 ## Requirements
 
-- **Claude Code**, installed and signed in with a Claude account (the only thing you install yourself). Current version of luke-voice: v0.31.0.
+- **Claude Code**, installed and signed in with a Claude account (the only thing you install yourself). Current version of luke-voice: v0.31.1.
 - **Windows, macOS or Linux.** On a Mac with Apple silicon you get the natural voice; an Intel Mac gets the light voice.
 - **Node.js 20 or newer and Git** (Windows) are brought by the installer when missing, for your user only.
 - **Disk space:** about 3.3 GB for the natural voice, about 360 MB for the light voice (the installer checks first).

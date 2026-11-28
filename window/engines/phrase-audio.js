@@ -17,6 +17,16 @@ export const ELLIPSIS_PAUSE_S = 0.3
 export const MAX_INNER_PAUSE_S = 0.24
 // A frame quieter than this share of the phrase's loudest frame is silence.
 const SILENCE_SHARE = 0.06
+// The voice makes a chunk while the one before it plays, on a single engine slot. Slower than the
+// speech it makes (real-time factor above 1), every chunk boundary turns into a gap: on 2026-11-28 a
+// Docker/WSL VM held ~3 GB of an 8 GB GPU, 2 GB of the voice spilled to system memory, and Ceci's
+// pauses after a period grew to 6 s. The first chunk alone is not judged: a few seconds of audio are
+// needed for a steady reading.
+export const SLOW_RTF = 1
+const SLOW_MIN_AUDIO_S = 3
+export function isVoiceSlow({ madeS, audioS }) {
+  return audioS >= SLOW_MIN_AUDIO_S && madeS / audioS > SLOW_RTF
+}
 // What is kept of the silence at a cut edge, so a soft start or a fading end is not clipped.
 const KEEP_S = 0.03
 const FRAME_S = 0.02

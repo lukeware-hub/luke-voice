@@ -7,7 +7,7 @@ import { ACKS, pickAck } from '/engines/acks.js'
 import { pickGreeting } from '/engines/greetings.js'
 import { isConfirm, isDeny, stopTarget } from '/engines/fast-path.js'
 import { speechChunks } from '/engines/speech-text.js'
-import { capPauses, isReadyToStart, pauseAfter, sentenceLeft, trimEdges } from '/engines/phrase-audio.js'
+import { capPauses, isReadyToStart, isVoiceSlow, pauseAfter, sentenceLeft, trimEdges } from '/engines/phrase-audio.js'
 import { contextEntry, trimContext } from '/engines/context.js'
 import { createCutReply, createTurnJoiner, createTurnLog } from '/engines/turn-join.js'
 import { risingPercent } from '/engines/progress.js'
@@ -234,6 +234,8 @@ const MAC_VOICE_HINT = 'Para a voz soar mais natural neste Mac, escolha a Siri V
 const STT_TIMEOUT_MS = 120_000
 const TTS_TIMEOUT_MS = 30_000
 const NATIVE_DOWN = 'A voz natural não respondeu; usando a voz leve nesta chamada.'
+// The native voice makes speech slower than it plays (phrase-audio.js, isVoiceSlow): the pauses grow into gaps.
+const SLOW_VOICE = 'A voz está mais lenta que a fala: a memória de vídeo pode estar cheia. Feche apps que usam a placa de vídeo (como o Docker) e reinicie a chamada.'
 
 export async function startSession({
   hub,
@@ -297,6 +299,8 @@ export async function startSession({
   // The browser voice switched from Kokoro to the lighter Piper (Kokoro too slow here, or it did not load).
   if (!isNative && voiceInfo?.fallback) onStatus(voiceInfo.fallback, { isWarning: true })
   else if (!isNative && !isMacVoice && config.macVoiceHint) onStatus(MAC_VOICE_HINT, { isWarning: true })
+  // SLOW_VOICE is said once per call.
+  let isSlowWarned = false
 
   const stream = await navigator.mediaDevices.getUserMedia({
     // No automatic gain: it raised whatever was left of Ceci's echo after the echo canceller,
@@ -532,6 +536,8 @@ export async function startSession({
     let isStarted = false
     let madeS = 0
     let madeChars = 0
+    // Seconds of audio made so far: with madeS, how fast the voice runs against the speech.
+    let audioS = 0
     const replyStarted = performance.now()
     // What is ready to play: the held phrases with their pauses, and what still plays.
     const readyS = () => held.reduce((s, h) => s + h.audio.length / h.rate + h.pause, 0) + (playing.size ? Math.max(0, playhead - outContext.currentTime) : 0)
@@ -579,11 +585,21 @@ export async function startSession({
         whole.set(piece, at)
         at += piece.length
       }
-      madeS += (performance.now() - started) / 1000
+      const chunkS = (performance.now() - started) / 1000
+      madeS += chunkS
       madeChars += parts[i].length
       // The phrase's own silence is cut, a long silence inside it is shortened, and the page puts a
       // steady pause after it (phrase-audio.js).
-      held.push({ audio: capPauses(trimEdges(whole, sampleRate, { start: true, end: true }), sampleRate), rate: sampleRate, pause: i < parts.length - 1 ? pauseAfter(parts[i]) : 0 })
+      const audio = capPauses(trimEdges(whole, sampleRate, { start: true, end: true }), sampleRate)
+      const spokenS = audio.length / sampleRate
+      audioS += spokenS
+      timing('speak', Math.round(chunkS * 1000), `for ${spokenS.toFixed(1)} s of audio (native, rtf ${spokenS ? (chunkS / spokenS).toFixed(2) : '-'})`)
+      if (!isSlowWarned && isVoiceSlow({ madeS, audioS })) {
+        isSlowWarned = true
+        console.warn(`[luke-voice] the native voice is slower than speech: rtf ${(madeS / audioS).toFixed(2)}`)
+        onStatus(SLOW_VOICE, { isWarning: true })
+      }
+      held.push({ audio, rate: sampleRate, pause: i < parts.length - 1 ? pauseAfter(parts[i]) : 0 })
       // A sentence waits until the audio ready covers what is left of it to make, so no pause
       // inside it turns into a gap; the next sentence is made while this one plays.
       if (isReadyToStart({ readyS: readyS(), madeS, madeChars, leftChars: sentenceLeft(parts, i) })) startHeld()
