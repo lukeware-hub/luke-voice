@@ -6,6 +6,7 @@ import {
   QUIET_OFF,
   QUIET_ON,
   REFUSED,
+  SUMMARY_FAILED,
   createQuietMode,
   createSpeechFilter,
   createVoiceGate,
@@ -1129,6 +1130,12 @@ const clientTools = {
   luke_session_activity: async ({ session }) => {
     const out = await hub('GET', `/activity?session=${encodeURIComponent(session || '')}`).catch(error => ({ text: error.message }))
     return quoteUntrusted(out.text)
+  },
+  // A big spoken summary of a session, written by its mod (hub POST /summary). The text is said as it
+  // comes (engines/local.js); a failure starts with SUMMARY_FAILED, so the brain explains it instead.
+  luke_session_summary: async ({ session }) => {
+    const out = await hub('POST', '/summary', { session: session || undefined }).catch(error => ({ ok: false, message: error.message }))
+    return out.ok && out.message ? out.message : `${SUMMARY_FAILED}: ${out.message || 'no answer'}`
   },
   // Ceci's permanent memory. Reading needs no "ok?"; what the sessions wrote comes back quoted.
   luke_memory_search: async ({ query, from, to }) => {

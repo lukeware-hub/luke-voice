@@ -310,7 +310,9 @@ async function synthesizePiper(text, speed = 1) {
 }
 
 async function transcribe(audio, language = 'portuguese') {
-  const out = await stt(audio, { language, task: 'transcribe', max_new_tokens: 224 })
+  // Whisper hears 30 s at a time: a longer turn (up to 5 minutes, vad.js) is heard in 30 s windows
+  // that overlap by 5 s and are stitched back together, instead of being cut after the first 30 s.
+  const out = await stt(audio, { language, task: 'transcribe', max_new_tokens: 224, chunk_length_s: 30, stride_length_s: 5 })
   return String(out?.text ?? '').trim()
 }
 

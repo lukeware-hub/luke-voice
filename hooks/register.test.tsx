@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Args, On } from 'claude-code'
 
-import { PLAN_FIRST, REFINE_TIMEOUT_MS, asPersona, parseRefined, refinePrompt, brainArgs, brainInput, classifyTask, NO_NODE, parseBrain, parseBrainText, parseSummary, memoryTarget, preview, withFull, summaryPrompt, TIERS } from './register'
+import { PLAN_FIRST, REFINE_TIMEOUT_MS, asPersona, parseRefined, refinePrompt, brainArgs, brainInput, classifyTask, NO_NODE, parseBrain, parseBrainText, parseSummary, memoryTarget, preview, withFull, summaryPrompt, TIERS, sessionSlice, spokenSummaryAsk, NOTES_SHARE } from './register'
 import type { BrainRequest } from './register'
 
 const FOOTER = { plugin: 'luke-voice', component: 'SessionMode', props: { modes: [] } } as const
@@ -1164,6 +1164,123 @@ test("a think command for Nara sends Nara's prompt", async ($, on) => {
 
   const sent = completes[0] as { systemBlocks?: Array<{ text: string }> }
   expect(sent.systemBlocks?.[0]?.text).toBe('Você é a Nara.')
+})
+
+// Lets every pending promise turn run (a reply assigned after an engine call, say).
+const settle = () => until(() => false)
+
+test('the session slice is the last 40% of the conversation, starts at a message and keeps to its cap', () => {
+  const messages = [
+    { role: 'user', text: 'a'.repeat(600) },
+    { role: 'assistant', text: 'resposta antiga' },
+    { role: 'user', text: '  ' },
+    { role: 'user', text: 'arruma o login' },
+    { role: 'assistant', text: 'Arrumei o login em auth.ts.' },
+  ]
+  const slice = sessionSlice(messages)
+  expect(slice.startsWith('claude: resposta antiga')).toBe(true)
+  expect(slice).toContain('usuário: arruma o login')
+  expect(slice).not.toContain('aaaa')
+  expect(sessionSlice(messages, 1)).toContain('a'.repeat(600))
+  expect(sessionSlice([{ role: 'user', text: 'b'.repeat(500) }], 0.4, 100)).toBe('b'.repeat(100))
+  expect(sessionSlice([])).toBe('')
+  // A cut inside the last message keeps that whole message.
+  expect(sessionSlice([{ role: 'user', text: 'roda os testes' }])).toBe('usuário: roda os testes')
+  expect(NOTES_SHARE).toBe(0.4)
+})
+
+test("the brain reads Ceci's notes on the session as untrusted data, and asks for a session summary as a tool", () => {
+  const input = brainInput({ ...REQUEST, notes: 'Arrumando o login.' })
+  expect(input).toContain('[notas da sessão]\n<<<untrusted>>>\nArrumando o login.\n<<</untrusted>>>')
+  expect(brainInput(REQUEST)).not.toContain('[notas da sessão]')
+  expect(parseBrainText('{"say":"Vou preparar o resumo.","tool":{"name":"luke_session_summary","args":{}}}').tool).toEqual({ name: 'luke_session_summary', args: {} })
+  expect(spokenSummaryAsk({ name: 'Luke', gender: 'male' })).toContain('Você é Luke')
+  expect(spokenSummaryAsk({ name: 'Luke', gender: 'male' })).toContain('masculino')
+  expect(spokenSummaryAsk()).toContain('feminino')
+})
+
+test("after Claude's turn Haiku writes the notes from the last 40%, once per 3 minutes; the brain and a spoken summary read them", async ($, on) => {
+  type Row = { role: 'user' | 'assistant'; text: string; toolUses: [] }
+  const messages: Row[] = [
+    { role: 'user', text: 'a'.repeat(600), toolUses: [] },
+    { role: 'assistant', text: 'resposta antiga', toolUses: [] },
+    { role: 'user', text: 'arruma o login', toolUses: [] },
+    { role: 'assistant', text: 'Arrumei o login em auth.ts.', toolUses: [] },
+  ]
+  on('session.messages', () => ({ value: messages }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('fs.read', () => ({ value: 'BRAIN PROMPT' }))
+  let noted: () => void = () => undefined
+  const isNoted = new Promise<void>(resolve => (noted = resolve))
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => (release = resolve))
+  const { calls, completes } = engine(on, [
+    async () => (await isNoted, { status: 200, body: { commands: [{ id: 't1', type: 'think', request: REQUEST }, { id: 's1', type: 'session_summary', persona: { name: 'Luke', gender: 'male' } }] } }),
+    async () => (await held, { status: 410, body: {} }),
+  ])
+  brainComplete = { isAnswered: true, text: 'NOTAS: login arrumado em auth.ts' }
+
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/inbox'))
+  await $.turn.start({ text: 'arruma o login', turnId: 'm1' })
+  await $.turn.complete({ answer: 'Arrumei.', durationMs: 1, isAborted: false, turnId: 'm1', reason: 'answer' })
+  await until(() => completes.length >= 1)
+  await settle()
+  // A second turn right after: no new notes call inside 3 minutes.
+  await $.turn.start({ text: 'e agora?', turnId: 'm2' })
+  await $.turn.complete({ answer: 'Pronto.', durationMs: 1, isAborted: false, turnId: 'm2', reason: 'answer' })
+  await settle()
+  brainComplete = { isAnswered: true, text: 'Eu arrumei o login com o Claude.' }
+  noted()
+  await until(() => calls.filter(c => c.path === '/ack').length >= 2)
+  await $.command.run(run('off'))
+  release()
+
+  type Sent = { model: string; effort: string; prompt: string; maxTokens: number; systemBlocks?: Array<{ text: string }> }
+  const sent = completes as Sent[]
+  const noting = sent.filter(c => c.model === 'haiku')
+  expect(noting.length).toBe(1)
+  expect(noting[0]?.prompt).toContain('claude: resposta antiga')
+  expect(noting[0]?.prompt).toContain('usuário: arruma o login')
+  expect(noting[0]?.prompt).not.toContain('aaaa')
+  const thinking = sent.find(c => c.effort === 'medium')
+  expect(thinking?.prompt).toContain('[notas da sessão]\n<<<untrusted>>>\nNOTAS: login arrumado em auth.ts')
+  const summing = sent.find(c => c.maxTokens === 3500)
+  expect(summing?.model).toBe('claude-sonnet-5-5')
+  expect(summing?.systemBlocks?.[0]?.text).toContain('Você é Luke')
+  expect(summing?.prompt).toContain('NOTAS: login arrumado em auth.ts')
+  const ack = calls.find(c => c.path === '/ack' && c.body.id === 's1')?.body
+  expect(ack?.ok).toBe(true)
+  expect(ack?.message).toBe('Eu arrumei o login com o Claude.')
+})
+
+test('a spoken summary with no notes reads the last 40% of the conversation, and an empty session acks that there is nothing', async ($, on) => {
+  let messages: Array<{ role: 'user' | 'assistant'; text: string; toolUses: [] }> = [{ role: 'user', text: 'roda os testes', toolUses: [] }]
+  on('session.messages', () => ({ value: messages }))
+  let release: () => void = () => undefined
+  const held = new Promise<void>(resolve => (release = resolve))
+  let second: () => void = () => undefined
+  const isSecond = new Promise<void>(resolve => (second = resolve))
+  const { calls, completes } = engine(on, [
+    async () => ({ status: 200, body: { commands: [{ id: 's1', type: 'session_summary' }] } }),
+    async () => (await isSecond, { status: 200, body: { commands: [{ id: 's2', type: 'session_summary' }] } }),
+    async () => (await held, { status: 410, body: {} }),
+  ])
+  brainComplete = { isAnswered: true, text: 'Rodamos os testes.' }
+
+  await $.command.run(run('on'))
+  await until(() => calls.some(c => c.path === '/ack'))
+  messages = []
+  second()
+  await until(() => calls.filter(c => c.path === '/ack').length >= 2)
+  await $.command.run(run('off'))
+  release()
+
+  expect((completes[0] as { prompt: string }).prompt).toContain('[conversa]\n<<<untrusted>>>\nusuário: roda os testes')
+  expect(completes.length).toBe(1)
+  expect(calls.find(c => c.path === '/ack' && c.body.id === 's1')?.body.message).toBe('Rodamos os testes.')
+  expect(calls.find(c => c.path === '/ack' && c.body.id === 's2')?.body.ok).toBe(false)
 })
 
 test('a brain that fails acks the think command as failed, with the reason', async ($, on) => {

@@ -5,6 +5,8 @@
 
 export const FRAME = 512
 export const RATE = 16_000
+// The longest one utterance can run: 5 minutes, so the user can explain something long in one go.
+export const MAX_UTTERANCE_S = 300
 
 const DEFAULTS = {
   // Below this RMS (~-42 dBFS) nothing counts as speech, however quiet the room. The mic has no
@@ -38,7 +40,7 @@ const DEFAULTS = {
   // While Ceci speaks, ~1.6 s is kept: speech has quiet dips between syllables, so a barge-in
   // fires a moment after the user started, and the words before it must not be lost.
   bargePrerollFrames: 50,
-  maxFrames: 940, // ~30 s at most per utterance
+  maxFrames: Math.round((MAX_UTTERANCE_S * RATE) / FRAME), // 9375 frames, 5 minutes at most per utterance
   // Shorter blips (a click, a knock) are dropped. ~190 ms: a quick "sim" or "não" has about that
   // much voiced sound; at 8 (~260 ms) it was often dropped. Silero still checks what passes.
   minSpeechFrames: 6,

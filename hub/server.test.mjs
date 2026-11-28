@@ -475,6 +475,32 @@ test('the brain turn goes to the focused session as a think command, and its JSO
   await call('POST', '/unsubscribe', { auth: s1.token })
 })
 
+test("a spoken summary goes to the named session's mod as a session_summary command, and its text comes back", async () => {
+  const s1 = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/summed', version: '0.27.0', canSessionSummary: true } })).body
+  const asked = call('POST', '/summary', { key: WINDOW, body: { session: s1.name } })
+  const command = (await call('GET', '/inbox?wait=2000', { auth: s1.token })).body.commands[0]
+  assert.equal(command.type, 'session_summary')
+  assert.equal(typeof command.persona.name, 'string')
+  assert.ok(['female', 'male'].includes(command.persona.gender))
+  await call('POST', '/ack', { auth: s1.token, body: { id: command.id, ok: true, message: 'Hoje arrumamos o login.' } })
+  assert.deepEqual((await asked).body, { ok: true, message: 'Hoje arrumamos o login.' })
+  // An unknown session name is said, not sent anywhere.
+  const unknown = await call('POST', '/summary', { key: WINDOW, body: { session: 'nope' } })
+  assert.equal(unknown.body.ok, false)
+  assert.match(unknown.body.message, /No session is named "nope"/)
+  await call('POST', '/unsubscribe', { auth: s1.token })
+})
+
+test('a session from before 0.27.0 is never sent a session_summary (it would take it for an order to Claude)', async () => {
+  const old = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/oldsum', version: '0.26.2', canSummarize: true } })).body
+  const reply = await call('POST', '/summary', { key: WINDOW, body: { session: old.name } })
+  assert.equal(reply.body.ok, false)
+  assert.match(reply.body.message, /versão antiga/)
+  const inbox = await call('GET', '/inbox?wait=50', { auth: old.token })
+  assert.equal((inbox.body.commands ?? []).length, 0)
+  await call('POST', '/unsubscribe', { auth: old.token })
+})
+
 test('a session from an older luke-voice (no version, no voice) is never asked to think', async () => {
   // 0.7.9 handed any command it did not know to Claude as a prompt: "…pass this on: undefined".
   const old = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/oldie' } })).body
