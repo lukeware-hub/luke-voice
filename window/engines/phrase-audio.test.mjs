@@ -91,3 +91,13 @@ test('only the rest of the sentence counts before Ceci starts, not the rest of t
   // A sentence cut at a space continues in the next part.
   assert.equal(sentenceLeft(['uma frase muito longa que', 'continua aqui.', 'Outra.'], 0), 'continua aqui.'.length)
 })
+
+test('the voice is slow once it makes speech slower than it plays, judged on a few seconds of audio', async () => {
+  const { isVoiceSlow } = await import('./phrase-audio.js')
+  // One short first chunk: too little to judge, however slow.
+  assert.equal(isVoiceSlow({ madeS: 4, audioS: 2 }), false)
+  // Twice as fast as speech: the next chunk is ready before this one ends.
+  assert.equal(isVoiceSlow({ madeS: 3.5, audioS: 7 }), false)
+  // 2026-11-28, VRAM spilled to system memory: 9 s to make 7 s of speech.
+  assert.equal(isVoiceSlow({ madeS: 9.1, audioS: 7 }), true)
+})
