@@ -476,7 +476,7 @@ test('the brain turn goes to the focused session as a think command, and its JSO
 })
 
 test("a spoken summary goes to the named session's mod as a session_summary command, and its text comes back", async () => {
-  const s1 = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/summed', version: '0.27.0', canSessionSummary: true } })).body
+  const s1 = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/summed', version: '0.28.0', canSessionSummary: true } })).body
   const asked = call('POST', '/summary', { key: WINDOW, body: { session: s1.name } })
   const command = (await call('GET', '/inbox?wait=2000', { auth: s1.token })).body.commands[0]
   assert.equal(command.type, 'session_summary')
@@ -491,7 +491,7 @@ test("a spoken summary goes to the named session's mod as a session_summary comm
   await call('POST', '/unsubscribe', { auth: s1.token })
 })
 
-test('a session from before 0.27.0 is never sent a session_summary (it would take it for an order to Claude)', async () => {
+test('a session from before 0.28.0 is never sent a session_summary (it would take it for an order to Claude)', async () => {
   const old = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/oldsum', version: '0.26.2', canSummarize: true } })).body
   const reply = await call('POST', '/summary', { key: WINDOW, body: { session: old.name } })
   assert.equal(reply.body.ok, false)
