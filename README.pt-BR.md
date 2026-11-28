@@ -322,6 +322,6 @@ A voz gratuita baixa na instalação partes de terceiros; nenhuma delas está ne
 
 O trecho de voz de referência da Ceci, `agent/ceci-voice.wav`, foi fornecido pelo dono do projeto e cortado, no tom original dela.
 
-O trecho de voz de referência do Luke, `agent/luke-voice.wav`, foi fornecido pelo dono do projeto e cortado, no tom dele. O do João, `agent/joao-voice.wav`, foi fornecido pelo dono do projeto, cortado e abaixado 1,5 semitom. Na voz leve, Luke e João falam com as vozes `pm_alex` e `pm_santa` do Kokoro.
+O trecho de voz de referência do Luke, `agent/luke-voice.wav`, foi fornecido pelo dono do projeto, inteiro e no tom dele. O do João, `agent/joao-voice.wav`, foi fornecido pelo dono do projeto, cortado e abaixado 1,5 semitom. Na voz leve, Luke e João falam com as vozes `pm_alex` e `pm_santa` do Kokoro.
 
 Mais detalhes, em inglês, no [README.md](README.md).

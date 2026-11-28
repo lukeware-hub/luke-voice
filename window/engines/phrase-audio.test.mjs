@@ -1,7 +1,31 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { COMMA_PAUSE_S, ELLIPSIS_PAUSE_S, SENTENCE_PAUSE_S, pauseAfter, sentenceLeft, trimEdges } from './phrase-audio.js'
+import { COMMA_PAUSE_S, ELLIPSIS_PAUSE_S, MAX_INNER_PAUSE_S, SENTENCE_PAUSE_S, capPauses, pauseAfter, sentenceLeft, trimEdges } from './phrase-audio.js'
+
+test('a long silence inside a chunk is cut down to a sentence pause; short ones and the edges stay', () => {
+  const rate = 24_000
+  const tone = s => Float32Array.from({ length: Math.round(rate * s) }, (_, i) => 0.5 * Math.sin(i / 3))
+  const quiet = s => new Float32Array(Math.round(rate * s))
+  const join = parts => {
+    const out = new Float32Array(parts.reduce((n, p) => n + p.length, 0))
+    let at = 0
+    for (const p of parts) (out.set(p, at), (at += p.length))
+    return out
+  }
+  // "Boa noite! [1.38 s] Tudo bem? [0.1 s] Eu sou o Luke." -> the long silence becomes MAX_INNER_PAUSE_S.
+  const take = join([quiet(0.3), tone(0.5), quiet(1.38), tone(0.4), quiet(0.1), tone(0.6), quiet(0.4)])
+  const out = capPauses(take, rate)
+  const lost = (take.length - out.length) / rate
+  assert.ok(Math.abs(lost - (1.38 - MAX_INNER_PAUSE_S)) < 0.03, `cut ${lost} s`)
+  // Nothing to cut: the same audio back.
+  const short = join([tone(0.5), quiet(0.2), tone(0.5)])
+  assert.equal(capPauses(short, rate), short)
+  assert.equal(capPauses(new Float32Array(0), rate).length, 0)
+  // The pauses after . ! ? are shorter than before (0.24 s, 0.34 s).
+  assert.equal(SENTENCE_PAUSE_S, 0.2)
+  assert.equal(ELLIPSIS_PAUSE_S, 0.3)
+})
 
 const RATE = 24_000
 // `lead` s of silence, `speech` s of a tone, `trail` s of silence.

@@ -2,12 +2,12 @@
 // voice detector, Whisper writes down what the user said, the brain decides what to do and say,
 // and Kokoro speaks it. Only the brain leaves the machine (through the hub, to Claude).
 // It gives the window the same session the ElevenLabs engine does.
-import { PLAN_ASK, REPEAT, askedAgain, decide, liveAction, needsPlanAsk, planAsked, unsureAnswer, withPlan } from '/engines/confirm.js'
+import { PLAN_ASK, PLAN_START, REPEAT, askedAgain, decide, liveAction, needsPlanAsk, planAsked, unsureAnswer, withPlan } from '/engines/confirm.js'
 import { ACKS, pickAck } from '/engines/acks.js'
 import { pickGreeting } from '/engines/greetings.js'
 import { isConfirm, isDeny, stopTarget } from '/engines/fast-path.js'
 import { speechChunks } from '/engines/speech-text.js'
-import { isReadyToStart, pauseAfter, sentenceLeft, trimEdges } from '/engines/phrase-audio.js'
+import { capPauses, isReadyToStart, pauseAfter, sentenceLeft, trimEdges } from '/engines/phrase-audio.js'
 import { contextEntry, trimContext } from '/engines/context.js'
 import { createCutReply, createTurnJoiner, createTurnLog } from '/engines/turn-join.js'
 import { risingPercent } from '/engines/progress.js'
@@ -576,8 +576,9 @@ export async function startSession({
       }
       madeS += (performance.now() - started) / 1000
       madeChars += parts[i].length
-      // The phrase's own silence is cut, and the page puts a steady pause after it (phrase-audio.js).
-      held.push({ audio: trimEdges(whole, sampleRate, { start: true, end: true }), rate: sampleRate, pause: i < parts.length - 1 ? pauseAfter(parts[i]) : 0 })
+      // The phrase's own silence is cut, a long silence inside it is shortened, and the page puts a
+      // steady pause after it (phrase-audio.js).
+      held.push({ audio: capPauses(trimEdges(whole, sampleRate, { start: true, end: true }), sampleRate), rate: sampleRate, pause: i < parts.length - 1 ? pauseAfter(parts[i]) : 0 })
       // A sentence waits until the audio ready covers what is left of it to make, so no pause
       // inside it turns into a gap; the next sentence is made while this one plays.
       if (isReadyToStart({ readyS: readyS(), madeS, madeChars, leftChars: sentenceLeft(parts, i) })) startHeld()
@@ -641,7 +642,7 @@ export async function startSession({
     if (isWarming) return
     isWarming = true
     try {
-      for (const text of [...ACKS, ...Object.values(DONE_SAY)]) {
+      for (const text of [...ACKS, ...Object.values(DONE_SAY), PLAN_START]) {
         if (ackAudio.has(text)) continue
         if (!isIdle()) return
         const stop = new AbortController()
@@ -916,7 +917,12 @@ export async function startSession({
     }
     if (action && isConfirm(text, recentSaid.join(' '))) {
       timing('fast path', 0, `yes to "ok?": ${action.tool.name}`)
-      if (action.planAsked) return runTool(withPlan(action, true), '', announce(action.tool.name))
+      if (action.planAsked) {
+        // "Tá bom, vou iniciar o planejamento agora." plays while the order is refined and planned
+        // (made ahead of time when it can be), so the wait does not sound like a hang.
+        if (!sayMade(PLAN_START)) void say(PLAN_START)
+        return runTool(withPlan(action, true), '', announce(action.tool.name))
+      }
       // "Comecei..." plays at once, made ahead of time, while the tool starts; a failure is still
       // explained after it.
       return runTool(action.tool, '', announce(action.tool.name))

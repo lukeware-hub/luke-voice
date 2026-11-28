@@ -74,6 +74,9 @@ export const askedAgain = (action, now) => ({ ...action, at: now, repeats: (acti
 // is not the end: she asks this one (planAsk) and keeps the same action waiting, marked as asked. Its
 // "sim" sends the order with plan: true, its "não" sends it with plan: false (the usual flow).
 export const PLAN_ASK = 'Antes de mandar, quer que eu planeje primeiro, ok?'
+// Said at once on the "sim" to PLAN_ASK, before the order is refined and planned: that takes a while,
+// and in silence the user took it for a hang.
+export const PLAN_START = 'Tá bom, vou iniciar o planejamento agora.'
 export const needsPlanAsk = action => action?.tool?.name === 'luke_send_to_claude' && !action.planAsked
 export const planAsked = (action, now) => ({ ...action, at: now, planAsked: true, repeats: 0 })
 export const withPlan = (action, plan) => ({ ...action.tool, args: { ...(action.tool.args ?? {}), plan } })

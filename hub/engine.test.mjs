@@ -556,7 +556,7 @@ test("Ceci's, Luke's and João's voices come with every install: the same clips,
   // both. Changing either changes that voice on every machine, so this test must be updated on purpose.
   assert.equal(sha('agent/ceci-voice.wav'), 'd4009e2a9855e8f511c65b27736896488ede82c3fcf65a22ef0f688547a3dca5')
   assert.equal(sha('agent/ceci-voice.txt'), '37f91de2f871d60e54eb1652f46b13498f2032a7e6dc9f1de504a2689ae95927')
-  assert.equal(sha('agent/luke-voice.wav'), 'ce4101ac7a18168b9ddd5c0755b575f7e2d16e041d44ff9fb76e6b9c9388c99b')
+  assert.equal(sha('agent/luke-voice.wav'), 'd38c11d1b3b80fa9394b5873906a8e1da24896a4986695897fd099ec04582a27')
   assert.equal(sha('agent/luke-voice.txt'), '1d0bec3d6efd6a822af792fc2ccb6c260b8e06f04035e992f8508e5d7326a1f8')
   assert.equal(sha('agent/joao-voice.wav'), '10671df6532f6df4cca2af76bcc25f5ca86c0853d380b457e0712fcf61d1b76c')
   assert.equal(sha('agent/joao-voice.txt'), '2c9d1ae5c3977aaab360a6684df8e61395f24a4929870768f5b6853c110e4800')
@@ -572,6 +572,10 @@ test("Ceci's, Luke's and João's voices come with every install: the same clips,
   assert.match(MODELS['native/qwen3-tts-1.7b-base-q5_k_m.gguf'].url, /^https:\/\/github\.com\/lukeware-hub\/luke-voice\/releases\/download\//)
   // Her sampling: the fixed seed makes the same sentence sound the same everywhere.
   assert.deepEqual(VOICE_SETTINGS, { temperature: 0.9, top_p: 0.9, seed: 7 })
+  // Luke is calmer: his own temperature; Ceci and João keep the shared sampling.
+  const { voiceSettings } = await import('./engine.mjs')
+  assert.deepEqual(voiceSettings('luke'), { temperature: 0.75, top_p: 0.8, seed: 7 })
+  for (const persona of ['ceci', 'joao', 'minha-voz']) assert.deepEqual(voiceSettings(persona), VOICE_SETTINGS)
 })
 
 test('the profile is read from disk again only when another process rewrites it', async () => {

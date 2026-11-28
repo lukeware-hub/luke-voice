@@ -81,6 +81,9 @@ const NATIVE_RESPELL = {
   'luke-voice': 'Luke Vóiss',
   'luke voice': 'Luke Vóiss',
   'claude code': 'Clód Code,',
+  // The owner's name, picked by ear: "Diego" written as it is came out unlike the Brazilian name;
+  // of four spellings "Djiégo" was the nearest, with the "e" closed ("ê"), as the owner says it.
+  diego: 'Djiêgo',
 }
 // "Clód Code," right before a mark of its own, or at the end, loses its comma: the mark already pauses.
 const CLAUDE_CODE_COMMA = /Clód Code,(?=\s*[.,;:!?…)\]"'”’»]|\s*$)/gu
@@ -305,6 +308,10 @@ export function respell(text) {
 
 // The native voice says "Bom dia!" as "bem dia" (3 of 4 seeds, by ear); "Bom dia!!" came out right on 10 of 10.
 const BOM_DIA = /(?<![\p{L}\d])(bom\s+dia)!(?!!)/giu
+// The native voice said "tudo bem" the European way ("bem" as "bãi"). Of four spellings the owner
+// picked "túdu bêin" by ear: the Brazilian final "u" and the closed, nasal "bêin". The first letter
+// keeps its case, and "tudo" or "bem" alone are left as they are.
+const TUDO_BEM = /(?<![\p{L}\d-])(t)udo\s+bem(?![\p{L}\d-])/giu
 
 // The native voice says a sentence-opening "Claro" as another word (the ASR heard "Se é o que
 // sim"); mid-sentence it is fine. By ear, on the production path: a lone "Claro." came out right as
@@ -318,6 +325,7 @@ export function respellNative(text) {
     .replace(NATIVE_RE, word => NATIVE_RESPELL[word.toLowerCase().replace(/\s+/g, ' ')])
     .replace(CLAUDE_CODE_COMMA, 'Clód Code')
     .replace(BOM_DIA, '$1!!')
+    .replace(TUDO_BEM, '$1údu bêin')
     .replace(CLARO_ALONE, '$1claro')
     .replace(CLARO_QUE, '$1Claaro')
 }
