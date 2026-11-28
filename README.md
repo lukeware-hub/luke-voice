@@ -367,6 +367,6 @@ The free voice downloads third-party parts at install time; none of them is in t
 - The Piper voice: see its model card.
 - espeak-ng (through espeak-phonemizer): GPL-3.0.
 
-Ceci's reference voice clip `agent/ceci-voice.wav` was supplied by the project owner, trimmed and lowered 2 semitones.
+Ceci's reference voice clip `agent/ceci-voice.wav` was supplied by the project owner, trimmed and lowered 1.5 semitones.
 
 Luke's and João's reference voice clips, `agent/luke-voice.wav` and `agent/joao-voice.wav`, were supplied by the project owner, trimmed and lowered 1.5 semitones. On the light voice, Luke and João speak with Kokoro's `pm_alex` and `pm_santa`.

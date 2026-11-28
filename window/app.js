@@ -16,6 +16,7 @@ import {
 } from '/guard.js'
 import { inputOptions, micConstraints, resolveMicrophone, saveMicrophone, savedMicrophone } from '/engines/microphone.js'
 import { analyzeRecording, encodeWav, meterLevel } from '/engines/mic-test.js'
+import { respellNative } from '/engines/speech-text.js'
 
 // Appearance: follows the system unless the user picked light or dark in Configurações.
 // Runs before the key exchange below awaits, so the saved theme lands on the first frames.
@@ -78,7 +79,8 @@ async function sayWelcome() {
   const res = await fetch('/tts', {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-luke-key': KEY },
-    body: JSON.stringify({ text: WELCOME_LINE }),
+    // The same spelling a call gives the natural voice, so luke-voice and Claude Code come out in English.
+    body: JSON.stringify({ text: respellNative(WELCOME_LINE) }),
     signal: playback.abort.signal,
   }).catch(() => null)
   if (welcomePlayback !== playback) return 'replaced'
