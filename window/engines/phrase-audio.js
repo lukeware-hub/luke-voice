@@ -7,8 +7,14 @@
 // A short, natural pause inside a sentence in pt-BR.
 export const COMMA_PAUSE_S = 0.12
 // After a sentence (. ! ?), a little longer; after "...", longer still, as a person trails off.
-export const SENTENCE_PAUSE_S = 0.24
-export const ELLIPSIS_PAUSE_S = 0.34
+// The owner heard the pauses after . ! ? as too long: 0.24 s and 0.34 s became 0.2 s and 0.3 s.
+export const SENTENCE_PAUSE_S = 0.2
+export const ELLIPSIS_PAUSE_S = 0.3
+// Since 0.23.3 a chunk holds several sentences, and the voice pauses between them on its own: on
+// Luke's voice those silences were 0.36 s at the median, 0.62 s at the 90th percentile and up to
+// 1.38 s (4 lines x 3 seeds). A silence inside a chunk is cut down to this, as long as a sentence
+// pause; shorter ones (a comma, a breath) stay as the voice made them.
+export const MAX_INNER_PAUSE_S = 0.24
 // A frame quieter than this share of the phrase's loudest frame is silence.
 const SILENCE_SHARE = 0.06
 // What is kept of the silence at a cut edge, so a soft start or a fading end is not clipped.
@@ -45,6 +51,49 @@ const ELLIPSIS_END = /(?:…|\.\.\.)["'”’»)\]]*$/
 export function pauseAfter(phrase) {
   if (ELLIPSIS_END.test(phrase)) return ELLIPSIS_PAUSE_S
   return SENTENCE_END.test(phrase) ? SENTENCE_PAUSE_S : COMMA_PAUSE_S
+}
+
+// The phrase with every silence inside it longer than `max` seconds cut down to `max`. The cut is
+// taken from the middle of the silence, so the fading end of a word and the soft start of the next
+// keep their edges.
+export function capPauses(audio, rate, max = MAX_INNER_PAUSE_S) {
+  if (audio.length === 0) return audio
+  const frame = Math.max(1, Math.round(rate * FRAME_S))
+  const levels = []
+  for (let at = 0; at < audio.length; at += frame) {
+    let sum = 0
+    const to = Math.min(audio.length, at + frame)
+    for (let i = at; i < to; i++) sum += audio[i] * audio[i]
+    levels.push(Math.sqrt(sum / (to - at)))
+  }
+  const bar = Math.max(...levels) * SILENCE_SHARE
+  const keep = Math.round(rate * max)
+  // The sample ranges to drop: the middle of each silent run longer than `max`.
+  const drops = []
+  for (let i = 0; i < levels.length; ) {
+    if (levels[i] > bar) {
+      i++
+      continue
+    }
+    let j = i
+    while (j < levels.length && levels[j] <= bar) j++
+    const from = i * frame
+    const to = Math.min(audio.length, j * frame)
+    // Only a silence between sounds: the edges of the phrase are trimEdges' job.
+    if (i > 0 && j < levels.length && to - from > keep) drops.push([from + Math.floor(keep / 2), to - Math.ceil(keep / 2)])
+    i = j
+  }
+  if (drops.length === 0) return audio
+  const out = new Float32Array(audio.length - drops.reduce((n, [a, b]) => n + (b - a), 0))
+  let at = 0
+  let from = 0
+  for (const [a, b] of drops) {
+    out.set(audio.subarray(from, a), at)
+    at += a - from
+    from = b
+  }
+  out.set(audio.subarray(from), at)
+  return out
 }
 
 // The characters still to make in the sentence of phrase `i`: the phrases after it, up to the one

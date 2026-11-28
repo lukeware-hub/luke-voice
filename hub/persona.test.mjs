@@ -35,7 +35,10 @@ test("Ceci's texts stay byte for byte the same", async () => {
 test("Luke's brain prompt is a man's: no Ceci, nothing in the feminine", async () => {
   const prompt = asPersona(await readFile(join(root, 'agent', 'brain-prompt.md'), 'utf8'), 'luke')
   assert.match(prompt, /^Você é o Luke, o assistente de voz/)
-  assert.match(prompt, /Seu nome é Luke\. Você é um homem de 36 anos, sério e dedicado\./)
+  assert.match(prompt, /Seu nome é Luke\. Você é um assistente de inteligência artificial técnico, feito para ajudar qualquer pessoa\./)
+  // A technical AI assistant: no age and no made-up life story.
+  assert.doesNotMatch(prompt, /36 anos|academia|churrasco|banda|garoto|videogame|rock clássico/)
+  assert.match(prompt, /nunca invente histórias pessoais/)
   assert.match(prompt, /Jeito: sério, dedicado e confiável/)
   assert.match(prompt, /Fale de si no masculino/)
   assert.match(prompt, /Você foi criado por Diego Morais/)
@@ -74,9 +77,12 @@ test("João's brain prompt is a man's of 45: serious and very cultured, nothing 
 
 test('the small talk says each age, and Luke and João answer it soberly', () => {
   assert.match(JSON.stringify(REPLIES), /Eu tenho 25 anos!/)
-  for (const [key, age] of [['luke', 36], ['joao', 45]]) {
+  // Luke is an AI assistant: he has no age to tell.
+  assert.match(asPersona(JSON.stringify(REPLIES), 'luke'), /Não tenho idade: sou um assistente de inteligência artificial\./)
+  for (const [key, age] of [['luke', null], ['joao', 45]]) {
     const all = asPersona(JSON.stringify(REPLIES), key)
-    assert.match(all, new RegExp(`Eu tenho ${age} anos\\.`))
+    if (age) assert.match(all, new RegExp(`Eu tenho ${age} anos\\.`))
+    else assert.doesNotMatch(all, /Eu tenho \d+ anos/)
     assert.doesNotMatch(all, /Oi, oi!|Opa, oi!|Tchau, tchau!|Que nada! Adoro ajudar\.|Tudo lindo por aqui!|Adorei a conversa\./)
   }
 })
@@ -101,9 +107,11 @@ test('each voice has tastes of its own, told only when asked, and never borrows 
   const luke = tastes(asPersona(base, 'luke'))
   const joao = tastes(asPersona(base, 'joao'))
   assert.match(ceci, /unhas.*Pipoca.*bailarina/)
-  assert.match(luke, /academia.*churrasco.*Quando garoto.*de jovem/)
+  // Luke has no tastes line: his story as a technical AI assistant replaces it.
+  assert.equal(luke, '')
+  assert.match(asPersona(base, 'luke'), /- Sua história: você é um assistente de inteligência artificial técnico/)
   assert.match(joao, /Machado de Assis.*vinil.*Quando garoto.*de jovem/)
-  for (const line of [ceci, luke, joao]) assert.match(line, /Só fale disso quando o usuário perguntar de você ou puxar o assunto/)
+  for (const line of [ceci, joao]) assert.match(line, /Só fale disso quando o usuário perguntar de você ou puxar o assunto/)
   for (const line of [luke, joao]) assert.doesNotMatch(line, /Pipoca|unhas|bailarina|maquiagem|amigas/)
   assert.doesNotMatch(joao, /academia|churrasco/)
   assert.match(await readFile(join(root, 'agent', 'prompt.md'), 'utf8'), /- Seus gostos,.*Pipoca/)

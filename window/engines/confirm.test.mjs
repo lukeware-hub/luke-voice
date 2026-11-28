@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
-import { MAX_REPEATS, PENDING_TTL_MS, REPEAT, askedAgain, decide, liveAction, unsureAnswer, PLAN_ASK, needsPlanAsk, planAsked, withPlan } from './confirm.js'
+import { MAX_REPEATS, PENDING_TTL_MS, REPEAT, askedAgain, decide, liveAction, unsureAnswer, PLAN_ASK, PLAN_START, needsPlanAsk, planAsked, withPlan } from './confirm.js'
 
 const task = { name: 'luke_send_to_claude', args: { prompt: 'roda os testes' } }
 const send = { name: 'luke_send_to_claude', args: { prompt: 'faz o commit' } }
@@ -142,4 +143,16 @@ test('an order to Claude asks "plan first?" once; its answer sets plan on the to
   assert.equal(asked.planAsked, true)
   assert.deepEqual(withPlan(asked, true).args, { prompt: 'roda os testes', plan: true })
   assert.deepEqual(withPlan(asked, false).args, { prompt: 'roda os testes', plan: false })
+})
+
+test('a "sim" to "plan first?" says it is starting the plan before the order goes, and a "não" does not', () => {
+  assert.equal(PLAN_START, 'Tá bom, vou iniciar o planejamento agora.')
+  const local = readFileSync(new URL('./local.js', import.meta.url), 'utf8')
+  const yes = local.slice(local.indexOf('if (action.planAsked) {'))
+  const branch = yes.slice(0, yes.indexOf('runTool(withPlan(action, true)'))
+  assert.match(branch, /sayMade\(PLAN_START\)\) void say\(PLAN_START\)/)
+  const no = local.slice(local.indexOf('if (action?.planAsked && isDeny(text))'))
+  assert.doesNotMatch(no.slice(0, no.indexOf('runTool(withPlan(action, false)')), /PLAN_START/)
+  // Made ahead of time with the acknowledgements, so it plays with no wait.
+  assert.ok(local.includes('...Object.values(DONE_SAY), PLAN_START]'))
 })

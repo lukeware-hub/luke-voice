@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url'
 
 import { conversationToken, credits, ensureAgent, outOfCreditsMessage } from './agent.mjs'
 import { PORT, isMainModule, stateDir, stateFile } from './paths.mjs'
-import { ASR_GLOSSARY, SERVICES, VOICE_SETTINGS, createEngine, maxFrames, prepareEngine, profileReady, readProfile } from './engine.mjs'
+import { ASR_GLOSSARY, SERVICES, VOICE_SETTINGS, voiceSettings, createEngine, maxFrames, prepareEngine, profileReady, readProfile } from './engine.mjs'
 import { pickMacVoice, sayWav } from './mac-voice.mjs'
 import { asPersona, personaFor, personaInfo, personasNow, voiceRegistry } from './persona.mjs'
 import { MODELS, ensureModel } from './models.mjs'
@@ -116,15 +116,15 @@ const newSecret = () => randomBytes(24).toString('base64url')
 // One /tts request body for Ceci's voice: the settings, then the reference as a pre-made JSON
 // fragment (`"speaker_ref_b64":"...","speaker_ref_text":"..."`). Byte for byte what
 // JSON.stringify of the whole object gave.
-export function ttsBody(text, seed, refJson) {
-  const head = JSON.stringify({ input: text, lang: 'pt', stream: true, response_format: 'wav', ...VOICE_SETTINGS, ...(seed === undefined ? {} : { seed }), n_predict: maxFrames(text) })
+export function ttsBody(text, seed, refJson, settings = VOICE_SETTINGS) {
+  const head = JSON.stringify({ input: text, lang: 'pt', stream: true, response_format: 'wav', ...settings, ...(seed === undefined ? {} : { seed }), n_predict: maxFrames(text) })
   return `${head.slice(0, -1)},${refJson}}`
 }
 
 // What a kept question take belongs to: the voice model files by content (their sha256, so a
 // republished model never replays old takes), the sampling and the reference clip.
-export const voiceKey = (refB64, refText) =>
-  [...SERVICES.tts.models.map(path => `${path}@${MODELS[path]?.sha256 ?? ''}`), JSON.stringify(VOICE_SETTINGS), createHash('sha1').update(refB64 + refText).digest('hex')].join('\n')
+export const voiceKey = (refB64, refText, settings = VOICE_SETTINGS) =>
+  [...SERVICES.tts.models.map(path => `${path}@${MODELS[path]?.sha256 ?? ''}`), JSON.stringify(settings),createHash('sha1').update(refB64 + refText).digest('hex')].join('\n')
 // The median pitch (Hz) of a reference clip given as base64 WAV, or null when it cannot be told.
 export function refPitch(refB64) {
   const { samples, rate } = wavSamples(Buffer.from(String(refB64 ?? ''), 'base64'))
@@ -1092,6 +1092,8 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
   // The reference as the JSON that ends every /tts body, made once: it is ~0.5 MB of base64, and
   // serializing it again for every chunk Ceci says cost time on the hub's single thread.
   let voiceRefJson = null
+  // The sampling of the chosen voice (engine.mjs, voiceSettings): loaded with its clip.
+  let voiceSampling = VOICE_SETTINGS
   let questions = null
   // Whether Ceci's reference clip and its transcript are both loaded. Without them the engine speaks
   // in some other voice, with its accent drifting to European Portuguese: nothing is said then, and
@@ -1102,6 +1104,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     // or agent/ceci-voice.wav, luke-voice.wav or joao-voice.wav.
     const registry = voiceRegistry()
     const chosen = assistantNow(registry)
+    voiceSampling = voiceSettings(chosen)
     const clip = registry[chosen]?.dir ? join(registry[chosen].dir, 'voice.wav') : voiceRef?.replace(/ceci-voice\.wav$/, `${chosen}-voice.wav`)
     const transcript = clip?.replace(/\.wav$/, '.txt')
     voiceRefB64 = clip && existsSync(clip) ? readFileSync(clip).toString('base64') : null
@@ -1118,7 +1121,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     return fetch(`${url}/tts`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: ttsBody(text, seed, voiceRefJson),
+      body: ttsBody(text, seed, voiceRefJson, voiceSampling),
       signal,
     }).catch(() => null)
   }
@@ -1127,7 +1130,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     questions ??= createQuestionTakes({
       dir: questionsDir,
       // A take belongs to one voice: the model, the sampling and the reference clip.
-      voiceKey: voiceKey(voiceRefB64, voiceRefText),
+      voiceKey: voiceKey(voiceRefB64, voiceRefText, voiceSampling),
       // The reference voice's pitch: a take in another voice (another register) is never served.
       voicePitch: refPitch(voiceRefB64),
       log,
@@ -1208,7 +1211,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
         if (isQuestion) said.push(chunk)
       }
       // The live take of a question is kept too: it may already rise, and the search goes on from it.
-      if (isQuestion && !stop.signal.aborted) questionTakes().remember(text, VOICE_SETTINGS.seed, Buffer.concat(said))
+      if (isQuestion && !stop.signal.aborted) questionTakes().remember(text, voiceSampling.seed, Buffer.concat(said))
     } catch {
       // The window hung up (barge-in): the generation was aborted with it.
     }
