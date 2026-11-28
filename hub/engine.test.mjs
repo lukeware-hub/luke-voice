@@ -554,12 +554,12 @@ test("Ceci's, Luke's and João's voices come with every install: the same clips,
   const sha = file => createHash('sha256').update(readFileSync(join(root, file))).digest('hex')
   // The reference clips the owner picked by ear, and their transcripts: the TTS clones each voice from
   // both. Changing either changes that voice on every machine, so this test must be updated on purpose.
-  assert.equal(sha('agent/ceci-voice.wav'), '76850ec92eb249893f6bebe92968fea16f2296a8a5fb0b6f58295dd3d8534c18')
-  assert.equal(sha('agent/ceci-voice.txt'), 'bf3a8385880f193177565f032b7c74470b80979e654efed89d34082d4ea00f24')
-  assert.equal(sha('agent/luke-voice.wav'), 'ad2647819adcdcab69d6425a1568ddb7ad101402c84d8c247cacd0d4d9b78c23')
-  assert.equal(sha('agent/luke-voice.txt'), 'e9767ea2f70bb66d8acfb4ddff62993e7d674b3f0c5ab81276c29853eda66452')
-  assert.equal(sha('agent/joao-voice.wav'), '52bc0f0b98674831d72a07c46a153058a3b546f31d66f8bb0d89454042de4b15')
-  assert.equal(sha('agent/joao-voice.txt'), '648596149a514ac73421c9ddb688a4fbda7d1f719e4ef59cdde6fbbb49ef0279')
+  assert.equal(sha('agent/ceci-voice.wav'), 'a98f24820dba4eff6fb01abde5e990611ad520fc2546556c45163b77a65b816c')
+  assert.equal(sha('agent/ceci-voice.txt'), '37f91de2f871d60e54eb1652f46b13498f2032a7e6dc9f1de504a2689ae95927')
+  assert.equal(sha('agent/luke-voice.wav'), '8fc7ce012c36cba3135a2690221404f011904937698b10cb0e971cfbb1ba083e')
+  assert.equal(sha('agent/luke-voice.txt'), '1d0bec3d6efd6a822af792fc2ccb6c260b8e06f04035e992f8508e5d7326a1f8')
+  assert.equal(sha('agent/joao-voice.wav'), 'cc51d0ff8d16fa08849fff6c596ee83107dd41110be23ccad3038ff219686549')
+  assert.equal(sha('agent/joao-voice.txt'), '2c9d1ae5c3977aaab360a6684df8e61395f24a4929870768f5b6853c110e4800')
   // Git must hand them over byte for byte on Windows, Mac and Linux.
   const attributes = readFileSync(join(root, '.gitattributes'), 'utf8')
   assert.match(attributes, /^\*\.wav binary$/m)
