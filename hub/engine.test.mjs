@@ -558,7 +558,7 @@ test("Ceci's, Luke's and João's voices come with every install: the same clips,
   assert.equal(sha('agent/ceci-voice.txt'), 'd95728dd855c9985deeab7ea879256cc69328b3b397016f8167b3280d6d139ce')
   assert.equal(sha('agent/luke-voice.wav'), '613fe3a2752687488749836fa439dd022308cc3369311f1ab3a202f80a60d6c3')
   assert.equal(sha('agent/luke-voice.txt'), '1d0bec3d6efd6a822af792fc2ccb6c260b8e06f04035e992f8508e5d7326a1f8')
-  assert.equal(sha('agent/joao-voice.wav'), '10671df6532f6df4cca2af76bcc25f5ca86c0853d380b457e0712fcf61d1b76c')
+  assert.equal(sha('agent/joao-voice.wav'), '66bdb81682284d2b2572552fb02c473bf3e1cf0a1b298845067ac513d5d5046a')
   assert.equal(sha('agent/joao-voice.txt'), '2c9d1ae5c3977aaab360a6684df8e61395f24a4929870768f5b6853c110e4800')
   // Git must hand them over byte for byte on Windows, Mac and Linux.
   const attributes = readFileSync(join(root, '.gitattributes'), 'utf8')
