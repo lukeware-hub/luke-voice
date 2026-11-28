@@ -70,6 +70,17 @@ test('the native voice gets luke-voice and Claude Code in the spelling it says i
   assert.deepEqual(speechChunks('Abri o Claude Code.'), ['Abri o clód Code.'])
 })
 
+test('the native voice says "deseja" the Brazilian way, "dezêja"; "repetir" and the browser voices as written', () => {
+  assert.equal(respellNative('O que você deseja?'), 'O que você dezêja?')
+  assert.equal(respellNative('Deseja mais alguma coisa?'), 'Dezêja mais alguma coisa?')
+  for (const text of ['O que você desejar.', 'Eu desejo sorte.', 'Pode repetir para mim, por favor?']) assert.equal(respellNative(text), text)
+  assert.deepEqual(speechChunks('O que você deseja?'), ['O que você deseja?'])
+  // "peço" with the open "é" of Brazil; other forms of the verb as written.
+  assert.equal(respellNative('Peço ao Claude para olhar, ok?'), 'Péço ao Claude para olhar, ok?')
+  assert.equal(respellNative('Eu peço desculpas.'), 'Eu péço desculpas.')
+  for (const text of ['Ele pede ajuda.', 'Pedi ao Claude.']) assert.equal(respellNative(text), text)
+})
+
 test('the native voice says "tudo bem" the Brazilian way, "túdu bêin"; the browser voices as written', () => {
   assert.deepEqual(speechChunks('Boa noite! Tudo bem? Eu sou o Luke.', { isNative: true }), ['Boa noite! Túdu bêin? Eu sou o Luke.'])
   assert.equal(respellNative('Está tudo bem com o build.'), 'Está túdu bêin com o build.')
@@ -115,14 +126,22 @@ test('the native voice packs short sentences into one chunk, so a line is said i
   assert.deepEqual(speechChunks('Você quer que eu verifique os testes de login no repositório api? Posso?', { isNative: true }), ['Você quer que eu verifique os testes de login no repositório api? Posso?'])
   // A short first clause is never said on its own ("Certo," alone came out in another voice).
   assert.deepEqual(speechChunks('Certo, vou verificar os testes de login no repositório api agora.', { isNative: true }), ['Certo, vou verificar os testes de login no repositório api agora.'])
-  // After the first chunk (at most 90 characters), sentences pack up to 220.
+  // After the first chunk (at most 90 characters), sentences pack up to 120: a longer chunk drifts from the voice.
   const long = 'Terminei a tarefa no projeto de autenticação do serviço de pagamentos, e todos os testes passaram sem nenhum erro. Pode seguir. Quer que eu faça mais alguma coisa?'
   assert.deepEqual(speechChunks(long, { isNative: true }), ['Terminei a tarefa no projeto de autenticação do serviço de pagamentos,', 'e todos os testes passaram sem nenhum erro. Pode seguir. Quer que eu faça mais alguma coisa?'])
   // Nothing is lost or added, apart from the spaces between the chunks.
   const many = Array.from({ length: 12 }, (_, i) => `Esta é a frase número ${i + 1} da resposta.`).join(' ')
   const out = speechChunks(many, { isNative: true })
   assert.equal(out.join(' '), many)
-  assert.ok(out[0].length <= 90 && out.every(chunk => chunk.length <= 220), JSON.stringify(out))
+  assert.ok(out[0].length <= 90 && out.every(chunk => chunk.length <= 120), JSON.stringify(out))
+  // A sentence longer than 120 characters is cut at a comma, never left whole.
+  const longSentence = 'Pronto. Terminei a revisão do código do cadastro, ajustei a validação do telefone que estava faltando, rodei os testes de novo e atualizei a documentação do projeto.'
+  const cut = speechChunks(longSentence, { isNative: true })
+  assert.ok(cut.length >= 2 && cut.every(chunk => chunk.length <= 120), JSON.stringify(cut))
+  assert.equal(cut.join(' '), longSentence)
+  // A first chunk too short to keep the voice takes the next sentence along (up to 120).
+  const opener = speechChunks('Pronto, Diego. Terminei a revisão do código do cadastro e ajustei a validação do telefone.', { isNative: true })
+  assert.deepEqual(opener, ['Pronto, Djiêgo. Terminei a revisão do código do cadastro e ajustei a validação do telefone.'])
 })
 
 test('a question is never cut early, so the voice sees its "?" and rises at the end', () => {

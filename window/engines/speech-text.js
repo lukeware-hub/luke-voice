@@ -101,15 +101,21 @@ const FIRST_CHUNK = 70
 // bem? Eu sou o Luke. O que a gente vai fazer hoje?" changed voice three times, once per sentence,
 // with the accent wandering between regions. So the native voice packs whole sentences into one
 // chunk: up to FIRST_PACK_NATIVE characters for the first one (a greeting and most short replies
-// are one chunk, said in one voice; ~1.5 s to make on a mid-range GPU) and MAX_CHUNK after it.
+// are one chunk, said in one voice; ~1.5 s to make on a mid-range GPU) and MAX_CHUNK_NATIVE after it.
 const FIRST_PACK_NATIVE = 90
+// Not longer, either: a long chunk drifts from the cloned voice as it goes. Measured on Luke (4 seeds
+// each), the second half of a 150 to 220 character chunk sat about 1 semitone below the first, lower
+// and flatter, and long replies sounded like another voice; chunks of 80 to 90 characters stayed
+// within 1 semitone of the clip from start to end. So the chunks after the first stop at 120
+// characters, and a longer sentence is cut at a comma.
+const MAX_CHUNK_NATIVE = 120
 // A first sentence longer than FIRST_PACK_NATIVE still starts on its first clause, so the first
 // audio comes sooner, but only a clause long enough to keep the voice (never "Certo," alone).
 const MIN_CLAUSE_NATIVE = 30
 
 // The native voice's chunks: sentences packed together (see FIRST_PACK_NATIVE), never cut mid-phrase.
 export function nativeChunks(text) {
-  const pieces = chunks(text, MAX_CHUNK)
+  const pieces = chunks(text, MAX_CHUNK_NATIVE)
   const first = pieces[0]
   let isFirstCut = false
   if (first && first.length > FIRST_PACK_NATIVE && !first.endsWith('?')) {
@@ -122,7 +128,9 @@ export function nativeChunks(text) {
   const out = []
   for (const piece of pieces) {
     const last = out.length - 1
-    const limit = last === 0 ? FIRST_PACK_NATIVE : MAX_CHUNK
+    // A first chunk too short to keep the voice ("Pronto, Diego.") may take the next sentence up to
+    // MAX_CHUNK_NATIVE: a short chunk is the one that jumps (+7 semitones on 2 of 4 seeds at ~40 characters).
+    const limit = last === 0 && out[0].length >= MIN_CLAUSE_NATIVE ? FIRST_PACK_NATIVE : MAX_CHUNK_NATIVE
     const isClosed = last === 0 && isFirstCut
     if (last >= 0 && !isClosed && out[last].length + 1 + piece.length <= limit) out[last] = `${out[last]} ${piece}`
     else out.push(piece)
@@ -312,6 +320,12 @@ const BOM_DIA = /(?<![\p{L}\d])(bom\s+dia)!(?!!)/giu
 // picked "túdu bêin" by ear: the Brazilian final "u" and the closed, nasal "bêin". The first letter
 // keeps its case, and "tudo" or "bem" alone are left as they are.
 const TUDO_BEM = /(?<![\p{L}\d-])(t)udo\s+bem(?![\p{L}\d-])/giu
+// "deseja" came out the European way too; the owner picked "dezêja" by ear (closed "ê", the "s" as z).
+// "repetir" was checked the same way and is said right as it is written.
+const DESEJA = /(?<![\p{L}\d-])(d)eseja(?![\p{L}\d-])/giu
+// "peço" ("peço ao Claude") came out with a closed "ê", which cost a whole point of the owner's score;
+// "péço", with the Brazilian open "é", was picked by ear.
+const PECO = /(?<![\p{L}\d-])(p)eço(?![\p{L}\d-])/giu
 
 // The native voice says a sentence-opening "Claro" as another word (the ASR heard "Se é o que
 // sim"); mid-sentence it is fine. By ear, on the production path: a lone "Claro." came out right as
@@ -326,6 +340,8 @@ export function respellNative(text) {
     .replace(CLAUDE_CODE_COMMA, 'Clód Code')
     .replace(BOM_DIA, '$1!!')
     .replace(TUDO_BEM, '$1údu bêin')
+    .replace(DESEJA, '$1ezêja')
+    .replace(PECO, '$1éço')
     .replace(CLARO_ALONE, '$1claro')
     .replace(CLARO_QUE, '$1Claaro')
 }

@@ -82,11 +82,10 @@ export const SERVICES = {
 // 0.9 gives her melody back (6.2 of 10, panel 7.6 to 8.8). The fixed seed makes the same sentence
 // always sound the same.
 export const VOICE_SETTINGS = { temperature: 0.9, top_p: 0.9, seed: 7 }
-// What a voice changes in that sampling. Luke clones the owner's own voice, and the owner asked for
-// him calmer, with a steady Brazilian accent that still varies a little. Measured on 4 lines x 6
-// seeds, the spread of his voice between takes: 2.21 semitones at 0.9/0.9, 2.04 at 0.75/0.9, 1.53
-// at 0.75/0.8 (takes over 3 semitones off his voice: 4, 4, 3). Ceci keeps 0.9/0.9, her melody.
-export const PERSONA_VOICE_SETTINGS = { luke: { temperature: 0.75, top_p: 0.8 } }
+// What a voice changes in that sampling: none does now. Luke had 0.75/0.8 for a steadier accent
+// (0.24.0); the owner rated João 10/10 on the shared 0.9/0.9 and picked Luke on João's recipe, his
+// clip slowed to João's pace with the shared sampling, over keeping 0.75/0.8.
+export const PERSONA_VOICE_SETTINGS = {}
 export const voiceSettings = persona => ({ ...VOICE_SETTINGS, ...(PERSONA_VOICE_SETTINGS[persona] ?? {}) })
 
 // What Qwen3-ASR is told, so English tech words, Ceci's name and session names come out right.

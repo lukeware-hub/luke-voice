@@ -383,7 +383,8 @@
   "text": "Olha, isso pode demorar um pouco, porque o projeto é grande e tem muitas dependências antigas que precisam ser atualizadas com cuidado, uma por uma, sem quebrar nada do que já funciona hoje em produção para os usuários.",
   "native": [
    "Olha, isso pode demorar um pouco,",
-   "porque o projeto é grande e tem muitas dependências antigas que precisam ser atualizadas com cuidado, uma por uma, sem quebrar nada do que já funciona hoje em produção para os usuários."
+   "porque o projeto é grande e tem muitas dependências antigas que precisam ser",
+   "atualizadas com cuidado, uma por uma, sem quebrar nada do que já funciona hoje em produção para os usuários."
   ],
   "browser": [
    "Olha,",
@@ -457,8 +458,7 @@
  {
   "text": "Entendi. Vou pedir para o Claude criar um plano antes de mexer no código, assim você revisa primeiro.",
   "native": [
-   "Entendi.",
-   "Vou pedir para o Claude criar um plano antes de mexer no código, assim você revisa primeiro."
+   "Entendi. Vou pedir para o Claude criar um plano antes de mexer no código, assim você revisa primeiro."
   ],
   "browser": [
    "Entendi.",
