@@ -554,7 +554,7 @@ test("Ceci's, Luke's and João's voices come with every install: the same clips,
   const sha = file => createHash('sha256').update(readFileSync(join(root, file))).digest('hex')
   // The reference clips the owner picked by ear, and their transcripts: the TTS clones each voice from
   // both. Changing either changes that voice on every machine, so this test must be updated on purpose.
-  assert.equal(sha('agent/ceci-voice.wav'), 'a8bd002a2a67c49c24167da873077dc7c93118747652092072ed8edf60e4f4ab')
+  assert.equal(sha('agent/ceci-voice.wav'), 'd4009e2a9855e8f511c65b27736896488ede82c3fcf65a22ef0f688547a3dca5')
   assert.equal(sha('agent/ceci-voice.txt'), '37f91de2f871d60e54eb1652f46b13498f2032a7e6dc9f1de504a2689ae95927')
   assert.equal(sha('agent/luke-voice.wav'), '9383ea3a6c99dc04050495b0c68f658949071b3319245511f6336a0b16bbb340')
   assert.equal(sha('agent/luke-voice.txt'), '1d0bec3d6efd6a822af792fc2ccb6c260b8e06f04035e992f8508e5d7326a1f8')

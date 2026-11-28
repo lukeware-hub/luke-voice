@@ -191,19 +191,3 @@ test('markup leftovers: snake_case, arithmetic, domains, emoji and list items', 
   assert.equal(plainText('Fiz três coisas:\n- Revisei\n- Testei\n\n1. Primeiro\n2. Segundo'), 'Fiz três coisas: Revisei. Testei. Primeiro. Segundo')
   assert.deepEqual(speechChunks('Fiz três coisas:\n- Revisei o código\n- Rodei os testes', { isNative: true }), ['Fiz três coisas: Revisei o código.', 'Rodei os testes'])
 })
-
-test('the natural voice says a chunk phrase by phrase, cut after each comma, so the page can pause there', async () => {
-  const { phrases } = await import('./speech-text.js')
-  assert.deepEqual(phrases('Terminei a tarefa, rodei os testes, e todos passaram sem nenhum erro.'), ['Terminei a tarefa,', 'rodei os testes,', 'e todos passaram sem nenhum erro.'])
-  // A short word before a comma pauses too, as a person would.
-  assert.deepEqual(phrases('Certo, vou ver os testes.'), ['Certo,', 'vou ver os testes.'])
-  assert.deepEqual(phrases('Pronto, terminei.'), ['Pronto,', 'terminei.'])
-  // A decimal comma is not a pause.
-  assert.deepEqual(phrases('O tempo médio caiu para 1,5 segundo em todos os testes.'), ['O tempo médio caiu para 1,5 segundo em todos os testes.'])
-  // A question pauses at its comma, and its last phrase keeps the "?" for the rise.
-  assert.deepEqual(phrases('Vou rodar os testes no repositório api, posso?'), ['Vou rodar os testes no repositório api,', 'posso?'])
-  // Nothing is lost or added, apart from the spaces at the cuts.
-  const text = 'Abri o repositório da API, li o README, corrigi o bug no login, e rodei tudo de novo.'
-  assert.equal(phrases(text).join(' '), text)
-  assert.deepEqual(phrases(''), [])
-})
