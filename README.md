@@ -367,6 +367,6 @@ The free voice downloads third-party parts at install time; none of them is in t
 - The Piper voice: see its model card.
 - espeak-ng (through espeak-phonemizer): GPL-3.0.
 
-Ceci's reference voice clip `agent/ceci-voice.wav` comes from CML-TTS (Oliveira et al., 2023), Portuguese, speaker 3050, licensed CC-BY-4.0; the recording is a LibriVox public-domain reading. It was changed for this project: trimmed, raised one semitone, with more pitch movement and 8% faster.
+Ceci's reference voice clip `agent/ceci-voice.wav` was supplied by the project owner, trimmed and lowered 2 semitones.
 
-João's reference voice clip `agent/joao-voice.wav` comes from CML-TTS (Oliveira et al., 2023), Portuguese, speaker 8655, licensed CC-BY-4.0; the recording is a LibriVox public-domain reading. It was trimmed and lowered one semitone. Luke's reference voice clip `agent/luke-voice.wav` joins two recordings of one Brazilian speaker from Mozilla Common Voice 17.0 (Portuguese), dedicated to the public domain (CC0), trimmed and loudness-matched. On the light voice, Luke and João speak with Kokoro's `pm_alex` and `pm_santa`.
+Luke's and João's reference voice clips, `agent/luke-voice.wav` and `agent/joao-voice.wav`, were supplied by the project owner, trimmed and lowered 1.5 semitones. On the light voice, Luke and João speak with Kokoro's `pm_alex` and `pm_santa`.
