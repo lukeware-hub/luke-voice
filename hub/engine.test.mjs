@@ -557,7 +557,7 @@ test("Ceci's, Luke's and João's voices come with every install: the same clips,
   assert.equal(sha('agent/ceci-voice.wav'), 'cc35bfd4a5ef231732db64582a5378dd7eba3f11a6be3d3fa05be7a7587d13c3')
   assert.equal(sha('agent/ceci-voice.txt'), 'd95728dd855c9985deeab7ea879256cc69328b3b397016f8167b3280d6d139ce')
   assert.equal(sha('agent/luke-voice.wav'), '0636f60ea7b5af05bfd55160d06fac9f5de9b3d3abcaed959e0fab7d80a1ec5c')
-  assert.equal(sha('agent/luke-voice.txt'), 'e00fcbc316889d4084d83948469f32aa4ba35c6a57534b300fe22c9142f13257')
+  assert.equal(sha('agent/luke-voice.txt'), '615c96ffe2b9a1975bf5552ddeb5c5d123b2689a309bab2916c9222d5cbda316')
   assert.equal(sha('agent/joao-voice.wav'), '66bdb81682284d2b2572552fb02c473bf3e1cf0a1b298845067ac513d5d5046a')
   assert.equal(sha('agent/joao-voice.txt'), '2c9d1ae5c3977aaab360a6684df8e61395f24a4929870768f5b6853c110e4800')
   // Git must hand them over byte for byte on Windows, Mac and Linux.
@@ -572,9 +572,10 @@ test("Ceci's, Luke's and João's voices come with every install: the same clips,
   assert.match(MODELS['native/qwen3-tts-1.7b-base-q5_k_m.gguf'].url, /^https:\/\/github\.com\/lukeware-hub\/luke-voice\/releases\/download\//)
   // Her sampling: the fixed seed makes the same sentence sound the same everywhere.
   assert.deepEqual(VOICE_SETTINGS, { temperature: 0.9, top_p: 0.9, seed: 7 })
-  // Luke is made like João, 10/10 for the owner: the shared sampling, as every built-in voice, in pt-BR.
+  // Luke is made like João, 10/10 for the owner: the shared sampling in pt-BR, with seed 23, which the
+  // owner rated best by ear in the intonation rounds (seed 7 was the worst for him).
   const { voiceSettings, engineLang } = await import('./engine.mjs')
-  assert.deepEqual(voiceSettings('luke'), { ...VOICE_SETTINGS, lang: 'pt-BR' })
+  assert.deepEqual(voiceSettings('luke'), { ...VOICE_SETTINGS, lang: 'pt-BR', seed: 23 })
   // The engine knows only 'pt': pt-BR goes as no language, so the Brazilian clip leads.
   assert.equal(engineLang('pt-BR'), undefined)
   assert.equal(engineLang(), 'pt')
