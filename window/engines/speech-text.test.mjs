@@ -88,9 +88,9 @@ test('the native voice says "tudo bem" the Brazilian way, "túdu bêin"; the bro
   assert.deepEqual(speechChunks('Tudo bem?'), ['Tudo bem?'])
 })
 
-test('the native voice says the owner name the Brazilian way, "Djiêgo"; the browser voices keep "Diego"', () => {
-  assert.deepEqual(speechChunks('Pronto, Diego, terminei.', { isNative: true }), ['Pronto, Djiêgo, terminei.'])
-  assert.equal(respellNative('O DIEGO pediu.'), 'O Djiêgo pediu.')
+test('the native voice says the owner name the Brazilian way, "Dji-êgo"; the browser voices keep "Diego"', () => {
+  assert.deepEqual(speechChunks('Pronto, Diego, terminei.', { isNative: true }), ['Pronto, Dji-êgo, terminei.'])
+  assert.equal(respellNative('O DIEGO pediu.'), 'O Dji-êgo pediu.')
   for (const text of ['Diegos', 'San-Diego']) assert.equal(respellNative(text), text)
   assert.deepEqual(speechChunks('Pronto, Diego.'), ['Pronto, Diego.'])
 })
@@ -141,7 +141,7 @@ test('the native voice packs short sentences into one chunk, so a line is said i
   assert.equal(cut.join(' '), longSentence)
   // A first chunk too short to keep the voice takes the next sentence along (up to 120).
   const opener = speechChunks('Pronto, Diego. Terminei a revisão do código do cadastro e ajustei a validação do telefone.', { isNative: true })
-  assert.deepEqual(opener, ['Pronto, Djiêgo. Terminei a revisão do código do cadastro e ajustei a validação do telefone.'])
+  assert.deepEqual(opener, ['Pronto, Dji-êgo. Terminei a revisão do código do cadastro e ajustei a validação do telefone.'])
 })
 
 test('a question is never cut early, so the voice sees its "?" and rises at the end', () => {
