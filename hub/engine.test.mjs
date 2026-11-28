@@ -554,8 +554,8 @@ test("Ceci's, Luke's and João's voices come with every install: the same clips,
   const sha = file => createHash('sha256').update(readFileSync(join(root, file))).digest('hex')
   // The reference clips the owner picked by ear, and their transcripts: the TTS clones each voice from
   // both. Changing either changes that voice on every machine, so this test must be updated on purpose.
-  assert.equal(sha('agent/ceci-voice.wav'), 'd4009e2a9855e8f511c65b27736896488ede82c3fcf65a22ef0f688547a3dca5')
-  assert.equal(sha('agent/ceci-voice.txt'), '37f91de2f871d60e54eb1652f46b13498f2032a7e6dc9f1de504a2689ae95927')
+  assert.equal(sha('agent/ceci-voice.wav'), 'cc35bfd4a5ef231732db64582a5378dd7eba3f11a6be3d3fa05be7a7587d13c3')
+  assert.equal(sha('agent/ceci-voice.txt'), 'd95728dd855c9985deeab7ea879256cc69328b3b397016f8167b3280d6d139ce')
   assert.equal(sha('agent/luke-voice.wav'), '613fe3a2752687488749836fa439dd022308cc3369311f1ab3a202f80a60d6c3')
   assert.equal(sha('agent/luke-voice.txt'), '1d0bec3d6efd6a822af792fc2ccb6c260b8e06f04035e992f8508e5d7326a1f8')
   assert.equal(sha('agent/joao-voice.wav'), '10671df6532f6df4cca2af76bcc25f5ca86c0853d380b457e0712fcf61d1b76c')
@@ -579,7 +579,8 @@ test("Ceci's, Luke's and João's voices come with every install: the same clips,
   assert.equal(engineLang('pt-BR'), undefined)
   assert.equal(engineLang(), 'pt')
   assert.equal(engineLang('pt'), 'pt')
-  for (const persona of ['ceci', 'joao', 'minha-voz']) assert.deepEqual(voiceSettings(persona), VOICE_SETTINGS)
+  assert.deepEqual(voiceSettings('ceci'), { ...VOICE_SETTINGS, lang: 'pt-BR' })
+  for (const persona of ['joao', 'minha-voz']) assert.deepEqual(voiceSettings(persona), VOICE_SETTINGS)
 })
 
 test('the profile is read from disk again only when another process rewrites it', async () => {

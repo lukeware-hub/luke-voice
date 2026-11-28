@@ -367,6 +367,6 @@ The free voice downloads third-party parts at install time; none of them is in t
 - The Piper voice: see its model card.
 - espeak-ng (through espeak-phonemizer): GPL-3.0.
 
-Ceci's reference voice clip `agent/ceci-voice.wav` was supplied by the project owner and trimmed, at her own pitch.
+Ceci's reference voice clip `agent/ceci-voice.wav` was supplied by the project owner (ceci-nova.wav, 13.7 s, used whole at its own pitch).
 
 Luke's reference voice clip `agent/luke-voice.wav` was supplied by the project owner, whole and at his own pitch, slowed to 94% speed (17.6 characters a second), between João's pace and its own. João's, `agent/joao-voice.wav`, was supplied by the project owner, trimmed and lowered 1.5 semitones. On the light voice, Luke and João speak with Kokoro's `pm_alex` and `pm_santa`.
