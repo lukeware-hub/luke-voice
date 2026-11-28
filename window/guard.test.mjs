@@ -168,3 +168,11 @@ test('a spoken silence is not manual, and the button turns it off', () => {
   assert.equal(quiet.manual, false)
   assert.equal(quiet.toggle(false), 'off')
 })
+
+test('a window opened with quiet=1 never starts a call by itself', async () => {
+  const { mayCallByItself } = await import('./guard.js')
+  assert.equal(mayCallByItself(new URLSearchParams('n=abc&call=1')), true)
+  assert.equal(mayCallByItself(new URLSearchParams('')), true)
+  assert.equal(mayCallByItself(new URLSearchParams('n=abc&quiet=1')), false)
+  assert.equal(mayCallByItself(new URLSearchParams('call=1&quiet=1')), false)
+})
