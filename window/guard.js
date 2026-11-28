@@ -184,3 +184,7 @@ export const mayCallByItself = params => params.get('quiet') !== '1'
 
 export const REFUSED =
   'Refused: the user has not spoken since the last automatic update. Ask the user out loud and wait for a clear yes before calling this tool.'
+
+// How a session summary that did not come starts (app.js luke_session_summary): the voice says a
+// summary as it comes, but this goes to the brain, which explains what failed.
+export const SUMMARY_FAILED = 'Summary failed'

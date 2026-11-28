@@ -13,11 +13,11 @@
 
 export const JOIN_WINDOW_MS = 2500
 const GAP_SAMPLES = 4800 // 0.3 s of silence between the joined parts, at 16 kHz
-// The longest turn that is still carried into the next one: 90 s at 16 kHz. One more part (the
-// detector ends a turn at ~30 s) keeps the joined turn near 2 minutes, under the hub's 4 MiB cap
-// for /stt (~131 s). A longer turn stands as it is and is answered, and the speech goes on as a
-// new turn, instead of the whole request being refused as too long.
-export const MAX_CARRY_SAMPLES = 90 * 16_000
+// The longest turn that is still carried into the next one: 5 minutes at 16 kHz. One more part (the
+// detector ends a turn at 5 minutes, vad.js) keeps the joined turn under 10 minutes, under the
+// hub's 24 MiB cap for /stt (~13 min). A longer turn stands as it is and is answered, and the
+// speech goes on as a new turn, instead of the whole request being refused as too long.
+export const MAX_CARRY_SAMPLES = 300 * 16_000
 
 function join(first, second) {
   const out = new Float32Array(first.length + GAP_SAMPLES + second.length)

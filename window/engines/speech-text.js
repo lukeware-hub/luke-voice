@@ -82,8 +82,10 @@ const NATIVE_RESPELL = {
   'luke voice': 'Luke Vóiss',
   'claude code': 'Clód Code,',
   // The owner's name, picked by ear: "Diego" written as it is came out unlike the Brazilian name;
-  // of four spellings "Djiégo" was the nearest, with the "e" closed ("ê"), as the owner says it.
-  diego: 'Djiêgo',
+  // of four spellings "Djiégo" was the nearest, with the "e" closed ("ê"), as the owner says it. With
+  // Luke's new clip the owner asked for it said slower: of "Djiêgo", "Dji-êgo", "Djiê-go" and "Dji êgo",
+  // the hyphen after "Dji" gave the short pause and kept it one word.
+  diego: 'Dji-êgo',
 }
 // "Clód Code," right before a mark of its own, or at the end, loses its comma: the mark already pauses.
 const CLAUDE_CODE_COMMA = /Clód Code,(?=\s*[.,;:!?…)\]"'”’»]|\s*$)/gu

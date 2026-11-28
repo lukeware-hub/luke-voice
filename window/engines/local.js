@@ -15,6 +15,7 @@ import { isEcho, isNotSpeech } from '/engines/transcript.js'
 import { FRAME, RATE, createVad, rms } from '/engines/vad.js'
 import { normalizeSpeech } from '/engines/gain.js'
 import { micConstraints } from '/engines/microphone.js'
+import { SUMMARY_FAILED } from '/guard.js'
 
 export const name = 'local'
 
@@ -229,7 +230,8 @@ const NATIVE_WAIT_MS = 90_000
 const MAC_VOICE_HINT = 'Para a voz soar mais natural neste Mac, escolha a Siri Voz 1 em Ajustes do Sistema › Acessibilidade › Conteúdo Falado › Voz do Sistema (ela baixa uma vez, numa rede que não seja a internet do celular). Com a Siri Voz 1 a assistente é o Luke; com a Siri Voz 2, a Nara. Ela vale a partir da próxima chamada.'
 // A native /stt or /tts request past these is dropped (that turn, or that chunk), so a hung
 // llama-server never holds the turn queue forever.
-const STT_TIMEOUT_MS = 20_000
+// A turn of up to ~10 minutes (two joined 5-minute parts) is transcribed in 30 s pieces (hub/asr-split.mjs).
+const STT_TIMEOUT_MS = 120_000
 const TTS_TIMEOUT_MS = 30_000
 const NATIVE_DOWN = 'A voz natural não respondeu; usando a voz leve nesta chamada.'
 
@@ -743,7 +745,16 @@ export async function startSession({
     if (isStale()) return
     if (typeof clientTools[tool.name] !== 'function') return say(said)
     commitTurn()
+    // A session summary takes a while to write: what the brain said ("Vou preparar o resumo.") plays
+    // first, and the summary itself is said as it comes, with no second brain call.
+    const isSummary = tool.name === 'luke_session_summary'
+    if (isSummary && said) await say(said)
+    if (isSummary && isStale()) return
     const result = String(await clientTools[tool.name](tool.args ?? {}))
+    if (isSummary && !result.startsWith(SUMMARY_FAILED)) {
+      remember(`[tool ${tool.name}] said the session summary`)
+      return say(result)
+    }
     remember(`[tool ${tool.name}] ${result}`)
     // The brain sometimes acts without a word; the user still needs to hear that it worked.
     if (tool.name !== 'luke_session_activity' && TOOL_OK.test(result)) return isAnnounced ? undefined : say(said || DONE_SAY[tool.name] || '')

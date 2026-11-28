@@ -134,6 +134,12 @@ Algumas coisas não precisam de chamada ao modelo:
 
 O Silero VAD (MIT) descarta sons sem fala. O Pipecat Smart Turn v3.2 (BSD-2-Clause) decide quando você terminou de falar: ele é consultado depois de uma pausa de 0,4 s e de novo a cada 0,2 s enquanto a pausa continua, e um "terminou" encerra a sua vez ali. 1,1 s de silêncio sempre encerra (1,3 s sem o modelo). Se uma respiração no meio da frase encerrar a sua vez e você continuar falando antes de a Ceci começar a responder, as duas partes viram um pedido só. Enquanto a Ceci fala, um som que pode ser você falando por cima abaixa a voz dela; ela para quando as suas palavras são ouvidas, e volta ao volume normal se era só o eco dela mesma. Um barulho que começa e continua (uma TV, um ar-condicionado) vira o som da sala em cerca de 10 s, então a sua vez continua terminando na hora.
 
+Você pode falar até 5 minutos sem parar; depois disso a sua vez é cortada ali e as próximas palavras começam outra. Fala longa é transcrita em pedaços de 30 s.
+
+### Resumos da sessão
+
+Com o luke-voice ligado, a Ceci guarda notas próprias do que está sendo conversado na sessão: quando o Claude termina uma resposta (no máximo uma vez a cada 3 minutos), o Claude Haiku lê os últimos 40% da conversa e compacta em notas. Só a cópia da Ceci é compactada: a sessão do Claude Code nunca é alterada. Peça "faz um resumo da sessão" e ela escreve um resumo falado grande a partir dessas notas e das mensagens mais novas (Claude Sonnet, até uns 5 minutos de fala) e lê para você; diga "pare" para ela parar. Desligar o luke-voice apaga as notas.
+
 ### Quão rápido é
 
 Medido numa RTX 3060 Ti, perfil gpu:
@@ -198,7 +204,7 @@ A Ceci nunca esquece uma conversa. Toda chamada fica guardada inteira numa memó
 ### O que sai do seu computador
 
 - **Desligado:** nada.
-- **Voz gratuita:** o áudio não sai do seu computador. Só o texto do que você falou, um resumo curto do que acontece na sessão e o resultado das tarefas vão para o Claude Sonnet, da sua conta do Claude, que decide o que a Ceci fala. Os arquivos dos modelos são baixados uma vez (do Hugging Face e do GitHub): na instalação ou no setup, ou na primeira chamada se nenhum dos dois rodou. Depois disso, nada é baixado.
+- **Voz gratuita:** o áudio não sai do seu computador. Só o texto do que você falou, um resumo curto do que acontece na sessão e o resultado das tarefas vão para o Claude Sonnet, da sua conta do Claude, que decide o que a Ceci fala. Para os resumos da sessão, os últimos 40% da conversa da sessão também vão para o Claude Haiku e o Claude Sonnet, da sua conta do Claude. Os arquivos dos modelos são baixados uma vez (do Hugging Face e do GitHub): na instalação ou no setup, ou na primeira chamada se nenhum dos dois rodou. Depois disso, nada é baixado.
 - **Voz ElevenLabs:** a sua voz e o que acontece na sessão (seus pedidos e as ferramentas que o Claude usa) vão para o seu agente na ElevenLabs.
 
 ## Se algo não funcionar
@@ -322,6 +328,6 @@ A voz gratuita baixa na instalação partes de terceiros; nenhuma delas está ne
 
 O trecho de voz de referência da Ceci, `agent/ceci-voice.wav`, foi fornecido pelo dono do projeto (ceci-nova.wav, 13,7 s, usado inteiro e no tom original).
 
-O trecho de voz de referência do Luke, `agent/luke-voice.wav`, foi fornecido pelo dono do projeto, inteiro, 1 semitom mais agudo com os formantes preservados, e desacelerado para 94% da velocidade (17,6 caracteres por segundo). O do João, `agent/joao-voice.wav`, foi fornecido pelo dono do projeto, cortado, no tom original dele, e acelerado para 122% (17,4 caracteres por segundo). Na voz leve, Luke e João falam com as vozes `pm_alex` e `pm_santa` do Kokoro.
+O trecho de voz de referência do Luke, `agent/luke-voice.wav`, é uma gravação com licença MIT escolhida pelo dono do projeto, cortada numa pausa em 7,9 s e 1 semitom mais grave. O do João, `agent/joao-voice.wav`, foi fornecido pelo dono do projeto, cortado, no tom original dele, e acelerado para 122% (17,4 caracteres por segundo). Na voz leve, Luke e João falam com as vozes `pm_alex` e `pm_santa` do Kokoro.
 
 Mais detalhes, em inglês, no [README.md](README.md).

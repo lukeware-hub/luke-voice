@@ -78,6 +78,23 @@
     },
     {
       "type": "client",
+      "name": "luke_session_summary",
+      "description": "Write a big spoken summary, in Brazilian Portuguese, of what is being discussed and done in a Claude session (up to about 5 minutes of speech). Say the text that comes back as it is.",
+      "expects_response": true,
+      "response_timeout_secs": 100,
+      "parameters": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "session": {
+            "type": "string",
+            "description": "The short name of the session. Leave empty for the focused one."
+          }
+        }
+      }
+    },
+    {
+      "type": "client",
       "name": "luke_memory_search",
       "description": "Search Ceci's permanent memory: every past conversation with the user, the tasks and what the sessions did. Use it before saying you do not remember. Returns dated hits.",
       "expects_response": true,

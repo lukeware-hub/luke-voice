@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { FRAME, createVad, rms } from './vad.js'
+import { FRAME, MAX_UTTERANCE_S, RATE, createVad, rms } from './vad.js'
 
 const tone = level => Float32Array.from({ length: FRAME }, (_, i) => level * Math.sin(i / 3) * Math.SQRT2)
 const silence = () => new Float32Array(FRAME)
@@ -37,6 +37,24 @@ test('a breath of about 0.6 s in the middle of a sentence does not end the turn'
   const breath = Array(19).fill(0).map(silence) // ~0.6 s
   const events = feed(vad, [...Array(20).fill(0).map(silence), ...speech(), ...breath, ...speech(), ...Array(45).fill(0).map(silence)])
   assert.deepEqual(events.map(e => e.type), ['start', 'end'])
+})
+
+test('a long talk with short breaths stays one turn past the old 30 s cap, and the turn is cut at 5 minutes', () => {
+  const vad = createVad()
+  // ~0.64 s of speech then ~0.16 s of breath, over and over: speech dips like a person's.
+  const talk = seconds => {
+    const frames = []
+    while (frames.length < (seconds * RATE) / FRAME) frames.push(...Array(20).fill(0).map(() => tone(0.1)), ...Array(5).fill(0).map(silence))
+    return frames
+  }
+  const minute = feed(vad, [...Array(20).fill(0).map(silence), ...talk(60), ...Array(45).fill(0).map(silence)])
+  assert.deepEqual(minute.map(e => e.type), ['start', 'end'])
+  assert.ok(minute[1].audio.length / RATE > 59)
+  assert.equal(MAX_UTTERANCE_S, 300)
+  const long = feed(createVad(), [...Array(20).fill(0).map(silence), ...talk(320)])
+  assert.deepEqual(long.slice(0, 2).map(e => e.type), ['start', 'end'])
+  const cut = long[1].audio.length / RATE
+  assert.ok(cut > 295 && cut <= 302, `cut at ${cut} s`)
 })
 
 test('the room is not learned while Ceci speaks, so the user talking over her still barges in', () => {

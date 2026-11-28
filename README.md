@@ -34,7 +34,7 @@ On the gpu profile, the hub downloads llama.cpp's official release build b12556 
 
 ## Requirements
 
-- **Claude Code**, installed and signed in with a Claude account (the only thing you install yourself). Current version of luke-voice: v0.17.0.
+- **Claude Code**, installed and signed in with a Claude account (the only thing you install yourself). Current version of luke-voice: v0.28.0.
 - **Windows, macOS or Linux.** On a Mac with Apple silicon you get the natural voice; an Intel Mac gets the light voice.
 - **Node.js 20 or newer and Git** (Windows) are brought by the installer when missing, for your user only.
 - **Disk space:** about 3.3 GB for the natural voice, about 360 MB for the light voice (the installer checks first).
@@ -143,6 +143,12 @@ Some things need no model call at all:
 
 Silero VAD (MIT) drops sounds without speech. Pipecat Smart Turn v3.2 (BSD-2-Clause) decides when you finished talking: it is asked after a 0.4 s pause and again every 0.2 s while the pause goes on, and a "done" ends your turn there. 1.1 s of silence always ends it (1.3 s without the model). If a breath in the middle of a sentence ends your turn and you go on talking before Ceci starts answering, both parts are joined into one request. While Ceci speaks, a sound that may be you talking over her lowers her voice; she stops once your words are heard, and goes on at full volume if it was only her own echo. A noise that starts and stays (a TV, an air conditioner) is learned as the room in about 10 s, so your turns still end on time.
 
+You can talk for up to 5 minutes in one go; past that the turn is cut there and your next words start a new one. Long speech is transcribed in 30 s pieces.
+
+### Session summaries
+
+While luke-voice is on, Ceci keeps her own notes on what is being discussed in the session: after Claude finishes a turn (at most once every 3 minutes), Claude Haiku reads the last 40% of the conversation and compacts it into notes. Only Ceci's copy is compacted: the Claude Code session itself is never changed. Ask "faz um resumo da sessão" and she writes a big spoken summary from those notes and the newest messages (Claude Sonnet, up to about 5 minutes of speech) and reads it to you; say "pare" to stop her. Turning luke-voice off forgets the notes.
+
 ### How fast it is
 
 Measured on an RTX 3060 Ti, gpu profile:
@@ -207,7 +213,7 @@ Ceci never forgets a conversation. Every call is recorded whole in one memory pe
 ### What leaves your computer
 
 - **While it is off:** nothing.
-- **Free voice:** the audio never leaves your computer. Only the text of what you said, a short summary of what happens in the session, and finished task results go to Claude Sonnet on your Claude account, which decides what Ceci says. The model files are downloaded once (from Hugging Face and GitHub): at install or setup, or on the first call if neither ran. After that, nothing is downloaded.
+- **Free voice:** the audio never leaves your computer. Only the text of what you said, a short summary of what happens in the session, and finished task results go to Claude Sonnet on your Claude account, which decides what Ceci says. For session summaries, the last 40% of the session's conversation also goes to Claude Haiku and Claude Sonnet on your Claude account. The model files are downloaded once (from Hugging Face and GitHub): at install or setup, or on the first call if neither ran. After that, nothing is downloaded.
 - **ElevenLabs voice:** your voice and what happens in the session (your prompts and Claude's tool calls) go to your agent at ElevenLabs.
 
 ## Container mode
@@ -382,4 +388,4 @@ The free voice downloads third-party parts at install time; none of them is in t
 
 Ceci's reference voice clip `agent/ceci-voice.wav` was supplied by the project owner (ceci-nova.wav, 13.7 s, used whole at its own pitch).
 
-Luke's reference voice clip `agent/luke-voice.wav` was supplied by the project owner, whole, raised 1 semitone with its formants kept, and slowed to 94% speed (17.6 characters a second). João's, `agent/joao-voice.wav`, was supplied by the project owner, trimmed, at his own pitch, and sped up to 122% (17.4 characters a second). On the light voice, Luke and João speak with Kokoro's `pm_alex` and `pm_santa`.
+Luke's reference voice clip `agent/luke-voice.wav` is an MIT-licensed recording picked by the project owner, cut at a pause to 7.9 s and lowered 1 semitone. João's, `agent/joao-voice.wav`, was supplied by the project owner, trimmed, at his own pitch, and sped up to 122% (17.4 characters a second). On the light voice, Luke and João speak with Kokoro's `pm_alex` and `pm_santa`.

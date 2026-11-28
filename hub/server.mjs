@@ -28,8 +28,9 @@ import { contentType, vendorFile } from './vendor.mjs'
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const VERSION = JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'plugin.json'), 'utf8')).version
 const MAX_BODY = 64 * 1024
-// One utterance as 16 kHz PCM16 WAV: 30 s is under 1 MB.
-const MAX_AUDIO = 4 * 1024 * 1024
+// One utterance as 16 kHz PCM16 WAV: 30 s is under 1 MB, so this takes ~13 minutes: a turn of up
+// to 5 minutes (window/engines/vad.js) joined with the part before it (turn-join.js).
+const MAX_AUDIO = 24 * 1024 * 1024
 const MAX_TTS_CHARS = 360
 const MAX_ACTIVITY = 60
 // Ceci's memory (hub/memory.mjs): a session's report kinds as memory kinds, and the most text kept
@@ -43,17 +44,20 @@ const WEEKDAYS = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'q
 const ACK_WAIT_MS = 15_000
 // The router answers in ~0.3 s; past this, the utterance goes to the brain instead.
 const ROUTER_WAIT_MS = 1500
-// Qwen3-ASR transcribes a turn in ~0.2 s; a hung engine must not hold the request (the window gives up at 20 s).
+// Qwen3-ASR transcribes a short turn in ~0.2 s; a hung engine must not hold the request (the window gives up at 120 s).
 // A voice-task result that finds no window open opens one, at most once in this long.
 // The call window's log file starts over past this size.
 const WINDOW_LOG_BYTES = 1_000_000
 const REOPEN_FOR_NOTICE_MS = 60_000
-const STT_WAIT_MS = 20_000
+// A long turn (up to ~10 minutes) goes to the ears in 30 s pieces (asr-split.mjs), one after another.
+const STT_WAIT_MS = 120_000
 // How much of what Ceci just said goes into the ears' prompt: her last minute, newest 200 characters.
 const RECENT_SAID_MS = 60_000
 const RECENT_SAID_CHARS = 200
 // A brain turn is one short Claude Sonnet call at medium effort (~2–3 s); a cold start can take longer.
 const BRAIN_WAIT_MS = 40_000
+// A spoken session summary is one longer Sonnet call (up to ~700 words, 90 s in the mod).
+const SUMMARY_WAIT_MS = 100_000
 const NO_SESSION_SAY = 'Nenhuma sessão do Claude está ligada. Ligue o luke-voice no Claude Code e me chame de novo.'
 const STALE_SESSION_MS = 90_000
 // How many sessions ended from the window the hub remembers (~/.luke-voice/ended.json).
@@ -963,7 +967,8 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       const clip = (value, max) => String(value ?? '').slice(0, max)
       const request = {
         kind: ['user', 'notice', 'tool_result'].includes(body.kind) ? body.kind : 'user',
-        text: clip(body.text, 4000),
+        // 5 minutes of speech is ~4500 characters; a joined turn can be twice that.
+        text: clip(body.text, 12_000),
         context: (Array.isArray(body.context) ? body.context : []).slice(-8).map(c => clip(c, 2500)),
         turns: (Array.isArray(body.turns) ? body.turns : []).slice(-12).map(t => ({ role: t?.role === 'luke' ? 'luke' : 'user', text: clip(t?.text, 500) })),
         sessions: roster(),
@@ -1005,6 +1010,18 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       const result = await routeUtterance(String(body.text ?? '').slice(0, 500), { ask, lastSaid: String(body.lastSaid ?? '').slice(-500) })
       // The router's lines are Ceci's: Luke and João say them in their own words (persona.json).
       return [200, { ...result, say: typeof result.say === 'string' ? asPersona(result.say, personaNow(), personasNow()) : result.say, ms: Date.now() - started }]
+    },
+    // A big spoken summary of a session (luke_session_summary): its mod writes it from Ceci's notes on
+    // the conversation and the newest messages, in the voice of whoever answers. Only a mod that says
+    // it can is asked: an older one would take an unknown command for an order to Claude.
+    'POST /summary': async (_none, body) => {
+      const name = typeof body.session === 'string' && body.session ? body.session : null
+      const session = target(name)
+      if (!session) return [200, { ok: false, message: missing(name) }]
+      if (!session.canSessionSummary) return [200, { ok: false, message: oldSessionSay(session.name) }]
+      const { name: who, gender } = personaInfo(personaNow())
+      const result = await enqueue(session, { type: 'session_summary', persona: { name: who, gender: gender === 'male' ? 'male' : 'female' } }, SUMMARY_WAIT_MS)
+      return [200, { ok: result.ok, message: result.message }]
     },
     'GET /activity': (_none, _body, url) => {
       const name = url.searchParams.get('session')
@@ -1333,7 +1350,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
           wake(previous)
         }
         const cwd = typeof body.cwd === 'string' ? body.cwd : ''
-        const session = { token, sessionId, name: previous?.name ?? uniqueName(cwd), cwd, canThink: typeof body.version === 'string' || typeof body.provider === 'string', canSummarize: body.canSummarize === true, inbox: previous?.inbox ?? [], waiters: [], activity: [], isBusy: false, needsYou: false, seenAt: Date.now() }
+        const session = { token, sessionId, name: previous?.name ?? uniqueName(cwd), cwd, canThink: typeof body.version === 'string' || typeof body.provider === 'string', canSummarize: body.canSummarize === true, canSessionSummary: body.canSessionSummary === true, inbox: previous?.inbox ?? [], waiters: [], activity: [], isBusy: false, needsYou: false, seenAt: Date.now() }
         sessions.set(token, session)
         focused ??= session.name
         sendRoster()
