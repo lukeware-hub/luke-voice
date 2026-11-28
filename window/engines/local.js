@@ -30,7 +30,8 @@ const DONE_SAY = {
 const DENIED = 'Tá bom, deixei pra lá.'
 // Said at once when the brain takes longer than ACK_AFTER_MS on a request, so the user knows
 // Ceci heard (acks.js). Synthesized when the call starts, so they play with no wait.
-const ACK_AFTER_MS = 600
+// 1.2 s, not 0.6 s: most replies come before it, so the waiting line plays only on a slow one.
+const ACK_AFTER_MS = 1200
 // With the end-of-turn model: a ~380 ms pause asks it whether the user is done, and it is asked
 // again every ~190 ms while the pause goes on; a "done" (0.6) ends the turn there, and ~0.6 s of
 // silence ends it anyway. Without the model, ~0.8 s (vad.js). A breath mid-sentence that still
@@ -775,8 +776,8 @@ export async function startSession({
     return runTool(next.tool, next.say)
   }
 
-  // The answer to "ok?" could not be heard for sure (confirm.js, unsureAnswer): Ceci says "Pode
-  // repetir para mim, por favor?" and the "ok?" stays open, so the repeated "sim" still runs it.
+  // The answer to "ok?" could not be heard for sure (confirm.js, unsureAnswer): Ceci says "Não
+  // entendi bem. Pode repetir?" and the "ok?" stays open, so the repeated "sim" still runs it.
   // Null when the answer was clear enough, there is no "ok?", or she already asked enough.
   function askAgain(heard) {
     const action = liveAction(pendingAction, Date.now())
@@ -918,7 +919,7 @@ export async function startSession({
     if (action && isConfirm(text, recentSaid.join(' '))) {
       timing('fast path', 0, `yes to "ok?": ${action.tool.name}`)
       if (action.planAsked) {
-        // "Tá bom, vou iniciar o planejamento agora." plays while the order is refined and planned
+        // "Combinado, vou planejar primeiro." plays while the order is refined and planned
         // (made ahead of time when it can be), so the wait does not sound like a hang.
         if (!sayMade(PLAN_START)) void say(PLAN_START)
         return runTool(withPlan(action, true), '', announce(action.tool.name))

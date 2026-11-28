@@ -57,7 +57,7 @@ export type BrainRequest = {
 type BrainTool = { name: string; args: Record<string, unknown> }
 
 // say: what Ceci says now. tool: what runs now. pending: what runs if the user's next words are a
-// plain yes (Ceci asked "ok?"), so the confirmation needs no second model call.
+// plain yes (Ceci asked to confirm), so the confirmation needs no second model call.
 export type BrainReply = { say: string; tool: BrainTool | null; pending: BrainTool | null }
 
 export const BRAIN_MODEL = 'claude-sonnet-5-5'
@@ -1435,7 +1435,7 @@ async function helpText($: EngineInterface) {
     'Seu status agora:',
     ...checks.map(line => `  ${line}`),
     '',
-    'O que é: a Ceci (no Mac com a Siri Voz 1, o Luke; com a Siri Voz 2, a Nara), uma assistente de voz em português ao lado do Claude Code. Você fala o que quer, ela repete e pergunta "ok?", e depois do seu "sim" um subagente do Claude faz a tarefa no seu computador. Quando termina, ela conta o resultado.',
+    'O que é: a Ceci (no Mac com a Siri Voz 1, o Luke; com a Siri Voz 2, a Nara), uma assistente de voz em português ao lado do Claude Code. Você fala o que quer, ela repete o pedido em forma de pergunta, e depois do seu "sim" um subagente do Claude faz a tarefa no seu computador. Quando termina, ela conta o resultado.',
     '',
     'Antes de usar (uma vez só):',
     '  1. Tenha o Node.js 20 ou mais novo (nodejs.org, versão LTS) e o Google Chrome.',
@@ -1454,7 +1454,7 @@ async function helpText($: EngineInterface) {
     'Como usar:',
     '  1. Clique em "✦ luke-voice: off" acima do prompt. Ele vira "on", a janela abre e a chamada começa.',
     '  2. Fale normalmente. Exemplo: "Verifica no repositório luke-voice onde o botão de ligar é desenhado."',
-    '  3. Ela repete o pedido e pergunta "ok?". Diga "sim".',
+    '  3. Ela repete o pedido em forma de pergunta. Diga "sim", "ok", "vai" ou "pode continuar".',
     '  4. O pedido aparece em Histórico, na janela. Quando terminar, ela fala o resultado.',
     '',
     'Comandos:',

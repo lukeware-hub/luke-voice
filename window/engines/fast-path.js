@@ -41,6 +41,8 @@ const YES = new Set([
   'blz', 'logico', 'obvio', 'otimo', 'legal', 'tranquilo', 'joia', 'massa', 'bacana', 'demorou', 'certinho', 'aha', 'dale',
   'concordo', 'aceito', 'autorizo', 'autorizado', 'aprovado', 'confirma', 'confirmar', 'vamos', 'vamo',
   'yeah', 'yep', 'yup', 'sure',
+  // Asking to go on ("prosseguir", "pode continuar", "siga"): during a confirmation, going on is a yes.
+  'prosseguir', 'prossegue', 'prossiga', 'continue', 'continua', 'continuar', 'siga', 'seguir', 'avanca', 'avancar', 'mande', 'comeca', 'comecar', 'comece',
 ])
 // Agreements of several words, said as one: each becomes "sim" before the words are counted
 // ("sem problema", "tudo bem", "de acordo"). Alone, their words are not a yes ("problema", "acordo").
@@ -48,6 +50,7 @@ const YES_PHRASES = [
   'sem problema', 'sem problemas', 'tudo bem', 'tudo certo', 'esta bem', 'esta certo', 'ta bem', 'ta certo', 'ta legal', 'esta bom', 'de acordo(?! com)',
   'sim senhor', 'sim senhora', 'pode crer', 'vamos nessa', 'vamos la', 'bora la', 'manda brasa', 'vai fundo', 'toca ficha', 'da-lhe', 'da lhe',
   'com certeza', 'claro que sim', 'pode sim', 'isso mesmo', 'e isso', 'e isso ai',
+  'pode ir', 'pode continuar', 'pode seguir', 'pode prosseguir', 'vai em frente', 'segue em frente', 'siga em frente', 'vamos em frente', 'manda bala', 'e pra ja',
 ]
 const YES_PHRASES_RE = new RegExp(`\\b(?:${YES_PHRASES.join('|')})\\b`, 'g')
 const NO = new Set([
@@ -67,6 +70,8 @@ const FILLER = new Set([
   ...NAMES, 'por', 'favor', 'pode', 'sim', 'ver', 'ai', 'ja', 'agora', 'mesmo', 'com', 'certeza',
   'fazer', 'mandar', 'ir', 'pra', 'para', 'la', 'precisa', 'obrigado', 'obrigada', 'e', 'o', 'a', 'se', 'ya', 'isso', 'melhor', 'tudo', 'bem', 'bom', 'ser', 'que', 'bala',
   'rodar', 'roda', 'seguir', 'continuar', 'continua', 'em', 'frente',
+  // The going-on words fill a no too ("não, não prossiga"), so they are fillers as well as yes words.
+  'prosseguir', 'prossegue', 'prossiga', 'continue', 'siga', 'avanca', 'avancar', 'comeca', 'comecar', 'comece',
   'gentileza', 'senhor', 'senhora', 'valeu',
 ])
 const MAX_ANSWER_WORDS = 7
@@ -119,9 +124,12 @@ export function isConfirm(text, said = '') {
 // A question back ("não?") is not a no, and neither is a yes beside a no ("sim, não": isMixed).
 export const isDeny = text => !/\?\W*$/.test(plain(text)) && !isMixed(text) && (shortAnswer(text, NO, NO_PHRASES_RE, 'nao') || LONE_NO.has(loneWord(text)))
 
+// The words that ask to go on: "não prossiga" and "não continua" are a no, not a yes beside a no.
+const GO_ON = ['prosseguir', 'prossegue', 'prossiga', 'continue', 'continua', 'continuar', 'siga', 'seguir', 'avanca', 'avancar', 'comeca', 'comecar', 'comece']
+
 // Words that only ever mean yes. "pode", "isso", "tá" and "vai" also fill a no ("isso não", "pode
 // ser que não", "não tá bom"), so they do not make an answer mixed.
-const CLEAR_YES = new Set([...YES].filter(w => !['pode', 'pod', 'podi', 'isso', 'ta', 'vai', 'faz', 'faca', 'segue', 'manda', 'bora', 'vamos', 'vamo', 'certeza'].includes(w)))
+const CLEAR_YES = new Set([...YES].filter(w => !['pode', 'pod', 'podi', 'isso', 'ta', 'vai', 'faz', 'faca', 'segue', 'manda', 'mande', 'bora', 'vamos', 'vamo', 'certeza', ...GO_ON].includes(w)))
 
 // A short answer with both a yes and a no in it ("sim, não", "não, ok", "ok... não"): two voices
 // over each other, or a word lost in the noise. Neither runs nor drops the action: Ceci asks again.
@@ -131,3 +139,13 @@ export function isMixed(text) {
   if (!said.every(w => YES.has(w) || NO.has(w) || FILLER.has(w))) return false
   return said.some(w => NO.has(w)) && said.some(w => CLEAR_YES.has(w))
 }
+
+// What the user can say to confirm Ceci's question and go on, kept in one place: the fast path
+// takes every one of these as a yes (fast-path.test.mjs), and the README lists them.
+export const CONFIRM_PHRASES = [
+  'Sim.', 'Ok.', 'Prosseguir.', 'Pode continuar.', 'Pode ir.', 'Vai.',
+  'Pode.', 'Pode sim.', 'Claro.', 'Com certeza.', 'Isso.', 'Isso mesmo.', 'Tá bom.', 'Tudo bem.', 'Beleza.', 'Fechado.',
+  'Manda ver.', 'Manda bala.', 'Pode mandar.', 'Pode fazer.', 'Faz isso.', 'Pode seguir.', 'Segue em frente.', 'Vai em frente.',
+  'Pode prosseguir.', 'Prossiga.', 'Continua.', 'Pode começar.', 'Bora.', 'Vamos lá.', 'Sim, pode ir.', 'Ok, pode continuar.',
+  'Sim, vai.', 'Pode avançar.', 'Confirmo.', 'Autorizado.', 'De acordo.', 'Combinado.', 'Perfeito, pode ir.', 'É pra já.',
+]

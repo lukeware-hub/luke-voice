@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { isConfirm, isDeny, isMixed, isStopClaude, isStopOnly, stopTarget } from './fast-path.js'
+import { CONFIRM_PHRASES, isConfirm, isDeny, isMixed, isStopClaude, isStopOnly, stopTarget } from './fast-path.js'
 
 test('a short stop request is caught, with or without accents, fillers or the name', () => {
   for (const said of ['Pare.', 'para!', 'Ceci, para tudo.', 'Luke, para tudo.', 'Nara, para tudo.', 'Para, Narah, para!', 'Nará, pare', 'PARA AGORA', 'cancela isso', 'chega', 'Pará.', 'para o Claude, por favor', 'Ceci, para.', 'Cecí, pare agora', 'Cecy, chega']) {
@@ -195,5 +195,27 @@ test('a yes and a no in one short answer is mixed: neither a yes nor a no', () =
   // A no made with yes-like words is still a plain no; a yes with a change goes to the brain.
   for (const said of ['Isso não.', 'Pode ser que não.', 'Claro que não.', 'não, tudo bem', 'Não tá bom.', 'Sim, mas não agora', 'sim', 'não', '']) {
     assert.equal(isMixed(said), false, said)
+  }
+})
+
+test('every listed confirm phrase is a yes, the asked keywords among them, and at least thirty', () => {
+  assert.ok(CONFIRM_PHRASES.length >= 30)
+  for (const word of ['Sim.', 'Ok.', 'Prosseguir.', 'Pode continuar.', 'Pode ir.', 'Vai.']) assert.ok(CONFIRM_PHRASES.includes(word), word)
+  for (const said of CONFIRM_PHRASES) {
+    assert.equal(isConfirm(said), true, said)
+    assert.equal(isDeny(said), false, said)
+    assert.equal(isMixed(said), false, said)
+  }
+  // Without the period, in lower case, or with the name, as the ears write them.
+  for (const said of ['prosseguir', 'pode continuar', 'pode ir', 'vai', 'Ceci, pode prosseguir', 'Sim, pode continuar, Ceci.']) assert.equal(isConfirm(said), true, said)
+})
+
+test('the going-on words never turn a no, a question or a request into a yes', () => {
+  for (const said of ['Não prossiga.', 'Não, não continua.', 'Continua não.']) {
+    assert.equal(isConfirm(said), false, said)
+    assert.equal(isDeny(said), true, said)
+  }
+  for (const said of ['Prosseguir?', 'Pode ir?', 'Pode continuar?', 'Continua os testes de login.', 'Pode ir para a pasta site.', 'depois', 'não vai']) {
+    assert.equal(isConfirm(said), false, said)
   }
 })

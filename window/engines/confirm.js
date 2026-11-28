@@ -9,14 +9,14 @@ import { isNotSpeech } from './transcript.js'
 const PENDABLE = ['luke_send_to_claude', 'luke_memory_delete']
 // Said instead of the brain's words when it called an acting tool at once: it did not run yet.
 const ASK = {
-  luke_send_to_claude: 'Refino e mando isso para o Claude, ok?',
-  luke_memory_delete: 'Apago isso da memória, ok?',
+  luke_send_to_claude: 'Refino e mando isso para o Claude?',
+  luke_memory_delete: 'Apago isso da memória?',
 }
 // A "ok?" waits this long for its "sim".
 export const PENDING_TTL_MS = 90_000
 // Said when an answer could not be heard for sure: too soft, mixed with another voice, a noise or
 // the room. The "ok?" it answered stays open, so the repeated "sim" still runs it.
-export const REPEAT = 'Pode repetir para mim, por favor?'
+export const REPEAT = 'Não entendi bem. Pode repetir?'
 // How many times Ceci asks it for one "ok?": a TV or a fan that keeps setting off turns must not
 // keep her asking. After that, the turn goes as it did before.
 export const MAX_REPEATS = 2
@@ -73,10 +73,10 @@ export const askedAgain = (action, now) => ({ ...action, at: now, repeats: (acti
 // Before an order goes to Claude, Ceci asks a second question: plan first? A "sim" to the order's "ok?"
 // is not the end: she asks this one (planAsk) and keeps the same action waiting, marked as asked. Its
 // "sim" sends the order with plan: true, its "não" sends it with plan: false (the usual flow).
-export const PLAN_ASK = 'Antes de mandar, quer que eu planeje primeiro, ok?'
+export const PLAN_ASK = 'Quer que eu planeje antes de mandar?'
 // Said at once on the "sim" to PLAN_ASK, before the order is refined and planned: that takes a while,
 // and in silence the user took it for a hang.
-export const PLAN_START = 'Tá bom, vou iniciar o planejamento agora.'
+export const PLAN_START = 'Combinado, vou planejar primeiro.'
 export const needsPlanAsk = action => action?.tool?.name === 'luke_send_to_claude' && !action.planAsked
 export const planAsked = (action, now) => ({ ...action, at: now, planAsked: true, repeats: 0 })
 export const withPlan = (action, plan) => ({ ...action.tool, args: { ...(action.tool.args ?? {}), plan } })

@@ -7,6 +7,8 @@ const LONG = 'eu queria que você olhasse o projeto da api e me dissesse por que
 
 test('a short turn gets a quick word, a long one a listening line', () => {
   assert.ok(QUICK_ACKS.includes(pickAck('roda os testes')))
+  // Fewer waiting lines (owner's ask): no "hum" fillers.
+  for (const line of [...QUICK_ACKS, ...LONG_ACKS]) assert.doesNotMatch(line, /\bhum\b/i, line)
   assert.ok(LONG_ACKS.includes(pickAck(LONG)))
   // The lines the owner asked for.
   assert.ok(QUICK_ACKS.includes('Entendi.'))

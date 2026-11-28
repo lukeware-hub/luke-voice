@@ -94,7 +94,7 @@ export function medianPitch(samples, fs) {
 
 // How far a take's voice sits from the reference voice, in semitones. A take made with another seed
 // can come out in another voice, and its end then "rises" because the whole voice jumped up: a male
-// voice confirming an order ("Refino e mando isso para o Claude, ok?") was heard as a woman's. Such a
+// voice confirming an order ("Refino e mando isso para o Claude?") was heard as a woman's. Such a
 // take is never served.
 export const MAX_VOICE_SHIFT = 3
 export function voiceShift(samples, fs, voicePitch) {
@@ -139,7 +139,7 @@ export function wavSamples(buffer) {
 }
 
 // Questions Ceci asks often, improved in the background once the engine is up.
-export const COMMON_QUESTIONS = ['Ok?', 'Começo, ok?', 'Quer que eu faça mais alguma coisa?', 'Mais alguma coisa?', 'Tudo bem?', 'Pode ser?', 'Quer que eu continue?']
+export const COMMON_QUESTIONS = ['Refino e mando isso para o Claude?', 'Quer que eu planeje antes de mandar?', 'Apago isso da memória?', 'Quer que eu faça mais alguma coisa?', 'Mais alguma coisa?', 'Tudo bem?', 'Pode ser?', 'Quer que eu continue?']
 // Part of every kept take's key: 2 since takes in another voice are never served (voiceShift).
 const TAKES_VERSION = 2
 // Seeds tried for a question, after Ceci's own (the take said live).
