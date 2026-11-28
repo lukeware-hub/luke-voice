@@ -88,7 +88,11 @@ export const VOICE_SETTINGS = { temperature: 0.9, top_p: 0.9, seed: 7 }
 // slow; 94% (17.6 characters a second) was picked by ear.
 // `lang`: the language a voice speaks, 'pt' unless set. Luke speaks 'pt-BR' (the owner still heard
 // Portugal in him); so do Ceci since her new clip (ceci-nova.wav) and João. See engineLang for what the engine is sent.
-export const PERSONA_VOICE_SETTINGS = { luke: { lang: 'pt-BR' }, ceci: { lang: 'pt-BR' }, joao: { lang: 'pt-BR' } }
+// Luke's seed: 23. In two by-ear rounds (11 to 17 lines x seeds 7, 11 and 23, 2026-11-28) the owner
+// rated 12 of 39 seed-23 takes good, 8 of seed 11 and only 3 of seed 7. With his transcript punctuated
+// (Fala, galera. ...), seed 23 gave 6 good takes of 11, questions among them (9/10 for "Quer que eu
+// monte um plano?"); before, he had no punctuation at all and his questions ended flat.
+export const PERSONA_VOICE_SETTINGS = { luke: { lang: 'pt-BR', seed: 23 }, ceci: { lang: 'pt-BR' }, joao: { lang: 'pt-BR' } }
 export const voiceSettings = persona => ({ ...VOICE_SETTINGS, ...(PERSONA_VOICE_SETTINGS[persona] ?? {}) })
 // The language field the engine gets. Qwen3-TTS knows Portuguese only as a whole ('pt'); 'pt-BR'
 // makes llama-server fail ("unknown language"). So 'pt-BR' is sent as no language at all: the
