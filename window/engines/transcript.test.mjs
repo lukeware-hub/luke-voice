@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { isEcho, isNotSpeech } from './transcript.js'
+import { isBargeEcho, isEcho, isNotSpeech } from './transcript.js'
 
 test('punctuation alone is not speech, but a word with accents is, however short', () => {
   for (const heard of ['', '.', '...', ' ?! ', '-', '…']) assert.equal(isNotSpeech(heard), true, heard)
@@ -50,4 +50,16 @@ test("a barge-in made of Ceci's own words is her echo; the user's own words are 
   assert.equal(isEcho('não, quero outra coisa', said), false)
   assert.equal(isEcho('', said), false)
   assert.equal(isEcho('testes', ''), false)
+})
+
+test('a short yes or no said over Ceci\'s "ok?" is the answer, not her echo, even made of her words', () => {
+  const said = 'Refino e mando isso para o Claude?'
+  // While her "ok?" waits, "isso" or "manda" over her voice is the user's answer.
+  for (const heard of ['Isso.', 'Isso mesmo.', 'Pode mandar.', 'Não.', 'Sim.']) assert.equal(isBargeEcho(heard, said, true), false, heard)
+  // With no "ok?" waiting, her own words are still her echo.
+  assert.equal(isBargeEcho('Isso.', said, false), true)
+  // A longer run of her words is still her echo, "ok?" or not.
+  assert.equal(isBargeEcho('Refino e mando isso para o Claude', said, true), true)
+  // The user's own words are never her echo.
+  assert.equal(isBargeEcho('roda os testes da pasta hub', said, false), false)
 })

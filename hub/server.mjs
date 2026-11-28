@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url'
 
 import { conversationToken, credits, ensureAgent, outOfCreditsMessage } from './agent.mjs'
 import { PORT, isMainModule, stateDir, stateFile } from './paths.mjs'
-import { ASR_GLOSSARY, SERVICES, VOICE_SETTINGS, engineLang, voiceSettings, createEngine, maxFrames, prepareEngine, profileReady, readProfile } from './engine.mjs'
+import { ASR_ANSWER_PROMPT, ASR_GLOSSARY, SERVICES, VOICE_SETTINGS, engineLang, voiceSettings, createEngine, maxFrames, prepareEngine, profileReady, readProfile } from './engine.mjs'
 import { pickMacVoice, sayWav } from './mac-voice.mjs'
 import { asPersona, personaFor, personaInfo, personasNow, voiceRegistry } from './persona.mjs'
 import { MODELS, ensureModel } from './models.mjs'
@@ -1078,7 +1078,9 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     // The newest words matter most: cut from the front, at a word boundary.
     return joined.length <= RECENT_SAID_CHARS ? joined : joined.slice(-RECENT_SAID_CHARS).replace(/^\S*\s+/, '')
   }
-  const asrPrompt = () => {
+  // `isAnswer`: the window waits for the answer to a "ok?" (the x-luke-answer header).
+  const asrPrompt = (isAnswer = false) => {
+    if (isAnswer) return ASR_ANSWER_PROMPT
     const names = [...sessions.values()].map(s => s.name).join(', ')
     const said = saidLately()
     return [ASR_GLOSSARY, names && `Sessões: ${names}.`, said && `Ceci acabou de dizer: ${said}`].filter(Boolean).join(' ')
@@ -1089,7 +1091,8 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     const url = engine?.url('asr')
     if (!url) return send(res, 503, { error: 'The native speech engine is not running.' })
     const wav = await readRaw(req, MAX_AUDIO)
-    const prompt = asrPrompt()
+    const isAnswer = req.headers['x-luke-answer'] === '1'
+    const prompt = asrPrompt(isAnswer)
     const started = Date.now()
     // The window gone (it hung up, or gave up waiting) or a hung engine: stop the transcription,
     // so the engine's single slot is free for the next turn. The request closes once its body is
@@ -1100,19 +1103,35 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     // Long speech (parts joined across pauses) is heard in pieces of at most 30 s, one after the
     // other: whole, it outgrew the engine's context and came back cut short or not at all (asr-split.mjs).
     const heard = []
+    // One piece heard with `withPrompt` (or none): { raw, words }, or null when the engine failed.
+    const hear = async (piece, withPrompt) => {
+      const form = new FormData()
+      form.append('file', new Blob([piece], { type: 'audio/wav' }), 'speech.wav')
+      form.append('model', 'qwen3-asr')
+      form.append('language', 'pt')
+      if (withPrompt) form.append('prompt', withPrompt)
+      const answer = await fetch(`${url}/v1/audio/transcriptions`, { method: 'POST', body: form, signal })
+      if (!answer.ok) return { status: answer.status }
+      const { text = '' } = await answer.json()
+      // Only the words after the ears' language tag; on silence or soft noise they can also write
+      // their own prompt down, and that part is not the user (asr-leak.mjs).
+      return { raw: String(text), words: withPrompt ? withoutPromptLeak(asrWords(text), withPrompt) : asrWords(text) }
+    }
     try {
-      for (const piece of splitWav(wav)) {
-        const form = new FormData()
-        form.append('file', new Blob([piece], { type: 'audio/wav' }), 'speech.wav')
-        form.append('model', 'qwen3-asr')
-        form.append('language', 'pt')
-        form.append('prompt', prompt)
-        const answer = await fetch(`${url}/v1/audio/transcriptions`, { method: 'POST', body: form, signal })
-        if (!answer.ok) return send(res, 502, { error: `speech engine ${answer.status}` })
-        const { text = '' } = await answer.json()
-        // Only the words after the ears' language tag; on silence or soft noise they can also write
-        // their own prompt down, and that part is not the user (asr-leak.mjs).
-        heard.push(withoutPromptLeak(asrWords(text), prompt))
+      const pieces = splitWav(wav)
+      for (const piece of pieces) {
+        let got = await hear(piece, prompt)
+        if (got.status) return send(res, 502, { error: `speech engine ${got.status}` })
+        if (isAnswer) log(`stt: answer to "ok?" raw ${JSON.stringify(got.raw.slice(0, 200))}, kept ${JSON.stringify(got.words)}, prompt ${prompt.length} chars`)
+        // An answer to "ok?" that came back with no words: heard once more with no prompt at all,
+        // so there is nothing for the ears to copy. A soft "sim" was lost this way, and Ceci asked
+        // "Pode repetir?" for an answer that was there (~250 ms more, only in this case).
+        if (isAnswer && pieces.length === 1 && !got.words) {
+          got = await hear(piece, null)
+          if (got.status) return send(res, 502, { error: `speech engine ${got.status}` })
+          log(`stt: answer to "ok?" heard again with no prompt: raw ${JSON.stringify(got.raw.slice(0, 200))}`)
+        }
+        heard.push(got.words)
       }
     } catch (error) {
       if (stop.signal.aborted) return res.end()

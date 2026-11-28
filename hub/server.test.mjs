@@ -7,7 +7,7 @@ import { after, before, test } from 'node:test'
 
 process.env.LUKE_VOICE_HOME = mkdtempSync(join(tmpdir(), 'luke-voice-test-'))
 const { browserCandidates, chromeArgs, chromePath, createEngineRunner, createHub, isWsl, loadSecrets, needsPrepare, openWindow, windowCommand } = await import('./server.mjs')
-const { ASR_GLOSSARY } = await import('./engine.mjs')
+const { ASR_GLOSSARY, ASR_ANSWER_PROMPT } = await import('./engine.mjs')
 
 const SERVICE = 'service-token'
 const WINDOW = 'window-key'
@@ -714,6 +714,64 @@ test('the ears writing their own prompt down is not taken for the user: the leak
     assert.equal(await hear(), '')
     tail = ' Sim.'
     assert.equal(await hear(), 'Sim.')
+  } finally {
+    hub2.closeAllConnections()
+    hub2.close()
+    fake.close()
+  }
+})
+
+test('an answer to "ok?" is heard with a short prompt, an empty one is heard again with none, and the raw text is logged', async () => {
+  // What the ears get per call, and what they answer: Qwen3-ASR copying its prompt back on a soft,
+  // short "sim" (the leak is cut and nothing is left), and the "Sim." it writes with no prompt.
+  const prompts = []
+  let answer = prompt => `language Portuguese<asr_text>${prompt ?? ''}`
+  const fake = createHttpServer(async (req, res) => {
+    const chunks = []
+    for await (const c of req) chunks.push(c)
+    const prompt = Buffer.concat(chunks).toString('utf8').match(/name="prompt"\r\n\r\n([^\r]*)/)?.[1] ?? null
+    prompts.push(prompt)
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ text: answer(prompt) }))
+  })
+  await new Promise(resolve => fake.listen(0, '127.0.0.1', resolve))
+  const base = `http://127.0.0.1:${fake.address().port}`
+  const logs = []
+  const engine = { url: () => base, status: () => ({ tts: true, asr: true, router: false }) }
+  const hub2 = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {}, engine, profile: () => ({ profile: 'gpu' }), log: line => logs.push(line) })
+  await new Promise(resolve => hub2.listen(0, '127.0.0.1', resolve))
+  const p = hub2.address().port
+  const hear = (isAnswer = false) =>
+    new Promise((resolve, reject) => {
+      const headers = { host: `127.0.0.1:${p}`, 'content-type': 'audio/wav', 'x-luke-key': WINDOW, ...(isAnswer ? { 'x-luke-answer': '1' } : {}) }
+      const req = request({ host: '127.0.0.1', port: p, method: 'POST', path: '/stt', headers }, res => {
+        const got = []
+        res.on('data', c => got.push(c))
+        res.on('end', () => resolve(JSON.parse(Buffer.concat(got).toString('utf8')).text))
+      })
+      req.on('error', reject)
+      req.end(Buffer.from('RIFFWAV'))
+    })
+  try {
+    // An answer to "ok?": the short answer prompt, not the glossary nor Ceci's last line.
+    answer = () => 'language Portuguese<asr_text>Sim.'
+    assert.equal(await hear(true), 'Sim.')
+    assert.deepEqual(prompts, [ASR_ANSWER_PROMPT])
+    assert.match(ASR_ANSWER_PROMPT, /sim, não, ok/)
+    // The raw text the ears gave is logged for an answer, so a lost "sim" can be found.
+    assert.ok(logs.some(line => line.includes('answer to "ok?"') && line.includes('Sim.')), logs.join('\n'))
+    // The prompt copied back, nothing left: heard once more with no prompt, which writes the "sim".
+    prompts.length = 0
+    answer = prompt => `language Portuguese<asr_text>${prompt ?? 'Sim.'}`
+    assert.equal(await hear(true), 'Sim.')
+    assert.deepEqual(prompts, [ASR_ANSWER_PROMPT, null])
+    // Any other turn keeps the glossary and is heard once, even when nothing is left.
+    prompts.length = 0
+    logs.length = 0
+    answer = prompt => `language Portuguese<asr_text>${prompt ?? 'Sim.'}`
+    assert.equal(await hear(false), '')
+    assert.deepEqual(prompts, [ASR_GLOSSARY])
+    assert.equal(logs.filter(line => line.includes('answer to "ok?"')).length, 0)
   } finally {
     hub2.closeAllConnections()
     hub2.close()
