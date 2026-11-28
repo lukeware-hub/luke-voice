@@ -11,7 +11,7 @@ import { capPauses, isReadyToStart, pauseAfter, sentenceLeft, trimEdges } from '
 import { contextEntry, trimContext } from '/engines/context.js'
 import { createCutReply, createTurnJoiner, createTurnLog } from '/engines/turn-join.js'
 import { risingPercent } from '/engines/progress.js'
-import { isEcho, isNotSpeech } from '/engines/transcript.js'
+import { isBargeEcho, isNotSpeech } from '/engines/transcript.js'
 import { FRAME, RATE, createVad, rms } from '/engines/vad.js'
 import { normalizeSpeech } from '/engines/gain.js'
 import { micConstraints } from '/engines/microphone.js'
@@ -408,13 +408,15 @@ export async function startSession({
   }
 
   // Speech to text on the native engine, after Silero (in the worker) confirms there is speech.
-  // `isAnswer`: a "ok?" waits, and a soft short "sim" passes a lower bar (speech-check.js).
+  // `isAnswer`: a "ok?" waits, and a soft short "sim" passes a lower bar (speech-check.js); the hub
+  // then hears it with a short answer prompt, and once more with none if no words came back.
   async function nativeTranscribe(audio, isAnswer) {
     const check = await ask('check', { audio, isAnswer })
     if (!check.isSpeech) return { text: '', noSpeech: true, ms: check.ms }
     let out
     try {
-      const response = await fetch('/stt', { method: 'POST', headers: { 'content-type': 'audio/wav', 'x-luke-key': KEY }, body: wavBytes(audio), signal: AbortSignal.timeout(STT_TIMEOUT_MS) })
+      const headers = { 'content-type': 'audio/wav', 'x-luke-key': KEY, ...(isAnswer ? { 'x-luke-answer': '1' } : {}) }
+      const response = await fetch('/stt', { method: 'POST', headers, body: wavBytes(audio), signal: AbortSignal.timeout(STT_TIMEOUT_MS) })
       if (!response.ok) throw new Error(`The native speech engine answered ${response.status}.`)
       out = await response.json()
     } catch (error) {
@@ -841,7 +843,7 @@ export async function startSession({
     transcribe(audio.slice())
       .then(heard => {
         if (isEnded) return
-        if (heard.noSpeech || isNotSpeech(heard.text) || isEcho(heard.text, recentSaid.join(' '))) {
+        if (heard.noSpeech || isNotSpeech(heard.text) || isBargeEcho(heard.text, recentSaid.join(' '), Boolean(liveAction(pendingAction, Date.now())))) {
           timing('dropped', heard.ms ?? 0, `a barge-in that was Ceci's own echo or no speech: "${heard.text ?? ''}"`)
           unduck()
           // A part carried for joining comes back as its own turn.

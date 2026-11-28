@@ -41,12 +41,19 @@ const YES = new Set([
   'blz', 'logico', 'obvio', 'otimo', 'legal', 'tranquilo', 'joia', 'massa', 'bacana', 'demorou', 'certinho', 'aha', 'dale',
   'concordo', 'aceito', 'autorizo', 'autorizado', 'aprovado', 'confirma', 'confirmar', 'vamos', 'vamo',
   'yeah', 'yep', 'yup', 'sure',
+  // Formal and slang yeses, "quero", and the grunts of agreeing ("ahan", "mhm", "hum").
+  'correto', 'corretissimo', 'certissimo', 'afirmativo', 'certamente', 'quero', 'opa', 'simbora', 'partiu', 'exactamente', 'exacto',
+  'ahan', 'anham', 'unhum', 'mhm', 'hum',
   // Asking to go on ("prosseguir", "pode continuar", "siga"): during a confirmation, going on is a yes.
   'prosseguir', 'prossegue', 'prossiga', 'continue', 'continua', 'continuar', 'siga', 'seguir', 'avanca', 'avancar', 'mande', 'comeca', 'comecar', 'comece',
 ])
 // Agreements of several words, said as one: each becomes "sim" before the words are counted
 // ("sem problema", "tudo bem", "de acordo"). Alone, their words are not a yes ("problema", "acordo").
+// "pois não" and "não tem problema" are yeses that carry a "não": they become "sim" before any no is counted.
+const YES_NAO_PHRASES = ['pois nao', 'nao tem problema', 'nao ha problema']
+const YES_NAO_RE = new RegExp(`\\b(?:${YES_NAO_PHRASES.join('|')})\\b`, 'g')
 const YES_PHRASES = [
+  ...YES_NAO_PHRASES, 'sem duvida', 'sem duvidas', 'vai nessa', 'quero sim', 'por mim,? tudo bem', 'o\\.? ?k',
   'sem problema', 'sem problemas', 'tudo bem', 'tudo certo', 'esta bem', 'esta certo', 'ta bem', 'ta certo', 'ta legal', 'esta bom', 'de acordo(?! com)',
   'sim senhor', 'sim senhora', 'pode crer', 'vamos nessa', 'vamos la', 'bora la', 'manda brasa', 'vai fundo', 'toca ficha', 'da-lhe', 'da lhe',
   'com certeza', 'claro que sim', 'pode sim', 'isso mesmo', 'e isso', 'e isso ai',
@@ -64,7 +71,7 @@ const NO_PHRASES = ['claro que nao', 'logico que nao', 'obvio que nao', 'com cer
 const NO_PHRASES_RE = new RegExp(`\\b(?:${NO_PHRASES.join('|')})\\b`, 'g')
 // A one-word answer the ears misheard, taken only when it is the whole answer to "ok?": a soft,
 // quick "sim" comes back as "Fim." or "Sin.", and a "não" as "Mão." or "Nau." (heard on the real engine).
-const LONE_YES = new Set(['fim', 'sin', 'si', 'cim', 'simm', 'siim'])
+const LONE_YES = new Set(['fim', 'sin', 'si', 'cim', 'simm', 'siim', 't', 'assim', 'isto', 'okey', 'oki'])
 const LONE_NO = new Set(['mao', 'nau', 'naao', 'naaao'])
 const FILLER = new Set([
   ...NAMES, 'por', 'favor', 'pode', 'sim', 'ver', 'ai', 'ja', 'agora', 'mesmo', 'com', 'certeza',
@@ -73,6 +80,8 @@ const FILLER = new Set([
   // The going-on words fill a no too ("não, não prossiga"), so they are fillers as well as yes words.
   'prosseguir', 'prossegue', 'prossiga', 'continue', 'siga', 'avanca', 'avancar', 'comeca', 'comecar', 'comece',
   'gentileza', 'senhor', 'senhora', 'valeu',
+  // A destination after the yes ("pode mandar pro Claude"), and "quero" and "hum", which also fill a no ("não quero", "hum, não").
+  'claude', 'pro', 'manda', 'quero', 'hum',
 ])
 const MAX_ANSWER_WORDS = 7
 
@@ -122,19 +131,19 @@ export function isConfirm(text, said = '') {
 
 // "não", "agora não", "deixa pra lá", "melhor não", "esquece", "de jeito nenhum", "claro que não".
 // A question back ("não?") is not a no, and neither is a yes beside a no ("sim, não": isMixed).
-export const isDeny = text => !/\?\W*$/.test(plain(text)) && !isMixed(text) && (shortAnswer(text, NO, NO_PHRASES_RE, 'nao') || LONE_NO.has(loneWord(text)))
+export const isDeny = text => !/\?\W*$/.test(plain(text)) && !isMixed(text) && (shortAnswer(plain(text).replace(YES_NAO_RE, 'sim'), NO, NO_PHRASES_RE, 'nao') || LONE_NO.has(loneWord(text)))
 
 // The words that ask to go on: "não prossiga" and "não continua" are a no, not a yes beside a no.
 const GO_ON = ['prosseguir', 'prossegue', 'prossiga', 'continue', 'continua', 'continuar', 'siga', 'seguir', 'avanca', 'avancar', 'comeca', 'comecar', 'comece']
 
 // Words that only ever mean yes. "pode", "isso", "tá" and "vai" also fill a no ("isso não", "pode
 // ser que não", "não tá bom"), so they do not make an answer mixed.
-const CLEAR_YES = new Set([...YES].filter(w => !['pode', 'pod', 'podi', 'isso', 'ta', 'vai', 'faz', 'faca', 'segue', 'manda', 'mande', 'bora', 'vamos', 'vamo', 'certeza', ...GO_ON].includes(w)))
+const CLEAR_YES = new Set([...YES].filter(w => !['pode', 'pod', 'podi', 'isso', 'ta', 'vai', 'faz', 'faca', 'segue', 'manda', 'mande', 'bora', 'vamos', 'vamo', 'certeza', 'quero', 'hum', 'opa', 'certamente', ...GO_ON].includes(w)))
 
 // A short answer with both a yes and a no in it ("sim, não", "não, ok", "ok... não"): two voices
 // over each other, or a word lost in the noise. Neither runs nor drops the action: Ceci asks again.
 export function isMixed(text) {
-  const said = words(plain(text).replace(NO_PHRASES_RE, 'nao'))
+  const said = words(plain(text).replace(YES_NAO_RE, 'sim').replace(NO_PHRASES_RE, 'nao'))
   if (said.length === 0 || said.length > MAX_ANSWER_WORDS) return false
   if (!said.every(w => YES.has(w) || NO.has(w) || FILLER.has(w))) return false
   return said.some(w => NO.has(w)) && said.some(w => CLEAR_YES.has(w))
@@ -148,4 +157,5 @@ export const CONFIRM_PHRASES = [
   'Manda ver.', 'Manda bala.', 'Pode mandar.', 'Pode fazer.', 'Faz isso.', 'Pode seguir.', 'Segue em frente.', 'Vai em frente.',
   'Pode prosseguir.', 'Prossiga.', 'Continua.', 'Pode começar.', 'Bora.', 'Vamos lá.', 'Sim, pode ir.', 'Ok, pode continuar.',
   'Sim, vai.', 'Pode avançar.', 'Confirmo.', 'Autorizado.', 'De acordo.', 'Combinado.', 'Perfeito, pode ir.', 'É pra já.',
+  'Correto.', 'Exatamente.', 'Pois não.', 'Sem dúvida.', 'Pode mandar pro Claude.', 'Afirmativo.', 'Quero sim.',
 ]

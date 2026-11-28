@@ -219,3 +219,36 @@ test('the going-on words never turn a no, a question or a request into a yes', (
     assert.equal(isConfirm(said), false, said)
   }
 })
+
+test('more pt-BR yeses to "ok?" are a yes: formal, slang, grunts, phrases, lone words and a destination', () => {
+  const said = [
+    'Correto.', 'Corretíssimo.', 'Certíssimo.', 'Afirmativo.', 'Certamente.', 'Quero.', 'Opa.', 'Simbora!', 'Partiu.', 'Exactamente.', 'Exacto.',
+    'Ahan.', 'Anham.', 'Unhum.', 'Mhm.', 'Hum.', 'Hum hum.',
+    'Pois não.', 'Sem dúvida.', 'Sem dúvidas.', 'Vai nessa.', 'Quero sim.', 'Por mim, tudo bem.', 'Não tem problema.', 'Não há problema.', 'O.K.', 'O k.',
+    'T.', 'Assim.', 'Isto.', 'Okey.', 'Oki.',
+    'Pode mandar pro Claude.', 'Manda pro Claude.', 'Sim, Ceci, pode mandar pro Claude.',
+  ]
+  for (const s of said) {
+    assert.equal(isConfirm(s), true, s)
+    assert.equal(isDeny(s), false, s)
+    assert.equal(isMixed(s), false, s)
+  }
+})
+
+test('the new yes words never turn a no, a question or a request into a yes', () => {
+  for (const s of ['Não quero.', 'Correto, não.', 'Por que não?', 'Assim não.', 'Quero outra coisa.', 'Isto é um teste longo de verdade.', 'Pois não?', 'T. Vamos falar de outra coisa agora.', 'Assim que puder, me explica o deploy.', 'Não manda pro Claude.']) {
+    assert.equal(isConfirm(s), false, s)
+  }
+  // A no with a new word beside it is a plain no; "correto" is clear enough to make "Correto, não." mixed.
+  for (const s of ['Não quero.', 'Não manda pro Claude.', 'Hum, não.']) assert.equal(isDeny(s), true, s)
+  assert.equal(isMixed('Correto, não.'), true)
+  assert.equal(isDeny('Correto, não.'), false)
+  // "Pois não" and "não tem problema" are yeses, never a no or a mix.
+  for (const s of ['Pois não.', 'Não tem problema.', 'Não há problema.']) {
+    assert.equal(isDeny(s), false, s)
+    assert.equal(isMixed(s), false, s)
+  }
+  // Sending to Claude still reads as a stop only when it is a stop.
+  assert.equal(stopTarget('Para o Claude.'), 'claude')
+  assert.equal(stopTarget('Manda pro Claude.'), null)
+})

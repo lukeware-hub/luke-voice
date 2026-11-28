@@ -1,3 +1,5 @@
+import { isConfirm, isDeny } from './fast-path.js'
+
 // What the ears hand back that the user did not say: no letter or digit at all (a lone "." or
 // "..."), or a phrase Whisper makes up from silence and noise (it learned them from video
 // subtitles). A phrase drops the transcript only when it is the whole of it, so a real sentence
@@ -35,4 +37,12 @@ export function isEcho(text, said, share = 0.7) {
   if (words.length === 0) return false
   const hers = new Set(normalize(said).split(' ').filter(Boolean))
   return words.filter(word => hers.has(word)).length / words.length >= share
+}
+
+// A barge-in to drop as Ceci's echo. While her "ok?" waits (`isAnswer`), a short yes or no is the
+// user's answer even when made of her words: "isso" over "Refino e mando isso para o Claude?" was
+// dropped as her echo, and the user had to say it again once she stopped.
+export function isBargeEcho(text, said, isAnswer = false) {
+  if (isAnswer && (isConfirm(text) || isDeny(text))) return false
+  return isEcho(text, said)
 }

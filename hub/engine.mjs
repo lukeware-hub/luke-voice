@@ -109,6 +109,11 @@ export const ASR_TERMS = [
   'endpoint', 'prompt', 'hook', 'skill', 'plugin', 'script', 'JSON', 'log', 'cache', 'ElevenLabs', 'Whisper', 'Qwen', 'Gemini',
 ]
 export const ASR_GLOSSARY = `Conversa em português do Brasil com a Ceci, uma assistente de programação. Termos comuns: ${ASR_TERMS.join(', ')}.`
+// What the ears are told for the answer to Ceci's "ok?". With the long prompt (the glossary and
+// her last line), a soft one-second "sim" came back as the prompt copied word for word, which the
+// leak cut removed whole: 35 "Pode repetir?" against 96 yeses heard in one day. A short prompt
+// has little to copy, and it names the words an answer is made of.
+export const ASR_ANSWER_PROMPT = 'Resposta curta em português do Brasil a uma pergunta de sim ou não: sim, não, ok, pode, isso, isso mesmo, exatamente, tá bom, beleza, correto, pode mandar.'
 
 // Audio frames allowed for a text (12.5 per second; ~14 characters per second in pt-BR), so a
 // rare generation loop stops after a few seconds instead of babbling for 40. Digits and acronyms
