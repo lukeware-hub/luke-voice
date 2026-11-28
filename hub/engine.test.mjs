@@ -607,3 +607,16 @@ test('digits and acronyms get more audio frames, so a line full of them is not c
   // Same length, but "2026" and "API" are said much longer than they are written.
   assert.ok(maxFrames('Em 2026 a API mudou.') >= maxFrames('Em xxxx a xxx mudou.') + 4 * 5 + 3 * 3)
 })
+
+test('devices are read from a CUDA build of llama-server too', () => {
+  const text = 'ggml_cuda_init: found 1 CUDA devices:\nAvailable devices:\n  CUDA0: NVIDIA GeForce RTX 3060 Ti (8191 MiB, 7000 MiB free)\r\n'
+  assert.deepEqual(parseDevices(text), [{ id: 'CUDA0', name: 'NVIDIA GeForce RTX 3060 Ti', mib: 8191 }])
+})
+
+test('LUKE_VOICE_LLAMA_SERVER uses that llama-server and downloads nothing', async () => {
+  const exe = join(fresh(), 'llama-server')
+  writeFileSync(exe, '')
+  const request = async () => assert.fail('nothing is downloaded')
+  assert.equal(await ensureBinaries({ dir: fresh(), key: 'linux-x64', given: exe, request }), exe)
+  await assert.rejects(ensureBinaries({ dir: fresh(), key: 'linux-x64', given: join(fresh(), 'missing'), request }), /LUKE_VOICE_LLAMA_SERVER/)
+})

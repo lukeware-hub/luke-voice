@@ -1,0 +1,18 @@
+# Only .claude-plugin, hub, window and agent go into the image.
+.git
+.github
+.impeccable
+assets
+hooks
+install
+types
+**/*.test.mjs
+**/*.corpus.mjs
+**/*.snapshot.json
+README.md
+README.pt-BR.md
+INSTALL.md
+CLAUDE.md
+tsconfig.json
+Dockerfile
+.dockerignore

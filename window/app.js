@@ -9,6 +9,7 @@ import {
   createQuietMode,
   createSpeechFilter,
   createVoiceGate,
+  mayCallByItself,
   queueSpeech,
   quoteUntrusted,
   safeKind,
@@ -306,6 +307,8 @@ async function recordMicTest() {
 micTestBtn?.addEventListener('click', () => void recordMicTest())
 
 const params = new URLSearchParams(location.search)
+// Opened quiet (container mode): the call starts only on the Chamar click.
+const canCallByItself = mayCallByItself(params)
 const STALE_WINDOW = 'Esta janela ficou desatualizada. Feche-a e digite /luke-voice window no Claude Code.'
 const KEY_ITEM = 'luke-voice-key'
 
@@ -1079,7 +1082,7 @@ function onNoticeCut(batch) {
 // A finished task with no call running: Ceci starts one and tells it, without being asked.
 // Not while a call is connecting or broken, nor with no window key.
 function callForNews() {
-  if (!conversation && KEY && callState === 'idle') void startCall()
+  if (canCallByItself && !conversation && KEY && callState === 'idle') void startCall()
 }
 
 function onActivity(session, events) {
@@ -1404,7 +1407,7 @@ function connectStream() {
     } else if (message.type === 'focus') {
       focused = message.name
       renderRoster()
-      if (message.startCall) void startCall()
+      if (message.startCall && canCallByItself) void startCall()
     } else if (message.type === 'end') {
       void endCall()
     }
@@ -1494,4 +1497,4 @@ if (KEY) connectStream()
 setInterval(flushActivity, ACTIVITY_FLUSH_MS)
 setInterval(speakWhenQuiet, 500)
 requestAnimationFrame(animate)
-if (params.get('call') === '1') void startCall()
+if (params.get('call') === '1' && canCallByItself) void startCall()

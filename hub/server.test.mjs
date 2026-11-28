@@ -1704,3 +1704,76 @@ test('a voice from the studio appears in /voices and can be chosen; once its fol
     await new Promise(resolve => hub7.close(resolve))
   }
 })
+
+test('container mode: every env var defaults to the plain local hub', async () => {
+  const { containerOptions } = await import('./server.mjs')
+  assert.deepEqual(containerOptions({}), { bind: '127.0.0.1', hosts: [], publicUrl: '', idleExit: true, brainWaitMs: 40_000 })
+  assert.deepEqual(containerOptions({ LUKE_VOICE_BIND: '0.0.0.0', LUKE_VOICE_HOSTS: 'luke-voice:4848, ceci:4848', LUKE_VOICE_PUBLIC_URL: 'http://localhost:9000/', LUKE_VOICE_IDLE_EXIT: '0', LUKE_VOICE_BRAIN_WAIT_MS: '130000' }), {
+    bind: '0.0.0.0',
+    hosts: ['luke-voice:4848', 'ceci:4848'],
+    publicUrl: 'http://localhost:9000',
+    idleExit: false,
+    brainWaitMs: 130_000,
+  })
+})
+
+test('container mode: extra hosts and the public address pass the Host and Origin checks, and the launch URL uses the public address', async () => {
+  const boxed = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: async () => false, vendor: async () => null, hosts: ['luke-voice:4848'], publicUrl: 'http://localhost:9000' })
+  await new Promise(resolve => boxed.listen(0, '127.0.0.1', resolve))
+  const saved = port
+  port = boxed.address().port
+  try {
+    assert.equal((await call('GET', '/health', { host: 'luke-voice:4848', origin: 'http://luke-voice:4848' })).status, 200)
+    assert.equal((await call('GET', '/health', { host: 'localhost:9000', origin: 'http://localhost:9000' })).status, 200)
+    assert.equal((await call('GET', '/health', { host: 'evil.example:4848' })).status, 403)
+    assert.equal((await call('GET', '/vendor/x.js', { host: 'luke-voice:4848', origin: 'http://luke-voice:4848' })).status, 404, 'a window on an extra host may load vendor files')
+    const s = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/box' } })).body
+    const shown = (await call('POST', '/show', { auth: s.token, body: {} })).body
+    assert.equal(shown.isOpened, false)
+    const nonce = /^http:\/\/localhost:9000\/\?n=([\w-]+)$/.exec(shown.url)?.[1]
+    assert.ok(nonce, shown.url)
+    assert.equal((await call('POST', '/launch', { host: 'localhost:9000', body: { nonce }, origin: 'http://localhost:9000' })).status, 200)
+    await call('POST', '/unsubscribe', { auth: s.token })
+  } finally {
+    port = saved
+    boxed.closeAllConnections()
+    boxed.close()
+  }
+})
+
+test('show with quiet hands out a quiet launch URL that never starts the call', async () => {
+  const quiet = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: async () => false })
+  await new Promise(resolve => quiet.listen(0, '127.0.0.1', resolve))
+  const saved = port
+  port = quiet.address().port
+  try {
+    const s = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/quiet' } })).body
+    const { url } = (await call('POST', '/show', { auth: s.token, body: { quiet: true, call: true } })).body
+    assert.match(url, /[?&]n=[\w-]+&quiet=1$/)
+    assert.doesNotMatch(url, /call=1/)
+    await call('POST', '/unsubscribe', { auth: s.token })
+  } finally {
+    port = saved
+    quiet.closeAllConnections()
+    quiet.close()
+  }
+})
+
+test('the brain waits brainWaitMs for the session to think, then gives up', async () => {
+  const slow = createHub({ serviceToken: SERVICE, windowKey: WINDOW, open: () => {}, brainWaitMs: 300 })
+  await new Promise(resolve => slow.listen(0, '127.0.0.1', resolve))
+  const saved = port
+  port = slow.address().port
+  try {
+    const s = (await call('POST', '/subscribe', { auth: SERVICE, body: { cwd: '/repos/slow', version: '0.26.2' } })).body
+    const started = Date.now()
+    const asked = await call('POST', '/brain', { key: WINDOW, body: { kind: 'user', text: 'oi' } })
+    assert.equal(asked.status, 502)
+    assert.ok(Date.now() - started < 5000, 'gave up at brainWaitMs, not at 40 s')
+    await call('POST', '/unsubscribe', { auth: s.token })
+  } finally {
+    port = saved
+    slow.closeAllConnections()
+    slow.close()
+  }
+})
