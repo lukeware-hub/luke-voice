@@ -1333,9 +1333,13 @@ test('the /tts body is the same JSON as before, with the reference fragment made
     const before = JSON.stringify({ input: text, lang: 'pt', stream: true, response_format: 'wav', ...VOICE_SETTINGS, ...(seed === undefined ? {} : { seed }), n_predict: maxFrames(text), ...ref })
     assert.equal(ttsBody(text, seed, fragment), before)
   }
-  // The voice's sampling goes in its bodies (engine.mjs, voiceSettings): Luke's is the shared one, as João's.
+  // The voice's settings go in its bodies (engine.mjs, voiceSettings): Luke's sampling is the shared
+  // one, as João's, and his pt-BR goes as no language (the engine fails on "pt-BR"); Ceci and João keep 'pt'.
   const { voiceSettings } = await import('./engine.mjs')
-  assert.equal(JSON.parse(ttsBody('Oi.', undefined, fragment, voiceSettings('luke'))).temperature, VOICE_SETTINGS.temperature)
+  const luke = JSON.parse(ttsBody('Oi.', undefined, fragment, voiceSettings('luke')))
+  assert.equal(luke.temperature, VOICE_SETTINGS.temperature)
+  assert.equal('lang' in luke, false)
+  for (const persona of ['ceci', 'joao']) assert.equal(JSON.parse(ttsBody('Oi.', undefined, fragment, voiceSettings(persona))).lang, 'pt')
 })
 
 test('a kept question take belongs to the voice model files by content, not only by name', async () => {

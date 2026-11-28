@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url'
 
 import { conversationToken, credits, ensureAgent, outOfCreditsMessage } from './agent.mjs'
 import { PORT, isMainModule, stateDir, stateFile } from './paths.mjs'
-import { ASR_GLOSSARY, SERVICES, VOICE_SETTINGS, voiceSettings, createEngine, maxFrames, prepareEngine, profileReady, readProfile } from './engine.mjs'
+import { ASR_GLOSSARY, SERVICES, VOICE_SETTINGS, engineLang, voiceSettings, createEngine, maxFrames, prepareEngine, profileReady, readProfile } from './engine.mjs'
 import { pickMacVoice, sayWav } from './mac-voice.mjs'
 import { asPersona, personaFor, personaInfo, personasNow, voiceRegistry } from './persona.mjs'
 import { MODELS, ensureModel } from './models.mjs'
@@ -116,8 +116,12 @@ const newSecret = () => randomBytes(24).toString('base64url')
 // One /tts request body for Ceci's voice: the settings, then the reference as a pre-made JSON
 // fragment (`"speaker_ref_b64":"...","speaker_ref_text":"..."`). Byte for byte what
 // JSON.stringify of the whole object gave.
+// The voice's language (settings.lang, 'pt' unless set) goes as the engine knows it (engineLang):
+// Luke's 'pt-BR' is sent as no language.
 export function ttsBody(text, seed, refJson, settings = VOICE_SETTINGS) {
-  const head = JSON.stringify({ input: text, lang: 'pt', stream: true, response_format: 'wav', ...settings, ...(seed === undefined ? {} : { seed }), n_predict: maxFrames(text) })
+  const { lang, ...sampling } = settings
+  const sent = engineLang(lang)
+  const head = JSON.stringify({ input: text, ...(sent ? { lang: sent } : {}), stream: true, response_format: 'wav', ...sampling, ...(seed === undefined ? {} : { seed }), n_predict: maxFrames(text) })
   return `${head.slice(0, -1)},${refJson}}`
 }
 
