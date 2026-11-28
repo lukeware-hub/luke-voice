@@ -53,7 +53,9 @@ const ECHO_MARGIN = 2
 const TOOL_OK = /^(Started|Claude started|Added as a note|Queued|Stopped|Sent|Deleted)/i
 
 // The acknowledgements, made once per voice and kept for the page: a second call in the same window
-// plays them with no new synthesis. voice ('native', or the browser model) -> text -> audio.
+// plays them with no new synthesis. voice (engine and persona) -> text -> audio. The persona is part
+// of the key: the native voice clones whoever answers, so Ceci's "Certo." kept from an earlier call
+// must never play in Luke's call after the user picked Luke in Configurações.
 const ackCache = new Map()
 
 // One worker for the whole page: the models stay loaded between calls.
@@ -355,7 +357,7 @@ export async function startSession({
   const joiner = createTurnJoiner()
   let turnNow = null
   const isStale = () => turnNow !== null && !joiner.isCurrent(turnNow)
-  const ackVoice = isNative ? 'native' : isMacVoice ? `mac:${config.macVoice}` : `browser:${voiceInfo?.tts ?? ''}`
+  const ackVoice = `${isNative ? 'native' : isMacVoice ? `mac:${config.macVoice}` : `browser:${voiceInfo?.tts ?? ''}:${kokoroVoice}`}|${config.persona?.key ?? herName}`
   if (!ackCache.has(ackVoice)) ackCache.set(ackVoice, new Map())
   const ackAudio = ackCache.get(ackVoice)
   let lastAck = ''
@@ -498,7 +500,7 @@ export async function startSession({
     return node
   }
 
-  // The native voice says a reply chunk by chunk: a whole sentence at a time (speech-text.js). The
+  // The native voice says a reply chunk by chunk: whole sentences packed together (speech-text.js). The
   // engine sends a chunk's audio in one burst at its end (measured: streaming brought it no sooner),
   // so each chunk is read whole. Cut at every comma instead, each piece came back with
   // the falling end of a sentence and a fixed pause after it, and the owner heard Ceci as robotic;

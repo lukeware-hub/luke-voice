@@ -86,8 +86,29 @@ export function endRise(samples, fs) {
 
 export const isNaturalRise = rise => rise !== null && rise >= NATURAL_RISE[0] && rise <= NATURAL_RISE[1]
 
-// The take to keep when none rose naturally: the one nearest the aim, not past +10 (a squeak).
+// The median pitch (Hz) of a voice's speech, or null when there is too little voice to tell.
+export function medianPitch(samples, fs) {
+  const f = pitchTrack(samples, fs).filter(Boolean).sort((a, b) => a - b)
+  return f.length < 15 ? null : f[f.length >> 1]
+}
+
+// How far a take's voice sits from the reference voice, in semitones. A take made with another seed
+// can come out in another voice, and its end then "rises" because the whole voice jumped up: a male
+// voice confirming an order ("Refino e mando isso para o Claude, ok?") was heard as a woman's. Such a
+// take is never served.
+export const MAX_VOICE_SHIFT = 3
+export function voiceShift(samples, fs, voicePitch) {
+  if (!voicePitch) return 0
+  const pitch = medianPitch(samples, fs)
+  return pitch === null ? 0 : 12 * Math.log2(pitch / voicePitch)
+}
+export const isOffVoice = take => Math.abs(take?.shift ?? 0) > MAX_VOICE_SHIFT
+
+// The take to keep when none rose naturally: the one nearest the aim, not past +10 (a squeak), in the
+// voice that was cloned. Null when every take left the voice: the line is then said live.
 export function bestTake(takes) {
+  takes = takes.filter(t => !isOffVoice(t))
+  if (!takes.length) return null
   const fair = takes.filter(t => t.rise !== null && t.rise <= 10)
   if (!fair.length) return takes[0]
   return fair.reduce((a, b) => (Math.abs(b.rise - TARGET_RISE) < Math.abs(a.rise - TARGET_RISE) ? b : a))
@@ -119,6 +140,8 @@ export function wavSamples(buffer) {
 
 // Questions Ceci asks often, improved in the background once the engine is up.
 export const COMMON_QUESTIONS = ['Ok?', 'Começo, ok?', 'Quer que eu faça mais alguma coisa?', 'Mais alguma coisa?', 'Tudo bem?', 'Pode ser?', 'Quer que eu continue?']
+// Part of every kept take's key: 2 since takes in another voice are never served (voiceShift).
+const TAKES_VERSION = 2
 // Seeds tried for a question, after Ceci's own (the take said live).
 const MORE_SEEDS = [1, 2, 3, 4, 5, 6, 7, 8].map(s => s + 100)
 // At most this many takes per question in all. Each take holds the voice's single slot on the GPU
@@ -140,7 +163,8 @@ export const takeMs = text => 500 + 20 * String(text).length
 // more made only in time nobody waits for: while the line before still plays (`budget`), or in the
 // background when the engine is idle. Any live line stops the background search at once.
 // `say(text, seed, signal)` makes one take and resolves to its WAV (or null).
-export function createQuestionTakes({ say, dir, voiceKey, log = () => {}, now = () => Date.now(), idleMs = IDLE_MS, maxTakes = MAX_TAKES, retryMs = RETRY_MS, maxRetryMs = MAX_RETRY_MS }) {
+// `voicePitch`: the reference voice's median pitch (medianPitch), so a take in another voice is never served.
+export function createQuestionTakes({ say, dir, voiceKey, voicePitch = null, log = () => {}, now = () => Date.now(), idleMs = IDLE_MS, maxTakes = MAX_TAKES, retryMs = RETRY_MS, maxRetryMs = MAX_RETRY_MS }) {
   const memory = new Map() // key -> { text, takes: [{ seed, rise }], best }
   const queue = []
   let lastLive = 0
@@ -153,7 +177,8 @@ export function createQuestionTakes({ say, dir, voiceKey, log = () => {}, now = 
     failures = 0
     retryAt = 0
   }
-  const keyOf = text => createHash('sha1').update(`${voiceKey}\n${text}`).digest('hex').slice(0, 20)
+  // TAKES_VERSION: takes picked before the voice check are never served again.
+  const keyOf = text => createHash('sha1').update(`${TAKES_VERSION}\n${voiceKey}\n${text}`).digest('hex').slice(0, 20)
   const entryOf = text => {
     const key = keyOf(text)
     if (!memory.has(key)) {
@@ -183,11 +208,14 @@ export function createQuestionTakes({ say, dir, voiceKey, log = () => {}, now = 
     const { samples, rate } = wavSamples(wav)
     if (samples.length === 0) return false
     const rise = endRise(samples, rate)
-    entry.takes.push({ seed, rise })
-    const best = isNaturalRise(entry.best?.rise) ? entry.best : bestTake([...(entry.best ? [entry.best] : []), { seed, rise }])
+    const shift = Math.round(voiceShift(samples, rate, voicePitch) * 10) / 10
+    const made = { seed, rise, shift }
+    if (isOffVoice(made)) log(`question takes: seed ${seed} of "${text.slice(0, 40)}" left the voice (${shift} semitones), not served`)
+    entry.takes.push(made)
+    const best = isNaturalRise(entry.best?.rise) ? entry.best : bestTake([...(entry.best ? [entry.best] : []), made])
     try {
       mkdirSync(dir, { recursive: true })
-      if (best.seed === seed) writeFileSync(join(dir, `${key}.wav`), wav)
+      if (best?.seed === seed) writeFileSync(join(dir, `${key}.wav`), wav)
       entry.best = best
       writeFileSync(join(dir, `${key}.json`), JSON.stringify(entry))
       prune()

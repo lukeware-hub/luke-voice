@@ -16,7 +16,7 @@ import { pickMacVoice, sayWav } from './mac-voice.mjs'
 import { asPersona, personaFor, personaInfo, personasNow, voiceRegistry } from './persona.mjs'
 import { MODELS, ensureModel } from './models.mjs'
 import { createNotices } from './notices.mjs'
-import { COMMON_QUESTIONS, MAX_PICK_CHARS, createQuestionTakes, isYesNoQuestion } from './question-pick.mjs'
+import { COMMON_QUESTIONS, MAX_PICK_CHARS, createQuestionTakes, isYesNoQuestion, medianPitch, wavSamples } from './question-pick.mjs'
 import { route as routeUtterance } from './router.mjs'
 import { asrWords, withoutPromptLeak } from './asr-leak.mjs'
 import { splitWav } from './asr-split.mjs'
@@ -125,6 +125,11 @@ export function ttsBody(text, seed, refJson) {
 // republished model never replays old takes), the sampling and the reference clip.
 export const voiceKey = (refB64, refText) =>
   [...SERVICES.tts.models.map(path => `${path}@${MODELS[path]?.sha256 ?? ''}`), JSON.stringify(VOICE_SETTINGS), createHash('sha1').update(refB64 + refText).digest('hex')].join('\n')
+// The median pitch (Hz) of a reference clip given as base64 WAV, or null when it cannot be told.
+export function refPitch(refB64) {
+  const { samples, rate } = wavSamples(Buffer.from(String(refB64 ?? ''), 'base64'))
+  return samples.length ? medianPitch(samples, rate) : null
+}
 // A short, one-way tag of the key so health can show which key is in use without exposing it.
 const keyId = key => (key ? createHash('sha256').update(key).digest('hex').slice(0, 8) : null)
 
@@ -1123,6 +1128,8 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       dir: questionsDir,
       // A take belongs to one voice: the model, the sampling and the reference clip.
       voiceKey: voiceKey(voiceRefB64, voiceRefText),
+      // The reference voice's pitch: a take in another voice (another register) is never served.
+      voicePitch: refPitch(voiceRefB64),
       log,
       say: async (text, seed, signal) => {
         const url = engine?.url('tts')

@@ -1,13 +1,13 @@
 // Test audio for the question pick: synthetic voiced takes and streamed WAVs.
 export const FS = 24_000
 
-// A voiced take: a harmonic tone at 220 Hz that glides up `semitones` over its last 35%.
-export function take(seconds = 1.5, semitones = 0) {
+// A voiced take: a harmonic tone at `hz` (220 Hz) that glides up `semitones` over its last 35%.
+export function take(seconds = 1.5, semitones = 0, hz = 220) {
   const x = new Float32Array(Math.round(FS * seconds))
   let phase = 0
   for (let i = 0; i < x.length; i++) {
     const k = Math.max(0, (i / x.length - 0.65) / 0.35)
-    phase += (2 * Math.PI * 220 * 2 ** ((semitones * k) / 12)) / FS
+    phase += (2 * Math.PI * hz * 2 ** ((semitones * k) / 12)) / FS
     x[i] = 0.3 * Math.sin(phase) + 0.15 * Math.sin(2 * phase) + 0.08 * Math.sin(3 * phase)
   }
   return x

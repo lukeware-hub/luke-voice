@@ -2,9 +2,7 @@
  {
   "text": "Oi. Tudo bem? Sim!",
   "native": [
-   "Oi.",
-   "Tudo bem?",
-   "Sim!"
+   "Oi. Tudo bem? Sim!"
   ],
   "browser": [
    "Oi.",
@@ -15,8 +13,7 @@
  {
   "text": "Terminei a tarefa no projeto de autenticação, e todos os testes passaram sem nenhum erro. Pode seguir.",
   "native": [
-   "Terminei a tarefa no projeto de autenticação,",
-   "e todos os testes passaram sem nenhum erro.",
+   "Terminei a tarefa no projeto de autenticação, e todos os testes passaram sem nenhum erro.",
    "Pode seguir."
   ],
   "browser": [
@@ -37,8 +34,7 @@
  {
   "text": "O TOKEN fica no cache, e o Backend chama o endpoint.",
   "native": [
-   "O TOKEN fica no quéche,",
-   "e o Back End chama o End Point."
+   "O TOKEN fica no quéche, e o Back End chama o End Point."
   ],
   "browser": [
    "O tôquen fica no cache, e o béquend chama o endpoint."
@@ -56,8 +52,7 @@
  {
   "text": "Rodei os hooks, fiz o rebase e atualizei o changelog.",
   "native": [
-   "Rodei os ruks,",
-   "fiz o rebase e atualizei o tchêindj log."
+   "Rodei os ruks, fiz o rebase e atualizei o tchêindj log."
   ],
   "browser": [
    "Rodei os ruks, fiz o rebase e atualizei o changelog."
@@ -120,8 +115,7 @@
  {
   "text": "Certo, vou verificar os testes de login no repositório api agora.",
   "native": [
-   "Certo,",
-   "vou verificar os testes de login no repositório api agora."
+   "Certo, vou verificar os testes de login no repositório api agora."
   ],
   "browser": [
    "Certo, vou verificar os testes de lóguin no repositório a pê i agora."
@@ -130,8 +124,7 @@
  {
   "text": "Você quer que eu verifique os testes de login no repositório api? Posso?",
   "native": [
-   "Você quer que eu verifique os testes de login no repositório api?",
-   "Posso?"
+   "Você quer que eu verifique os testes de login no repositório api? Posso?"
   ],
   "browser": [
    "Você quer que eu verifique os testes de lóguin no repositório a pê i?",
@@ -168,9 +161,7 @@
  {
   "text": "Oi! Eu sou a Ceci. O que vamos fazer hoje?",
   "native": [
-   "Oi!",
-   "Eu sou a Ceci.",
-   "O que vamos fazer hoje?"
+   "Oi! Eu sou a Ceci. O que vamos fazer hoje?"
   ],
   "browser": [
    "Oi!",
@@ -181,8 +172,7 @@
  {
   "text": "Não consegui pensar numa resposta agora. Tente de novo.",
   "native": [
-   "Não consegui pensar numa resposta agora.",
-   "Tente de novo."
+   "Não consegui pensar numa resposta agora. Tente de novo."
   ],
   "browser": [
    "Não consegui pensar numa resposta agora.",
@@ -264,8 +254,7 @@
  {
   "text": "Pronto, os testes da API passaram e eu já abri o pull request para você revisar.",
   "native": [
-   "Pronto,",
-   "os testes da API passaram e eu já abri o pull request para você revisar."
+   "Pronto, os testes da API passaram e eu já abri o pull request para você revisar."
   ],
   "browser": [
    "Pronto,",
@@ -275,8 +264,7 @@
  {
   "text": "A Lagoa de Alcaçuz, em Natal, se encaixa nos requisitos.",
   "native": [
-   "A Lagoa de Alcaçuz,",
-   "em Natal, se encaixa nos requisitos."
+   "A Lagoa de Alcaçuz, em Natal, se encaixa nos requisitos."
   ],
   "browser": [
    "A Lagoa de Alcaçuz, em Natal, se encaixa nos requisitos."
@@ -285,8 +273,7 @@
  {
   "text": "Verifica os testes da API e me fala o resultado, por favor.",
   "native": [
-   "Verifica os testes da API e me fala o resultado,",
-   "por favor."
+   "Verifica os testes da API e me fala o resultado, por favor."
   ],
   "browser": [
    "Verifica os testes da a pê i e me fala o resultado, por favor."
@@ -313,8 +300,7 @@
  {
   "text": "Mais alguma coisa? Estou aqui se precisar.",
   "native": [
-   "Mais alguma coisa?",
-   "Estou aqui se precisar."
+   "Mais alguma coisa? Estou aqui se precisar."
   ],
   "browser": [
    "Mais alguma coisa?",
@@ -324,8 +310,7 @@
  {
   "text": "Tudo bem? Pode ser?",
   "native": [
-   "Tudo bem?",
-   "Pode ser?"
+   "Tudo bem? Pode ser?"
   ],
   "browser": [
    "Tudo bem?",
@@ -335,8 +320,7 @@
  {
   "text": "Quer que eu continue? Ainda faltam alguns arquivos.",
   "native": [
-   "Quer que eu continue?",
-   "Ainda faltam alguns arquivos."
+   "Quer que eu continue? Ainda faltam alguns arquivos."
   ],
   "browser": [
    "Quer que eu continue?",
@@ -346,8 +330,7 @@
  {
   "text": "O Claude ainda está trabalhando na sessão do site, e deve terminar logo.",
   "native": [
-   "O Claude ainda está trabalhando na sessão do site,",
-   "e deve terminar logo."
+   "O Claude ainda está trabalhando na sessão do site, e deve terminar logo."
   ],
   "browser": [
    "O clód ainda está trabalhando na sessão do sáite,",
@@ -357,8 +340,7 @@
  {
   "text": "Nenhuma sessão do Claude está ligada. Ligue o luke-voice no Claude Code e me chame de novo.",
   "native": [
-   "Nenhuma sessão do Claude está ligada.",
-   "Ligue o Luke Vóiss no Clód Code, e me chame de novo."
+   "Nenhuma sessão do Claude está ligada. Ligue o Luke Vóiss no Clód Code, e me chame de novo."
   ],
   "browser": [
    "Nenhuma sessão do clód está ligada.",
@@ -379,9 +361,7 @@
  {
   "text": "Hum… deixa eu pensar. Acho que o melhor é começar pelo backend.",
   "native": [
-   "Hum…",
-   "deixa eu pensar.",
-   "Acho que o melhor é começar pelo Back End."
+   "Hum… deixa eu pensar. Acho que o melhor é começar pelo Back End."
   ],
   "browser": [
    "Hum…",
@@ -392,8 +372,7 @@
  {
   "text": "Que bom! Então vou mandar para o Claude agora mesmo.",
   "native": [
-   "Que bom!",
-   "Então vou mandar para o Claude agora mesmo."
+   "Que bom! Então vou mandar para o Claude agora mesmo."
   ],
   "browser": [
    "Que bom!",
@@ -403,8 +382,8 @@
  {
   "text": "Olha, isso pode demorar um pouco, porque o projeto é grande e tem muitas dependências antigas que precisam ser atualizadas com cuidado, uma por uma, sem quebrar nada do que já funciona hoje em produção para os usuários.",
   "native": [
-   "Olha,",
-   "isso pode demorar um pouco, porque o projeto é grande e tem muitas dependências antigas que precisam ser atualizadas com cuidado, uma por uma, sem quebrar nada do que já funciona hoje em produção para os usuários."
+   "Olha, isso pode demorar um pouco,",
+   "porque o projeto é grande e tem muitas dependências antigas que precisam ser atualizadas com cuidado, uma por uma, sem quebrar nada do que já funciona hoje em produção para os usuários."
   ],
   "browser": [
    "Olha,",
@@ -415,8 +394,7 @@
   "text": "Ele perguntou se pode apagar a pasta antiga. Eu disse que sim, mas só depois de fazer um backup completo de tudo. Tudo certo?",
   "native": [
    "Ele perguntou se pode apagar a pasta antiga.",
-   "Eu disse que sim, mas só depois de fazer um backup completo de tudo.",
-   "Tudo certo?"
+   "Eu disse que sim, mas só depois de fazer um backup completo de tudo. Tudo certo?"
   ],
   "browser": [
    "Ele perguntou se pode apagar a pasta antiga.",
@@ -427,8 +405,7 @@
  {
   "text": "Revisei o código, deixei alguns comentários e aprovei o pull request. Agora falta só o deploy, que eu posso fazer quando você quiser.",
   "native": [
-   "Revisei o código,",
-   "deixei alguns comentários e aprovei o pull request.",
+   "Revisei o código, deixei alguns comentários e aprovei o pull request.",
    "Agora falta só o deploy, que eu posso fazer quando você quiser."
   ],
   "browser": [
@@ -450,8 +427,7 @@
  {
   "text": "Bom dia! Hoje temos três tarefas abertas, duas revisões pendentes e uma reunião à tarde.",
   "native": [
-   "Bom dia!!",
-   "Hoje temos três tarefas abertas, duas revisões pendentes e uma reunião à tarde."
+   "Bom dia!! Hoje temos três tarefas abertas, duas revisões pendentes e uma reunião à tarde."
   ],
   "browser": [
    "Bom dia!",
@@ -461,8 +437,7 @@
  {
   "text": "Não entendi direito. Você pode repetir, por favor?",
   "native": [
-   "Não entendi direito.",
-   "Você pode repetir, por favor?"
+   "Não entendi direito. Você pode repetir, por favor?"
   ],
   "browser": [
    "Não entendi direito.",
@@ -472,8 +447,7 @@
  {
   "text": "Claro, posso fazer isso. Quer que eu comece pela parte do login ou pela página inicial?",
   "native": [
-   "Claaro, posso fazer isso.",
-   "Quer que eu comece pela parte do login ou pela página inicial?"
+   "Claaro, posso fazer isso. Quer que eu comece pela parte do login ou pela página inicial?"
   ],
   "browser": [
    "Claro, posso fazer isso.",
@@ -494,8 +468,7 @@
  {
   "text": "Pronto! Terminei.",
   "native": [
-   "Pronto!",
-   "Terminei."
+   "Pronto! Terminei."
   ],
   "browser": [
    "Pronto!",
@@ -505,8 +478,7 @@
  {
   "text": "O GitHub está fora do ar agora, então o push vai ter que esperar um pouco.",
   "native": [
-   "O GitHub está fora do ar agora,",
-   "então o push vai ter que esperar um pouco."
+   "O GitHub está fora do ar agora, então o push vai ter que esperar um pouco."
   ],
   "browser": [
    "O guít rãb está fora do ar agora,",
@@ -516,8 +488,7 @@
  {
   "text": "Sinceramente, eu não recomendo mexer nisso agora; é melhor esperar a próxima versão.",
   "native": [
-   "Sinceramente,",
-   "eu não recomendo mexer nisso agora; é melhor esperar a próxima versão."
+   "Sinceramente, eu não recomendo mexer nisso agora; é melhor esperar a próxima versão."
   ],
   "browser": [
    "Sinceramente,",
@@ -527,8 +498,7 @@
  {
   "text": "Está tudo funcionando, inclusive o email de confirmação e o login com o Google.",
   "native": [
-   "Está tudo funcionando,",
-   "inclusive o email de confirmação e o login com o Google."
+   "Está tudo funcionando, inclusive o email de confirmação e o login com o Google."
   ],
   "browser": [
    "Está tudo funcionando,",

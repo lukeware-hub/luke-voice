@@ -92,9 +92,40 @@ const NATIVE_RE = new RegExp(
 const MAX_CHUNK = 220
 // The first chunk is short: on a CPU the voice takes ~0.7 s per second of audio, so the first sound comes sooner.
 const FIRST_CHUNK = 70
-// The native voice makes a whole chunk before sending it (~0.4 s per second of speech plus ~0.7 s
-// for the reference): a first chunk of one short clause makes her start sooner.
-const FIRST_CHUNK_NATIVE = 40
+// The native voice (Qwen3-TTS) clones the speaker again for every chunk it makes, and a short chunk
+// ("Boa noite!", "Tudo bem?") gives the clone too little to hold on to: its pitch, timbre and
+// accent drift from one chunk to the next. Said sentence by sentence, the greeting "Boa noite! Tudo
+// bem? Eu sou o Luke. O que a gente vai fazer hoje?" changed voice three times, once per sentence,
+// with the accent wandering between regions. So the native voice packs whole sentences into one
+// chunk: up to FIRST_PACK_NATIVE characters for the first one (a greeting and most short replies
+// are one chunk, said in one voice; ~1.5 s to make on a mid-range GPU) and MAX_CHUNK after it.
+const FIRST_PACK_NATIVE = 90
+// A first sentence longer than FIRST_PACK_NATIVE still starts on its first clause, so the first
+// audio comes sooner, but only a clause long enough to keep the voice (never "Certo," alone).
+const MIN_CLAUSE_NATIVE = 30
+
+// The native voice's chunks: sentences packed together (see FIRST_PACK_NATIVE), never cut mid-phrase.
+export function nativeChunks(text) {
+  const pieces = chunks(text, MAX_CHUNK)
+  const first = pieces[0]
+  let isFirstCut = false
+  if (first && first.length > FIRST_PACK_NATIVE && !first.endsWith('?')) {
+    const comma = first.indexOf(', ', MIN_CLAUSE_NATIVE)
+    if (comma >= MIN_CLAUSE_NATIVE && comma <= FIRST_PACK_NATIVE) {
+      pieces.splice(0, 1, first.slice(0, comma + 1), first.slice(comma + 1).trim())
+      isFirstCut = true
+    }
+  }
+  const out = []
+  for (const piece of pieces) {
+    const last = out.length - 1
+    const limit = last === 0 ? FIRST_PACK_NATIVE : MAX_CHUNK
+    const isClosed = last === 0 && isFirstCut
+    if (last >= 0 && !isClosed && out[last].length + 1 + piece.length <= limit) out[last] = `${out[last]} ${piece}`
+    else out.push(piece)
+  }
+  return out
+}
 
 // Emoji and pictographs (with their joiners, skin tones, variation selectors and flags): never said.
 const EMOJI = /[ \t]*[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}\u{1F3FB}-\u{1F3FF}\u{200D}\u{FE0E}\u{FE0F}\u{20E3}]+(?=(.?))/gu
@@ -348,5 +379,5 @@ export function chunks(text, max = MAX_CHUNK, first = max) {
 // knows most of them and gets only its own short list.
 export function speechChunks(text, { isNative = false } = {}) {
   const spoken = spokenForms(plainText(text))
-  return isNative ? chunks(respellNative(spoken), MAX_CHUNK, FIRST_CHUNK_NATIVE) : chunks(respell(spoken), MAX_CHUNK, FIRST_CHUNK)
+  return isNative ? nativeChunks(respellNative(spoken)) : chunks(respell(spoken), MAX_CHUNK, FIRST_CHUNK)
 }

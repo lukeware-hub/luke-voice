@@ -556,7 +556,7 @@ test("Ceci's, Luke's and João's voices come with every install: the same clips,
   // both. Changing either changes that voice on every machine, so this test must be updated on purpose.
   assert.equal(sha('agent/ceci-voice.wav'), 'd4009e2a9855e8f511c65b27736896488ede82c3fcf65a22ef0f688547a3dca5')
   assert.equal(sha('agent/ceci-voice.txt'), '37f91de2f871d60e54eb1652f46b13498f2032a7e6dc9f1de504a2689ae95927')
-  assert.equal(sha('agent/luke-voice.wav'), '9383ea3a6c99dc04050495b0c68f658949071b3319245511f6336a0b16bbb340')
+  assert.equal(sha('agent/luke-voice.wav'), 'ce4101ac7a18168b9ddd5c0755b575f7e2d16e041d44ff9fb76e6b9c9388c99b')
   assert.equal(sha('agent/luke-voice.txt'), '1d0bec3d6efd6a822af792fc2ccb6c260b8e06f04035e992f8508e5d7326a1f8')
   assert.equal(sha('agent/joao-voice.wav'), '10671df6532f6df4cca2af76bcc25f5ca86c0853d380b457e0712fcf61d1b76c')
   assert.equal(sha('agent/joao-voice.txt'), '2c9d1ae5c3977aaab360a6684df8e61395f24a4929870768f5b6853c110e4800')

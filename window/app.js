@@ -69,11 +69,17 @@ let welcomePlayback = null
 // The picked voice reads WELCOME_LINE through the natural voice (the hub's /tts, which speaks with
 // the voice just chosen). Not during a call: its sound would go over the conversation.
 // -> 'playing' | 'call' | 'unavailable' (no natural voice here) | 'replaced' (a newer pick won).
-async function sayWelcome() {
+// Stops the welcome sample and its request. A call starting stops it too: a sample still being made
+// or still playing went on over the call's greeting, two voices at once.
+function stopWelcome() {
   welcomePlayback?.abort.abort()
   welcomePlayback?.audio?.pause()
   welcomePlayback = null
-  if (conversation || callState !== 'idle') return 'call'
+}
+const isInCall = () => Boolean(conversation) || callState !== 'idle'
+async function sayWelcome() {
+  stopWelcome()
+  if (isInCall()) return 'call'
   const playback = { abort: new AbortController(), audio: null }
   welcomePlayback = playback
   const res = await fetch('/tts', {
@@ -88,6 +94,10 @@ async function sayWelcome() {
   const blob = await res.blob().catch(() => null)
   if (welcomePlayback !== playback) return 'replaced'
   if (!blob) return 'unavailable'
+  if (isInCall()) {
+    stopWelcome()
+    return 'call'
+  }
   const url = URL.createObjectURL(blob)
   playback.audio = new Audio(url)
   playback.audio.addEventListener('ended', () => URL.revokeObjectURL(url), { once: true })
@@ -1224,6 +1234,7 @@ async function voiceEngine() {
 
 async function startCall() {
   if (conversation || callState === 'connecting') return
+  stopWelcome()
   const generation = ++callGeneration
   const isCurrent = () => generation === callGeneration
   setCall('connecting')
