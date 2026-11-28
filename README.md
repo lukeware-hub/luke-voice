@@ -216,6 +216,19 @@ Ceci never forgets a conversation. Every call is recorded whole in one memory pe
 - **Free voice:** the audio never leaves your computer. Only the text of what you said, a short summary of what happens in the session, and finished task results go to Claude Sonnet on your Claude account, which decides what Ceci says. For session summaries, the last 40% of the session's conversation also goes to Claude Haiku and Claude Sonnet on your Claude account. The model files are downloaded once (from Hugging Face and GitHub): at install or setup, or on the first call if neither ran. After that, nothing is downloaded.
 - **ElevenLabs voice:** your voice and what happens in the session (your prompts and Claude's tool calls) go to your agent at ElevenLabs.
 
+## Container mode
+
+The hub can run in a Linux container (`Dockerfile`, targets `light`, `cuda` and `vulkan`; images `ghcr.io/lukeware-hub/luke-voice:<version>-light|-cuda|-vulkan`), where another app is the session client: it subscribes with the service token, pulls `GET /inbox`, answers `think` and acks, and opens the call window in a browser tab from the `url` that `POST /show` returns. Every setting below keeps today's behavior when it is not set.
+
+- `LUKE_VOICE_BIND`: the address the hub listens on, `127.0.0.1` by default (`0.0.0.0` in the images).
+- `LUKE_VOICE_HOSTS`: extra `host:port` values, comma-separated, the hub accepts as Host and Origin, such as `luke-voice:4848`.
+- `LUKE_VOICE_PUBLIC_URL`: the address the browser reaches the hub at, used for the launch URL, such as `http://localhost:4848`.
+- `LUKE_VOICE_IDLE_EXIT`: `0` keeps the hub running when no one has used it for 10 minutes.
+- `LUKE_VOICE_BRAIN_WAIT_MS`: how long the hub waits for the session to answer `think`, 40000 by default (130000 in the images).
+- `LUKE_VOICE_LLAMA_SERVER`: the path to a llama-server already installed, used instead of downloading one (`/app/llama-server` in the `cuda` and `vulkan` images).
+- `CECI_MEMORY`: `0` turns Ceci's memory off, so nothing is written and the Memória tab stays empty.
+- `POST /show` with `{"quiet": true}`: the window opened from that launch URL never starts a call by itself; the call starts when the user clicks **Chamar**.
+
 ## If something does not work
 
 | What you see | What to do |

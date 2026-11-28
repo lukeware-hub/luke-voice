@@ -198,7 +198,12 @@ const tarCommand = () => (process.platform === 'win32' ? join(process.env.System
 // The llama.cpp build for this platform, downloaded, checked and unpacked once. Returns llama-server's path.
 // The hub and setup.mjs may unpack at the same time: each unpacks into a folder of its own and
 // moves it in whole, with its marker, so neither ever sees (or writes into) a half-unpacked build.
-export async function ensureBinaries({ dir = engineDir(), key = platformKey(), request, onProgress, run = runFile } = {}) {
+// LUKE_VOICE_LLAMA_SERVER names a llama-server already installed (a Docker image): nothing is downloaded.
+export async function ensureBinaries({ dir = engineDir(), key = platformKey(), request, onProgress, run = runFile, given = process.env.LUKE_VOICE_LLAMA_SERVER ?? '' } = {}) {
+  if (given) {
+    if (!existsSync(given)) throw new Error(`LUKE_VOICE_LLAMA_SERVER points to a missing file: ${given}`)
+    return given
+  }
   const entry = BINARIES[key]
   if (!entry) throw new Error(`No native engine for ${process.platform}-${process.arch}.`)
   const target = join(dir, LLAMA_BUILD)

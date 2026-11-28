@@ -179,6 +179,9 @@ export function queueSpeech(pending, item) {
   return true
 }
 
+// A window opened with quiet=1 starts a call only when the user clicks Chamar.
+export const mayCallByItself = params => params.get('quiet') !== '1'
+
 export const REFUSED =
   'Refused: the user has not spoken since the last automatic update. Ask the user out loud and wait for a clear yes before calling this tool.'
 

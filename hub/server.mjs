@@ -122,6 +122,18 @@ const newSecret = () => randomBytes(24).toString('base64url')
 // JSON.stringify of the whole object gave.
 // The voice's language (settings.lang, 'pt' unless set) goes as the engine knows it (engineLang):
 // Luke's 'pt-BR' is sent as no language.
+// Container mode: how the hub binds, which hosts and public address it answers, whether it exits
+// when idle and how long a session may think. Each default is the plain local hub.
+export function containerOptions(env = process.env) {
+  return {
+    bind: env.LUKE_VOICE_BIND || '127.0.0.1',
+    hosts: String(env.LUKE_VOICE_HOSTS ?? '').split(',').map(host => host.trim()).filter(Boolean),
+    publicUrl: String(env.LUKE_VOICE_PUBLIC_URL ?? '').replace(/\/+$/, ''),
+    idleExit: env.LUKE_VOICE_IDLE_EXIT !== '0',
+    brainWaitMs: Number(env.LUKE_VOICE_BRAIN_WAIT_MS) || BRAIN_WAIT_MS,
+  }
+}
+
 export function ttsBody(text, seed, refJson, settings = VOICE_SETTINGS) {
   const { lang, ...sampling } = settings
   const sent = engineLang(lang)
@@ -390,7 +402,9 @@ export function createEngineRunner({ engine, setDownload, warmQuestions = () => 
   }
 }
 
-export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, engine = null, profile = () => null, voiceRef = null, onLocalVoice = () => {}, onSetup = () => ({ started: false }), engineState = () => 'off', macVoice = () => null, macVoiceGender = () => null, macVoiceSiri = () => null, macSay = sayWav, platform = process.platform, log = () => {}, onShutdown = () => process.exit(0), questionsDir = join(stateDir(), 'cache', 'questions'), staleMs = STALE_SESSION_MS, sweepMs = 10_000, sttWaitMs = STT_WAIT_MS, clock = Date.now, noticesFile = stateFile('notices.json'), reopenMs = REOPEN_FOR_NOTICE_MS, windowLog = stateFile('window.log'), memory = null, graph = null, summarizeEveryMs = 120_000, endedFile = stateFile('ended.json'), ackWaitMs = ACK_WAIT_MS, maxGone = MAX_GONE }) {
+export function createHub({ serviceToken, windowKey, apiKey = '', provider = '', root = ROOT, open = openWindow, vendor = vendorFile, models = ensureModel, engine = null, profile = () => null, voiceRef = null, onLocalVoice = () => {}, onSetup = () => ({ started: false }), engineState = () => 'off', macVoice = () => null, macVoiceGender = () => null, macVoiceSiri = () => null, macSay = sayWav, platform = process.platform, log = () => {}, onShutdown = () => process.exit(0), questionsDir = join(stateDir(), 'cache', 'questions'), staleMs = STALE_SESSION_MS, sweepMs = 10_000, sttWaitMs = STT_WAIT_MS, clock = Date.now, noticesFile = stateFile('notices.json'), reopenMs = REOPEN_FOR_NOTICE_MS, windowLog = stateFile('window.log'), memory = null, graph = null, summarizeEveryMs = 120_000, endedFile = stateFile('ended.json'), ackWaitMs = ACK_WAIT_MS, maxGone = MAX_GONE, hosts: extraHosts = [], publicUrl = '', brainWaitMs = BRAIN_WAIT_MS }) {
+  // The public address the browser opens the window at (container mode), or none.
+  const publicSite = publicUrl ? new URL(publicUrl) : null
   const sessions = new Map() // token -> session
   const launches = new Map() // one-time launch code -> when it expires
   const replaced = new Set() // tokens a newer subscription of the same Claude session took over
@@ -523,12 +537,13 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
   const sendRoster = () => broadcast({ type: 'roster', sessions: roster(), focused, call })
 
   // The address that opens the window: a fresh launch code, traded once at POST /launch for the key.
-  const launchUrl = (startCall, lasts = LAUNCH_MS) => {
+  // A quiet window (quiet=1) never starts a call by itself.
+  const launchUrl = (startCall, lasts = LAUNCH_MS, quiet = false) => {
     const now = clock()
     for (const [code, until] of launches) if (until <= now) launches.delete(code)
     const code = newSecret()
     launches.set(code, now + lasts)
-    return `http://127.0.0.1:${PORT}/?n=${code}${startCall ? '&call=1' : ''}`
+    return `${publicUrl || `http://127.0.0.1:${PORT}`}/?n=${code}${quiet ? '&quiet=1' : startCall ? '&call=1' : ''}`
   }
 
   // Opens the window, and no other until it connects its stream (or LAUNCH_WAIT_MS passes). Resolves
@@ -677,7 +692,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     if (items.length === 0) return
     isSummarizing = true
     try {
-      const result = await enqueue(session, { type: 'summarize', items: items.map(({ level, period, toEvent, day, text }) => ({ level, period, toEvent, day, text })) }, BRAIN_WAIT_MS * 3)
+      const result = await enqueue(session, { type: 'summarize', items: items.map(({ level, period, toEvent, day, text }) => ({ level, period, toEvent, day, text })) }, brainWaitMs * 3)
       if (!result.ok) return log(`memory: summaries not written: ${result.message}`)
       let written = []
       try {
@@ -798,15 +813,16 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
     },
     'POST /show': async (session, body) => {
       focused = session.name
-      const startCall = Boolean(body.call)
+      const quiet = body.quiet === true
+      const startCall = !quiet && Boolean(body.call)
       if (canOpenWindow()) {
-        const url = launchUrl(startCall)
+        const url = launchUrl(startCall, LAUNCH_MS, quiet)
         // Never "the window is opening" when nothing could open it: the mod gets the address
         // instead, with a code of its own that lasts while the user gets to it.
         if ((await openLaunched(url)) === false) {
           launches.delete(new URL(url).searchParams.get('n'))
           sendRoster()
-          return [200, { ok: true, isWindowOpen: false, isOpened: false, url: launchUrl(startCall, MANUAL_LAUNCH_MS) }]
+          return [200, { ok: true, isWindowOpen: false, isOpened: false, url: launchUrl(startCall, MANUAL_LAUNCH_MS, quiet) }]
         }
       } else {
         // An open window moves to this session; one still starting reads the focus from the roster
@@ -965,7 +981,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
       }
       // A tool's answer read by the brain is kept too, as data from the computer.
       if (request.kind === 'tool_result') remember({ kind: 'tool_result', text: String(body.text ?? '').slice(0, MEMORY_TEXT), untrusted: true })
-      const result = await enqueue(session, { type: 'think', request }, BRAIN_WAIT_MS)
+      const result = await enqueue(session, { type: 'think', request }, brainWaitMs)
       if (!result.ok) return [502, { error: result.message }]
       try {
         const reply = JSON.parse(result.message)
@@ -1244,12 +1260,12 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
   // able to start gigabytes of downloads. The window and its workers are same-origin. A browser that
   // does not send Sec-Fetch-Site still sends the window's own address as Referer (its module
   // imports and its workers' fetches carry no custom header); the window key works too.
-  const isFromWindow = (req, hosts) => {
+  const isFromWindow = (req, origins) => {
     const site = req.headers['sec-fetch-site']
     if (site) return site === 'same-origin'
     if (sameSecret(req.headers['x-luke-key'], windowKey)) return true
     const from = req.headers.origin ?? req.headers.referer
-    return typeof from === 'string' && hosts.some(host => from === `http://${host}` || from.startsWith(`http://${host}/`))
+    return typeof from === 'string' && origins.some(site => from === site || from.startsWith(`${site}/`))
   }
 
   async function readBody(req) {
@@ -1286,10 +1302,11 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
   const server = createServer(async (req, res) => {
     try {
       const port = server.address()?.port
-      const hosts = [`127.0.0.1:${port}`, `localhost:${port}`]
+      const hosts = [`127.0.0.1:${port}`, `localhost:${port}`, ...extraHosts, ...(publicSite ? [publicSite.host] : [])]
       if (!hosts.includes(req.headers.host)) return send(res, 403, { error: 'host' })
+      const origins = [...hosts.map(host => `http://${host}`), ...(publicSite ? [publicSite.origin] : [])]
       const origin = req.headers.origin
-      if (origin && !hosts.some(host => origin === `http://${host}`)) return send(res, 403, { error: 'origin' })
+      if (origin && !origins.includes(origin)) return send(res, 403, { error: 'origin' })
 
       const url = new URL(req.url, `http://${req.headers.host}`)
       const route = `${req.method} ${url.pathname}`
@@ -1389,7 +1406,7 @@ export function createHub({ serviceToken, windowKey, apiKey = '', provider = '',
         return send(res, 200, { key: windowKey })
       }
 
-      if (req.method === 'GET' && (url.pathname.startsWith('/vendor/') || url.pathname.startsWith('/models/')) && !isFromWindow(req, hosts)) {
+      if (req.method === 'GET' && (url.pathname.startsWith('/vendor/') || url.pathname.startsWith('/models/')) && !isFromWindow(req, origins)) {
         return send(res, 403, { error: 'only the call window may load these' })
       }
 
@@ -1522,14 +1539,18 @@ if (isMainModule(import.meta.url, process.argv[1])) {
   let memory = null
   try {
     memory = openMemory({ log })
-    log(`memory: ${memory.file}`)
+    log(`memory: ${memory.file ?? 'off'}`)
   } catch (error) {
     log(`memory: could not open it: ${error?.message ?? error}`)
   }
   // Ceci's knowledge graph, kept up to date from the memory after each call (CECI_GRAPH=0 turns it off).
   const graph = memory?.isAvailable ? createGraphUpdater({ isCallLive: () => hub?.callState() === 'live', log }) : null
+  const container = containerOptions()
   const hub = createHub({
     memory,
+    hosts: container.hosts,
+    publicUrl: container.publicUrl,
+    brainWaitMs: container.brainWaitMs,
     graph,
     serviceToken,
     windowKey,
@@ -1553,17 +1574,18 @@ if (isMainModule(import.meta.url, process.argv[1])) {
   // Two launchers can race to start a hub; the one that finds the port taken leaves quietly.
   hub.on('error', error => {
     if (error.code === 'EADDRINUSE') {
-      console.log(`luke-voice hub: 127.0.0.1:${PORT} is already served, exiting`)
+      console.log(`luke-voice hub: ${container.bind}:${PORT} is already served, exiting`)
       process.exit(0)
     }
     throw error
   })
-  hub.listen(PORT, '127.0.0.1', () => {
-    console.log(`luke-voice hub on 127.0.0.1:${PORT}`)
+  hub.listen(PORT, container.bind, () => {
+    console.log(`luke-voice hub on ${container.bind}:${PORT}`)
     // The free voice is the choice: warm the native engine up now, so the first call has it.
     if (hub.voiceProvider() === 'local') runner.startOnce()
   })
-  setInterval(() => {
+  // LUKE_VOICE_IDLE_EXIT=0: a container keeps the hub up with no one connected.
+  if (container.idleExit) setInterval(() => {
     if (hub.idleFor() <= 10 * 60_000) return
     hub.endCall()
     process.exit(0)

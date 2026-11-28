@@ -155,7 +155,11 @@ CREATE TABLE IF NOT EXISTS deletions (
 // closed without saying goodbye does not glue tomorrow's talk onto today's.
 const CALL_GAP_MS = 30 * 60_000
 
-export function openMemory({ dir = memoryDir(), now = Date.now, log = () => {} } = {}) {
+// CECI_MEMORY=0 turns the memory off: nothing is written and every read finds nothing.
+export const isMemoryOn = (env = process.env) => env.CECI_MEMORY !== '0'
+
+export function openMemory({ dir = memoryDir(), now = Date.now, log = () => {}, isOn = isMemoryOn() } = {}) {
+  if (!isOn) return { ...pendingOnly({ file: null, pendingFile: null, now, log }), append: () => null, deleteMemory: () => ({ deleted: 0 }) }
   mkdirSync(dir, { recursive: true, mode: 0o700 })
   const file = join(dir, 'memory.db')
   const pendingFile = join(dir, 'pending.jsonl')
