@@ -45,7 +45,7 @@ const DEFAULTS = {
   // While Ceci waits for the answer to her "ok?" (isAnswer), a soft, quick answer ("sim", "não",
   // "pode", "ok") must not be lost: the bar to start a turn drops to this share of minLevel
   // (~-46 dBFS), and ~130 ms of voice is enough. Silero still checks the clip (speech-check.js), and
-  // nothing runs unless the ears write a clear yes; noise ends in "Pode repetir para mim?".
+  // nothing runs unless the ears write a clear yes; noise ends in "Pode repetir?".
   answerLevel: 0.6,
   answerSpeechFrames: 4,
   // A noise that switches on above the bar never has a quiet frame, so the floor, learned from quiet

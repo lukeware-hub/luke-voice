@@ -87,8 +87,8 @@ export const VOICE_SETTINGS = { temperature: 0.9, top_p: 0.9, seed: 7 }
 // with the shared sampling. Slowed to João's pace (76%) the accent and timbre were 10/10 but too
 // slow; 94% (17.6 characters a second) was picked by ear.
 // `lang`: the language a voice speaks, 'pt' unless set. Luke speaks 'pt-BR' (the owner still heard
-// Portugal in him); so does Ceci since her new clip (ceci-nova.wav). See engineLang for what the engine is sent.
-export const PERSONA_VOICE_SETTINGS = { luke: { lang: 'pt-BR' }, ceci: { lang: 'pt-BR' } }
+// Portugal in him); so do Ceci since her new clip (ceci-nova.wav) and João. See engineLang for what the engine is sent.
+export const PERSONA_VOICE_SETTINGS = { luke: { lang: 'pt-BR' }, ceci: { lang: 'pt-BR' }, joao: { lang: 'pt-BR' } }
 export const voiceSettings = persona => ({ ...VOICE_SETTINGS, ...(PERSONA_VOICE_SETTINGS[persona] ?? {}) })
 // The language field the engine gets. Qwen3-TTS knows Portuguese only as a whole ('pt'); 'pt-BR'
 // makes llama-server fail ("unknown language"). So 'pt-BR' is sent as no language at all: the

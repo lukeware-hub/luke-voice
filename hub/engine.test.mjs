@@ -580,7 +580,8 @@ test("Ceci's, Luke's and João's voices come with every install: the same clips,
   assert.equal(engineLang(), 'pt')
   assert.equal(engineLang('pt'), 'pt')
   assert.deepEqual(voiceSettings('ceci'), { ...VOICE_SETTINGS, lang: 'pt-BR' })
-  for (const persona of ['joao', 'minha-voz']) assert.deepEqual(voiceSettings(persona), VOICE_SETTINGS)
+  assert.deepEqual(voiceSettings('joao'), { ...VOICE_SETTINGS, lang: 'pt-BR' })
+  assert.deepEqual(voiceSettings('minha-voz'), VOICE_SETTINGS)
 })
 
 test('the profile is read from disk again only when another process rewrites it', async () => {

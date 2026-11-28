@@ -137,7 +137,7 @@ test('an order to Claude asks "plan first?" once; its answer sets plan on the to
   const action = { tool: task, at: 1 }
   assert.equal(needsPlanAsk(action), true)
   assert.equal(needsPlanAsk({ tool: stop, at: 1 }), false)
-  assert.match(PLAN_ASK, /ok\?$/)
+  assert.equal(PLAN_ASK, 'Quer que eu planeje antes de mandar?')
   const asked = planAsked(action, 5)
   assert.equal(needsPlanAsk(asked), false)
   assert.equal(asked.planAsked, true)
@@ -146,7 +146,7 @@ test('an order to Claude asks "plan first?" once; its answer sets plan on the to
 })
 
 test('a "sim" to "plan first?" says it is starting the plan before the order goes, and a "não" does not', () => {
-  assert.equal(PLAN_START, 'Tá bom, vou iniciar o planejamento agora.')
+  assert.equal(PLAN_START, 'Combinado, vou planejar primeiro.')
   const local = readFileSync(new URL('./local.js', import.meta.url), 'utf8')
   const yes = local.slice(local.indexOf('if (action.planAsked) {'))
   const branch = yes.slice(0, yes.indexOf('runTool(withPlan(action, true)'))
@@ -155,4 +155,13 @@ test('a "sim" to "plan first?" says it is starting the plan before the order goe
   assert.doesNotMatch(no.slice(0, no.indexOf('runTool(withPlan(action, false)')), /PLAN_START/)
   // Made ahead of time with the acknowledgements, so it plays with no wait.
   assert.ok(local.includes('...Object.values(DONE_SAY), PLAN_START]'))
+})
+
+test('no fixed question of Ceci ends in "ok?": each one is only the question itself', async () => {
+  const { COMMON_QUESTIONS } = await import('../../hub/question-pick.mjs')
+  const asks = [PLAN_ASK, REPEAT, ...COMMON_QUESTIONS, decide({ kind: 'user', reply: { say: '', tool: task, pending: null }, now: 1 }).say, decide({ kind: 'user', reply: { say: '', tool: { name: 'luke_memory_delete', args: { all: true } }, pending: null }, now: 1 }).say]
+  for (const line of asks) {
+    assert.doesNotMatch(line, /\bok\?$/i, line)
+    assert.match(line, /\?$/, line)
+  }
 })

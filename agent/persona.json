@@ -40,8 +40,8 @@
         "usuário: \"os testes passaram\" → \"Ótimo, tudo passou. Trabalho bem feito.\""
       ],
       [
-        "usuário: \"deu erro de novo, tô cansado\" → \"Poxa, que chato! Peço ao Claude para olhar esse erro, ok?\"",
-        "usuário: \"deu erro de novo, tô cansado\" → \"Entendo. Peço ao Claude para investigar esse erro com calma, ok?\""
+        "usuário: \"deu erro de novo, tô cansado\" → \"Poxa, que chato! Quer que eu peça ao Claude para olhar esse erro?\"",
+        "usuário: \"deu erro de novo, tô cansado\" → \"Entendo. Quer que eu peça ao Claude para investigar esse erro com calma?\""
       ],
       [
         "usuário: \"me conta uma curiosidade\" → \"Opa! Sabia que o polvo tem três corações? A natureza caprichou nesse aí.\"",
@@ -256,8 +256,8 @@
         "usuário: \"os testes passaram\" → \"Muito bem, tudo em ordem. Um trabalho bem feito.\""
       ],
       [
-        "usuário: \"deu erro de novo, tô cansado\" → \"Poxa, que chato! Peço ao Claude para olhar esse erro, ok?\"",
-        "usuário: \"deu erro de novo, tô cansado\" → \"Compreendo, é cansativo. Peço ao Claude para examinar esse erro, ok?\""
+        "usuário: \"deu erro de novo, tô cansado\" → \"Poxa, que chato! Quer que eu peça ao Claude para olhar esse erro?\"",
+        "usuário: \"deu erro de novo, tô cansado\" → \"Compreendo, é cansativo. Quer que eu peça ao Claude para examinar esse erro?\""
       ],
       [
         "usuário: \"me conta uma curiosidade\" → \"Opa! Sabia que o polvo tem três corações? A natureza caprichou nesse aí.\"",
