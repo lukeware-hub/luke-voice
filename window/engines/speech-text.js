@@ -74,7 +74,16 @@ const NATIVE_RESPELL = {
   pipeline: 'paip láin',
   workflow: 'work flow',
   payload: 'Payload',
+  // The product names, checked in 0.23.1 the same way on the three voices (Ceci, Luke, João), 18
+  // takes each: "luke-voice" came back 3 times as written and 17 as "Luke Vóiss"; "Claude Code" 2
+  // times as written and 11 as "Clód Code,". The comma is part of it: without it "Code" ran into the
+  // next word ("codeterminou"). It is dropped before other punctuation (respellNative).
+  'luke-voice': 'Luke Vóiss',
+  'luke voice': 'Luke Vóiss',
+  'claude code': 'Clód Code,',
 }
+// "Clód Code," right before a mark of its own, or at the end, loses its comma: the mark already pauses.
+const CLAUDE_CODE_COMMA = /Clód Code,(?=\s*[.,;:!?…)\]"'”’»]|\s*$)/gu
 const NATIVE_RE = new RegExp(
   `(?<![\\p{L}\\d-])(${Object.keys(NATIVE_RESPELL).sort((a, b) => b.length - a.length).map(k => k.replace(' ', '\\s+')).join('|')})(?![\\p{L}\\d-])`,
   'giu',
@@ -276,6 +285,7 @@ const CLARO_QUE = /(^|[.!?…]\s+)Claro(?=,|\s+que(?![\p{L}\d]))/gu
 export function respellNative(text) {
   return String(text ?? '')
     .replace(NATIVE_RE, word => NATIVE_RESPELL[word.toLowerCase().replace(/\s+/g, ' ')])
+    .replace(CLAUDE_CODE_COMMA, 'Clód Code')
     .replace(BOM_DIA, '$1!!')
     .replace(CLARO_ALONE, '$1claro')
     .replace(CLARO_QUE, '$1Claaro')

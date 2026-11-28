@@ -320,7 +320,7 @@ A voz gratuita baixa na instalação partes de terceiros; nenhuma delas está ne
 - A voz do Piper: veja o cartão do modelo.
 - espeak-ng (pelo espeak-phonemizer): GPL-3.0.
 
-O trecho de voz de referência da Ceci, `agent/ceci-voice.wav`, foi fornecido pelo dono do projeto, cortado e abaixado 2 semitons.
+O trecho de voz de referência da Ceci, `agent/ceci-voice.wav`, foi fornecido pelo dono do projeto, cortado e abaixado 1,5 semitom.
 
 Os trechos de voz de referência do Luke e do João, `agent/luke-voice.wav` e `agent/joao-voice.wav`, foram fornecidos pelo dono do projeto, cortados e abaixados 1,5 semitom. Na voz leve, Luke e João falam com as vozes `pm_alex` e `pm_santa` do Kokoro.
 

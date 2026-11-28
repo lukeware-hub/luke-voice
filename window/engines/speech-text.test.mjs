@@ -59,6 +59,17 @@ test('the native voice gets its own spelling for the tech words it says in Portu
   assert.deepEqual(speechChunks('O framework lê o state do store.', { isNative: true }), ['O Framework lê o State do store.'])
 })
 
+test('the native voice gets luke-voice and Claude Code in the spelling it says in English', () => {
+  assert.deepEqual(speechChunks('Seja bem-vindo ao luke-voice. Mande para o Claude Code.', { isNative: true }), ['Seja bem-vindo ao Luke Vóiss.', 'Mande para o Clód Code.'])
+  // Mid-sentence the comma stays, so "Code" does not run into the next word; before a mark it goes.
+  assert.equal(respellNative('Abri o Claude Code e o Luke Voice.'), 'Abri o Clód Code, e o Luke Vóiss.')
+  assert.equal(respellNative('O claude  CODE, depois; "Claude Code"'), 'O Clód Code, depois; "Clód Code"')
+  // Other words around them stay: a lone Claude, and a longer name with the hyphen.
+  for (const text of ['Pergunte ao Claude.', 'Use o luke-voice-studio.', 'O luke-voices e o claude-code.']) assert.equal(respellNative(text), text)
+  // The browser voices keep their own respelling.
+  assert.deepEqual(speechChunks('Abri o Claude Code.'), ['Abri o clód Code.'])
+})
+
 test('the native voice gets a sentence-opening "Claro" in the spelling it says right', () => {
   assert.deepEqual(speechChunks('Claro.', { isNative: true }), ['claro.'])
   assert.deepEqual(speechChunks('Entendi. Claro!', { isNative: true }), ['Entendi.', 'claro!'])
